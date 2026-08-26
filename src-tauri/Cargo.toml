@@ -1,0 +1,33 @@
+[package]
+name = "meld-desktop"
+version = "0.1.0"
+description = "Meld Desktop — a Windows-native GPLv3 port of Meld"
+authors = ["Meld contributors"]
+edition = "2021"
+
+[lib]
+name = "meld_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "brotli", "deflate", "stream"] }
+tokio = { version = "1", features = ["fs", "io-util", "sync", "time"] }
+regex = "1"
+urlencoding = "2"
+sha1 = "0.10"
+base64 = "0.22"
+hmac = "0.12"
+rusqlite = { version = "0.32", features = ["bundled"] }
+lofty = "0.22"
+rfd = "0.15"
+futures-util = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38.2"
+windows-core = "0.61"
