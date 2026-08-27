@@ -70,6 +70,7 @@ struct AuthSession {
     account_name: Option<String>,
     account_email: Option<String>,
     account_channel_handle: Option<String>,
+    account_avatar: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -79,6 +80,7 @@ struct SessionStatus {
     account_name: Option<String>,
     account_email: Option<String>,
     account_channel_handle: Option<String>,
+    account_avatar: Option<String>,
 }
 
 impl RuntimeState {
@@ -150,6 +152,16 @@ impl RuntimeState {
                 text TEXT NOT NULL,
                 synced INTEGER NOT NULL DEFAULT 0,
                 fetched_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS lyrics_variants (
+                song_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                text TEXT NOT NULL,
+                synced INTEGER NOT NULL DEFAULT 0,
+                matched_title TEXT NOT NULL DEFAULT '',
+                matched_artist TEXT NOT NULL DEFAULT '',
+                fetched_at INTEGER NOT NULL,
+                PRIMARY KEY (song_id, provider)
              );
              CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -800,7 +812,7 @@ fn auth_session(state: &tauri::State<'_, RuntimeState>) -> Result<Option<AuthSes
     let data_sync_id = setting_value(&db, "dataSyncId")?;
     let visitor_data = setting_value(&db, "visitorData")?;
     Ok(match (cookie, data_sync_id, visitor_data) {
-        (Some(cookie), Some(data_sync_id), Some(visitor_data)) if !cookie.trim().is_empty() && !data_sync_id.trim().is_empty() && visitor_data.starts_with(VISITOR_PREFIX) => Some(AuthSession { cookie, data_sync_id, visitor_data, account_name: setting_value(&db, "accountName")?, account_email: setting_value(&db, "accountEmail")?, account_channel_handle: setting_value(&db, "accountChannelHandle")? }),
+        (Some(cookie), Some(data_sync_id), Some(visitor_data)) if !cookie.trim().is_empty() && !data_sync_id.trim().is_empty() && visitor_data.starts_with(VISITOR_PREFIX) => Some(AuthSession { cookie, data_sync_id, visitor_data, account_name: setting_value(&db, "accountName")?, account_email: setting_value(&db, "accountEmail")?, account_channel_handle: setting_value(&db, "accountChannelHandle")?, account_avatar: setting_value(&db, "accountAvatar")? }),
         _ => None,
     })
 }
@@ -1307,8 +1319,12 @@ async fn download_start(item: YtItem, audio_quality: Option<String>, app: tauri:
         let artwork_path = cache_download_artwork(&song_id, item.thumbnail.as_deref()).await;
         let artist = item.artists.iter().map(|value| value.name.as_str()).collect::<Vec<_>>().join(", ");
         let artist = if artist.trim().is_empty() { item.subtitle.clone() } else { artist };
-        let lyrics_cached = fetch_lyrics_inner(item.title.clone(), artist, 0, item.album_title.clone(), Some(video_id.to_owned()), state_for_lyrics, true).await.is_ok();
+        let lyric_duration = payload.duration.clamp(0, i32::MAX as i64) as i32;
+        let lyrics_results = fetch_all_enabled_lyrics(&item.title, &artist, lyric_duration, item.album_title.as_deref(), Some(video_id), &state_for_lyrics).await.unwrap_or_default();
+        let lyrics_cached = !lyrics_results.is_empty();
+        let lyrics_cache_id = format!("lyrics:{}:{}", clean_lyrics_title(&item.title).to_lowercase(), clean_lyrics_artist(&artist).to_lowercase());
         let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+        for lyrics in &lyrics_results { cache_lyrics_payload(&db, &lyrics_cache_id, lyrics)?; }
         db.execute("UPDATE downloads SET bytes = ?1, total_bytes = ?2, state = 'completed', error = NULL, lyrics_cached = ?3, artwork_path = ?4 WHERE song_id = ?5", params![bytes, total_bytes.or(Some(bytes)), if lyrics_cached { 1 } else { 0 }, artwork_path, song_id]).map_err(|error| format!("download completion state failed: {error}"))?;
         if let Some(info) = read_download_info(&db, &song_id)? { emit_download(&app, &info); }
         Ok((bytes, total_bytes, lyrics_cached, artwork_path))
@@ -2755,6 +2771,47 @@ async fn fetch_lyrics_provider(
     }
 }
 
+fn cache_lyrics_payload(db: &Connection, cache_id: &str, payload: &LyricsPayload) -> Result<(), String> {
+    db.execute("INSERT INTO lyrics (song_id, provider, text, synced, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(song_id) DO UPDATE SET provider=excluded.provider, text=excluded.text, synced=excluded.synced, fetched_at=excluded.fetched_at", params![cache_id, payload.provider, payload.text, if payload.synced { 1 } else { 0 }, now_seconds()]).map_err(|error| format!("lyrics cache write failed: {error}"))?;
+    db.execute("INSERT INTO lyrics_variants (song_id, provider, text, synced, matched_title, matched_artist, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(song_id, provider) DO UPDATE SET text=excluded.text, synced=excluded.synced, matched_title=excluded.matched_title, matched_artist=excluded.matched_artist, fetched_at=excluded.fetched_at", params![cache_id, payload.provider, payload.text, if payload.synced { 1 } else { 0 }, payload.matched_title, payload.matched_artist, now_seconds()]).map_err(|error| format!("lyrics provider cache write failed: {error}"))?;
+    Ok(())
+}
+
+fn cached_lyrics_provider(db: &Connection, cache_id: &str, provider: &str) -> Result<Option<LyricsPayload>, String> {
+    db.query_row("SELECT text, synced, matched_title, matched_artist FROM lyrics_variants WHERE song_id = ?1 AND provider = ?2", params![cache_id, provider], |row| {
+        let text: String = row.get(0)?;
+        let synced: i64 = row.get(1)?;
+        Ok(LyricsPayload { lines: if synced != 0 { parse_lyric_lines(&text) } else { Vec::new() }, provider: provider.to_owned(), text, synced: synced != 0, matched_title: row.get(2)?, matched_artist: row.get(3)? })
+    }).optional().map_err(|error| format!("lyrics provider cache read failed: {error}"))
+}
+
+async fn fetch_all_enabled_lyrics(title: &str, artist: &str, duration: i32, album: Option<&str>, video_id: Option<&str>, state: &tauri::State<'_, RuntimeState>) -> Result<Vec<LyricsPayload>, String> {
+    let order = {
+        let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+        ordered_lyrics_providers(&db)?
+    };
+    let mut results = Vec::new();
+    for provider in order {
+        let enabled = {
+            let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+            match provider.as_str() {
+                "BetterLyrics" => lyric_setting_enabled(&db, "enableBetterLyrics", true)?,
+                "Paxsenix" => lyric_setting_enabled(&db, "enablePaxsenix", true)?,
+                "LrcLib" => lyric_setting_enabled(&db, "enableLrclib", true)?,
+                "KuGou" => lyric_setting_enabled(&db, "enableKugou", true)?,
+                "LyricsPlus" => lyric_setting_enabled(&db, "enableLyricsPlus", false)?,
+                "Musixmatch" => lyric_setting_enabled(&db, "enableMusixmatch", false)?,
+                "YouTubeSubtitle" | "YouTube" => true,
+                _ => false,
+            }
+        };
+        if !enabled { continue; }
+        let result = timeout(Duration::from_secs(12), fetch_lyrics_provider(&provider, title, artist, duration, album, video_id, state)).await;
+        if let Ok(Ok(Some(payload))) = result { results.push(payload); }
+    }
+    Ok(results)
+}
+
 async fn fetch_lyrics_inner(title: String, artist: String, duration: i32, album: Option<String>, id: Option<String>, state: tauri::State<'_, RuntimeState>, use_cache: bool) -> Result<LyricsPayload, String> {
     let cleaned_title = clean_lyrics_title(&title);
     let cleaned_artist = clean_lyrics_artist(&artist);
@@ -2790,7 +2847,7 @@ async fn fetch_lyrics_inner(title: String, artist: String, duration: i32, album:
         if !enabled { continue; }
         if let Some(payload) = fetch_lyrics_provider(&provider, &cleaned_title, &cleaned_artist, duration, album_name, id.as_deref(), &state).await? {
             let db = state.db.lock().map_err(|_| "database state poisoned")?;
-            db.execute("INSERT INTO lyrics (song_id, provider, text, synced, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(song_id) DO UPDATE SET provider=excluded.provider, text=excluded.text, synced=excluded.synced, fetched_at=excluded.fetched_at", params![cache_id, payload.provider, payload.text, if payload.synced { 1 } else { 0 }, now_seconds()]).map_err(|e| format!("lyrics cache write failed: {e}"))?;
+            cache_lyrics_payload(&db, &cache_id, &payload)?;
             return Ok(payload);
         }
     }
@@ -2822,11 +2879,15 @@ async fn fetch_lyrics_from_provider(title: String, artist: String, duration: i32
     let cleaned_artist = clean_lyrics_artist(&artist);
     let album_name = album.as_deref().map(str::trim).filter(|value| !value.is_empty());
     let cache_id = format!("lyrics:{}:{}", cleaned_title.to_lowercase(), cleaned_artist.to_lowercase());
+    {
+        let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+        if let Some(cached) = cached_lyrics_provider(&db, &cache_id, provider)? { return Ok(cached); }
+    }
     let payload = timeout(Duration::from_secs(30), fetch_lyrics_provider(provider, &cleaned_title, &cleaned_artist, duration, album_name, id.as_deref(), &state)).await
         .map_err(|_| "Lyrics provider timed out after 30 seconds".to_owned())??
         .ok_or_else(|| format!("{provider} did not return lyrics for this song"))?;
     let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-    db.execute("INSERT INTO lyrics (song_id, provider, text, synced, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(song_id) DO UPDATE SET provider=excluded.provider, text=excluded.text, synced=excluded.synced, fetched_at=excluded.fetched_at", params![cache_id, payload.provider, payload.text, if payload.synced { 1 } else { 0 }, now_seconds()]).map_err(|error| format!("lyrics provider cache write failed: {error}"))?;
+    cache_lyrics_payload(&db, &cache_id, &payload)?;
     Ok(payload)
 }
 
@@ -3000,12 +3061,12 @@ async fn ytm_toggle_library(video_id: String, add_to_library: bool, state: tauri
     send_feedback(&session, token).await
 }
 
-fn account_info_from_response(value: &Value) -> Option<(String, Option<String>, Option<String>)> {
+fn account_info_from_response(value: &Value) -> Option<(String, Option<String>, Option<String>, Option<String>)> {
     if let Some(object) = value.as_object() {
         if let Some(header) = object.get("activeAccountHeaderRenderer") {
             let name = text(header.get("accountName"));
             if !name.is_empty() {
-                return Some((name, Some(text(header.get("email"))).filter(|v| !v.is_empty()), Some(text(header.get("channelHandle"))).filter(|v| !v.is_empty())));
+                return Some((name, Some(text(header.get("email"))).filter(|v| !v.is_empty()), Some(text(header.get("channelHandle"))).filter(|v| !v.is_empty()), thumbnail(header.get("avatar"))));
             }
         }
         for child in object.values() { if let Some(info) = account_info_from_response(child) { return Some(info); } }
@@ -3018,15 +3079,15 @@ fn account_info_from_response(value: &Value) -> Option<(String, Option<String>, 
 async fn save_account_session_internal(cookie: String, data_sync_id: String, visitor_data: String, state: &RuntimeState) -> Result<SessionStatus, String> {
     if cookie.trim().is_empty() || !cookie.split(';').any(|part| part.trim().starts_with("SAPISID=")) { return Err("Google session cookie is missing SAPISID".to_owned()); }
     if data_sync_id.trim().is_empty() || !visitor_data.starts_with(VISITOR_PREFIX) { return Err("Google session requires dataSyncId and valid visitorData".to_owned()); }
-    let session = AuthSession { cookie: cookie.clone(), data_sync_id: data_sync_id.clone(), visitor_data: visitor_data.clone(), account_name: None, account_email: None, account_channel_handle: None };
+    let session = AuthSession { cookie: cookie.clone(), data_sync_id: data_sync_id.clone(), visitor_data: visitor_data.clone(), account_name: None, account_email: None, account_channel_handle: None, account_avatar: None };
     let response = post("account/account_menu", json!({ "context": context(&visitor_data, true, Some(&data_sync_id)) }), Some(&session)).await?;
-    let (name, email, channel_handle) = account_info_from_response(&response).ok_or_else(|| "Google session validation returned no active account header".to_owned())?;
+    let (name, email, channel_handle, avatar) = account_info_from_response(&response).ok_or_else(|| "Google session validation returned no active account header".to_owned())?;
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    for (key, value) in [("cookie", cookie), ("dataSyncId", data_sync_id), ("visitorData", visitor_data), ("accountName", name.clone()), ("accountEmail", email.clone().unwrap_or_default()), ("accountChannelHandle", channel_handle.clone().unwrap_or_default())] {
+    for (key, value) in [("cookie", cookie), ("dataSyncId", data_sync_id), ("visitorData", visitor_data), ("accountName", name.clone()), ("accountEmail", email.clone().unwrap_or_default()), ("accountChannelHandle", channel_handle.clone().unwrap_or_default()), ("accountAvatar", avatar.clone().unwrap_or_default())] {
         db.execute("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key, value]).map_err(|e| format!("account session save failed: {e}"))?;
     }
     *state.visitor_data.lock().map_err(|_| "visitor state poisoned")? = Some(session.visitor_data);
-    Ok(SessionStatus { authenticated: true, account_name: Some(name), account_email: email, account_channel_handle: channel_handle })
+    Ok(SessionStatus { authenticated: true, account_name: Some(name), account_email: email, account_channel_handle: channel_handle, account_avatar: avatar })
 }
 
 #[tauri::command]
@@ -3612,15 +3673,15 @@ fn clear_local_library_keep_downloads(state: tauri::State<'_, RuntimeState>) -> 
 fn account_logout(state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
     *state.visitor_data.lock().map_err(|_| "visitor state poisoned")? = None;
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    db.execute("DELETE FROM settings WHERE key IN ('cookie', 'dataSyncId', 'visitorData', 'accountName', 'accountEmail', 'accountChannelHandle')", []).map_err(|e| format!("account logout failed: {e}"))?;
+    db.execute("DELETE FROM settings WHERE key IN ('cookie', 'dataSyncId', 'visitorData', 'accountName', 'accountEmail', 'accountChannelHandle', 'accountAvatar')", []).map_err(|e| format!("account logout failed: {e}"))?;
     Ok(())
 }
 
 #[tauri::command]
 fn session_status(state: tauri::State<'_, RuntimeState>) -> Result<SessionStatus, String> {
     match auth_session(&state)? {
-        Some(session) => Ok(SessionStatus { authenticated: true, account_name: session.account_name, account_email: session.account_email, account_channel_handle: session.account_channel_handle }),
-        None => Ok(SessionStatus { authenticated: false, account_name: None, account_email: None, account_channel_handle: None }),
+        Some(session) => Ok(SessionStatus { authenticated: true, account_name: session.account_name, account_email: session.account_email, account_channel_handle: session.account_channel_handle, account_avatar: session.account_avatar }),
+        None => Ok(SessionStatus { authenticated: false, account_name: None, account_email: None, account_channel_handle: None, account_avatar: None }),
     }
 }
 
@@ -3765,7 +3826,7 @@ fn backup_create(state: tauri::State<'_, RuntimeState>) -> Result<String, String
     let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
     db.execute("VACUUM INTO ?1", params![temp_db.to_string_lossy().to_string()]).map_err(|error| format!("database backup failed: {error}"))?;
     let settings: Vec<SettingEntry> = {
-        let mut statement = db.prepare("SELECT key, value FROM settings WHERE key NOT IN ('cookie', 'dataSyncId', 'visitorData', 'accountName', 'accountEmail', 'accountChannelHandle', 'spotifySpDc', 'spotifySpKey', 'spotifyAccessToken', 'spotifyTokenExpiry', 'spotifyUsername', 'spotifyUserId') ORDER BY key").map_err(|error| format!("backup settings query failed: {error}"))?;
+        let mut statement = db.prepare("SELECT key, value FROM settings WHERE key NOT IN ('cookie', 'dataSyncId', 'visitorData', 'accountName', 'accountEmail', 'accountChannelHandle', 'accountAvatar', 'spotifySpDc', 'spotifySpKey', 'spotifyAccessToken', 'spotifyTokenExpiry', 'spotifyUsername', 'spotifyUserId') ORDER BY key").map_err(|error| format!("backup settings query failed: {error}"))?;
         let rows = statement.query_map([], |row| Ok(SettingEntry { key: row.get(0)?, value: row.get(1)? })).map_err(|error| format!("backup settings rows failed: {error}"))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("backup settings decode failed: {error}"))?
     };
@@ -3828,7 +3889,7 @@ fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, Strin
             candidate.execute("INSERT INTO settings (key, value) VALUES (?1, ?2)", params![setting.key, setting.value]).map_err(|error| format!("restored setting write failed: {error}"))?;
         }
     }
-    candidate.execute("DELETE FROM settings WHERE key IN ('cookie', 'dataSyncId', 'visitorData', 'accountName', 'accountEmail', 'accountChannelHandle', 'spotifySpDc', 'spotifySpKey', 'spotifyAccessToken', 'spotifyTokenExpiry', 'spotifyUsername', 'spotifyUserId')", []).map_err(|error| format!("restored auth clear failed: {error}"))?;
+    candidate.execute("DELETE FROM settings WHERE key IN ('cookie', 'dataSyncId', 'visitorData', 'accountName', 'accountEmail', 'accountChannelHandle', 'accountAvatar', 'spotifySpDc', 'spotifySpKey', 'spotifyAccessToken', 'spotifyTokenExpiry', 'spotifyUsername', 'spotifyUserId')", []).map_err(|error| format!("restored auth clear failed: {error}"))?;
     drop(candidate);
 
     let db_path = database_path();
@@ -4242,7 +4303,7 @@ fn library_playlist_songs(playlist_id: String, state: tauri::State<'_, RuntimeSt
 fn clear_guest_session(state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
     *state.visitor_data.lock().map_err(|_| "visitor state poisoned")? = None;
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    db.execute("DELETE FROM settings WHERE key IN ('visitorData', 'dataSyncId', 'cookie', 'accountName', 'accountEmail', 'accountChannelHandle')", []).map_err(|e| format!("guest session storage clear failed: {e}"))?;
+    db.execute("DELETE FROM settings WHERE key IN ('visitorData', 'dataSyncId', 'cookie', 'accountName', 'accountEmail', 'accountChannelHandle', 'accountAvatar')", []).map_err(|e| format!("guest session storage clear failed: {e}"))?;
     Ok(())
 }
 
@@ -4548,7 +4609,22 @@ mod tests {
         assert_eq!(page.sections[0].songs[0].history_remove_token.as_deref(), Some("remove-token"));
         assert_eq!(page.sections[0].songs[0].album_id.as_deref(), Some("album-id"));
         assert_eq!(page.sections[0].songs[0].album_title.as_deref(), Some("Album"));
-        assert_eq!(page.sections[1].songs[0].title, "Old");
+                assert_eq!(page.sections[1].songs[0].title, "Old");
     }
-
+    #[test]
+    fn account_parser_reads_active_account_avatar() {
+        let response = json!({
+            "activeAccountHeaderRenderer": {
+                "accountName": { "simpleText": "Meld User" },
+                "email": { "simpleText": "user@example.com" },
+                "channelHandle": { "simpleText": "@melduser" },
+                "avatar": { "thumbnails": [{ "url": "https://example.invalid/avatar-small" }, { "url": "https://example.invalid/avatar-large" }] }
+            }
+        });
+        let (name, email, handle, avatar) = account_info_from_response(&response).expect("account header must parse");
+        assert_eq!(name, "Meld User");
+        assert_eq!(email.as_deref(), Some("user@example.com"));
+        assert_eq!(handle.as_deref(), Some("@melduser"));
+        assert_eq!(avatar.as_deref(), Some("https://example.invalid/avatar-large"));
+    }
 }

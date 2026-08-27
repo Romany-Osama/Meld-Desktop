@@ -1,5 +1,14 @@
 # Meld Desktop Changelog
 
+## Unreleased — Continuous session and offline lyrics variants
+
+The next batch adds a real continuous playback session. When persistent queue is enabled, Meld Desktop stores the current queue, playlist/watch-next continuation context, selected item, playback position, and paused/playing state without storing an expired stream URL. On the next launch it resolves a fresh playable stream and resumes the same item at the saved position; a manually cleared queue remains cleared.
+
+Connected Google / YouTube Music accounts now expose the account avatar returned by the validated account menu beside the account name. Home is refreshed after account connect/disconnect so personalized YouTube Music shelves such as recently played and keep-listening can be requested with the active account instead of leaving the anonymous Home response on screen.
+
+Completed downloads now try every enabled lyrics provider in the configured order and cache each successful provider variant. The offline Provider selector can use those saved variants without a network connection, while the primary automatic lyrics result and the existing lyrics cache remain backward-compatible.
+
+
 ## [0.1.2] — Safe parity gap batch
 
 This release adds the safe, source-backed parity work completed after the Windows taskbar/volume batch. Artist details now have a real Follow/Following action backed by local SQLite state and authenticated YouTube Music subscription/unsubscription requests when a valid channel ID is available. Followed artists remain visible in the Artists library even without locally saved song mappings.

@@ -50,7 +50,7 @@ type StatsPayload = { period: string; totalPlays: number; totalMinutes: number; 
 type DetailPage = { kind: string; title: string; subtitle: string; thumbnail?: string | null; items: YtItem[]; continuation?: string | null; browseId?: string | null };
 type LyricsPayload = { provider: string; text: string; synced: boolean; matchedTitle: string; matchedArtist: string; lines: { timeMs: number; text: string }[] };
 type SettingEntry = { key: string; value: string };
-type SessionStatus = { authenticated: boolean; accountName?: string | null; accountEmail?: string | null; accountChannelHandle?: string | null };
+type SessionStatus = { authenticated: boolean; accountName?: string | null; accountEmail?: string | null; accountChannelHandle?: string | null; accountAvatar?: string | null };
 type SpotifySessionStatus = { authenticated: boolean; tokenExpiry?: number | null };
 type SpotifyProfile = { id: string; displayName?: string | null; avatar?: string | null };
 type SpotifyPlaylistItem = { id: string; name: string; description?: string | null; image?: string | null; owner?: string | null };
@@ -68,6 +68,7 @@ type PlaylistContinuationPage = { songs: YtItem[]; continuation?: string | null 
 
 type LoadState<T> = { status: "idle" | "loading" | "ready" | "error"; data: T; error?: string };
 type PlaytimeSession = { historyId: number; songId: string; lastPosition: number; pendingMs: number; playing: boolean; flushing: boolean };
+type PersistentPlayback = { items: YtItem[]; index: number; continuation: string | null; continuationKind: "next" | "playlist" | null; item?: YtItem | null; position?: number; playing?: boolean };
 type LibrarySongFilter = "liked" | "library" | "uploaded" | "downloaded" | "top";
 type LibrarySort = "created" | "name" | "artist" | "playtime";
 type PlaylistSort = "created" | "name" | "count";
@@ -337,6 +338,12 @@ function App() {
   const taskbarNextRef = useRef<() => void>(() => undefined);
   const persistentQueueLoadedRef = useRef(false);
   const persistentQueueSkipWriteRef = useRef(false);
+  const persistentSessionLoadedRef = useRef(false);
+  const persistentSessionSkipWriteRef = useRef(false);
+  const resumePositionRef = useRef<number | null>(null);
+  const resumePlayingRef = useRef(false);
+  const resumePendingRef = useRef(false);
+  const accountAuthStateRef = useRef<boolean | null>(null);
   const playtimeRef = useRef<PlaytimeSession | null>(null);
   const [sleepTimerOpen, setSleepTimerOpen] = useState(false);
   const [sleepTimerMinutes, setSleepTimerMinutes] = useState(30);
@@ -1056,6 +1063,13 @@ function App() {
     return () => { unlisten?.(); stopSpotify?.(); stopAccountError?.(); stopSpotifyError?.(); stopDownload?.(); };
   }, []);
   useEffect(() => { void loadSessionStatus(); void loadSpotifyStatus(); void loadSettings(); }, []);
+  useEffect(() => {
+    if (accountAuthStateRef.current === null) { accountAuthStateRef.current = sessionStatus.authenticated; return; }
+    if (accountAuthStateRef.current !== sessionStatus.authenticated) {
+      accountAuthStateRef.current = sessionStatus.authenticated;
+      if (active === "home") void loadHome();
+    }
+  }, [active, sessionStatus.authenticated]);
   useEffect(() => { void loadSpotifyProfile(); }, [spotifyStatus.authenticated]);
   useEffect(() => { if (settingsOpen) { void loadSettings(); void loadSessionStatus(); } }, [settingsOpen]);
 
@@ -1579,15 +1593,35 @@ function App() {
 
   useEffect(() => {
     if (!player || !audioRef.current) return;
+    const audio = audioRef.current;
     const playerId = player.item.id;
     activePlayerIdRef.current = playerId;
-    audioRef.current.src = mediaSrc(player.payload.streamUrl) ?? player.payload.streamUrl;
-    audioRef.current.volume = volume;
-    audioRef.current.playbackRate = playbackSpeed;
-    (audioRef.current as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = settings.varispeed !== true;
+    audio.src = mediaSrc(player.payload.streamUrl) ?? player.payload.streamUrl;
+    audio.volume = volume;
+    audio.playbackRate = playbackSpeed;
+    (audio as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = settings.varispeed !== true;
     setPlaybackSeconds(0);
     setDurationSeconds(0);
-    void audioRef.current.play().then(() => { if (activePlayerIdRef.current === playerId) setIsPlaying(true); }).catch((error) => { if (activePlayerIdRef.current === playerId) { setIsPlaying(false); setNotice(`Audio playback failed: ${errorMessage(error)}`); } });
+    const wasResuming = resumePendingRef.current;
+    const resumePosition = resumePositionRef.current;
+    const resumePlaying = resumePlayingRef.current;
+    resumePendingRef.current = false;
+    resumePositionRef.current = null;
+    resumePlayingRef.current = false;
+    const start = () => {
+      if (activePlayerIdRef.current !== playerId) return;
+      if (wasResuming && resumePosition !== null && Number.isFinite(resumePosition) && resumePosition > 0 && (!Number.isFinite(audio.duration) || resumePosition < audio.duration - 1)) {
+        try { audio.currentTime = resumePosition; setPlaybackSeconds(resumePosition); } catch { /* Metadata may still be unavailable. */ }
+      }
+      if (!wasResuming || resumePlaying) {
+        void audio.play().then(() => { if (activePlayerIdRef.current === playerId) setIsPlaying(true); }).catch((error) => { if (activePlayerIdRef.current === playerId) { setIsPlaying(false); setNotice(`Audio playback failed: ${errorMessage(error)}`); } });
+      } else {
+        setIsPlaying(false);
+      }
+    };
+    if (audio.readyState >= 1) start();
+    else audio.addEventListener("loadedmetadata", start, { once: true });
+    return () => audio.removeEventListener("loadedmetadata", start);
   }, [player]);
 
   useEffect(() => {
@@ -1600,7 +1634,10 @@ function App() {
     if (settings.persistentQueue !== true) {
       persistentQueueLoadedRef.current = false;
       persistentQueueSkipWriteRef.current = false;
+      persistentSessionLoadedRef.current = false;
+      persistentSessionSkipWriteRef.current = false;
       localStorage.removeItem("meld:persistentQueue");
+      localStorage.removeItem("meld:persistentPlayback");
       return;
     }
     if (persistentQueueLoadedRef.current) return;
@@ -1608,8 +1645,11 @@ function App() {
     // The write effect runs in the same commit as this hydration effect. Skip that
     // first write so the initial in-memory queue cannot overwrite stored entries.
     persistentQueueSkipWriteRef.current = true;
+    persistentSessionLoadedRef.current = true;
+    persistentSessionSkipWriteRef.current = true;
     try {
       const stored = JSON.parse(localStorage.getItem("meld:persistentQueue") ?? "null") as { items?: YtItem[]; index?: number; continuation?: string | null; continuationKind?: "next" | "playlist" | null } | null;
+      const storedSession = JSON.parse(localStorage.getItem("meld:persistentPlayback") ?? "null") as PersistentPlayback | null;
       const items = Array.isArray(stored?.items) ? stored.items.filter((item) => item && typeof item.id === "string" && typeof item.title === "string" && typeof item.kind === "string") : [];
       if (items.length > 0) {
         setQueueItems(items);
@@ -1619,6 +1659,22 @@ function App() {
         setQueueContinuationKind(storedContinuation ? stored?.continuationKind === "playlist" ? "playlist" : "next" : null);
         setNotice(`Restored ${items.length} item${items.length === 1 ? "" : "s"} in the Meld queue.`);
       }
+      const sessionItems = Array.isArray(storedSession?.items) && storedSession.items.length > 0 ? storedSession.items.filter((item) => item && typeof item.id === "string" && typeof item.title === "string" && typeof item.kind === "string") : items;
+      const sessionIndex = typeof storedSession?.index === "number" ? Math.min(Math.max(Math.trunc(storedSession.index), 0), Math.max(sessionItems.length - 1, 0)) : -1;
+      const sessionItem = storedSession?.item && typeof storedSession.item.id === "string" ? storedSession.item : sessionIndex >= 0 ? sessionItems[sessionIndex] : null;
+      if (sessionItem && sessionItems.length > 0) {
+        const resolvedIndex = Math.max(0, sessionItems.findIndex((item) => item.id === sessionItem.id));
+        const sessionContinuation = typeof storedSession?.continuation === "string" ? storedSession.continuation : null;
+        const sessionKind = sessionContinuation ? storedSession?.continuationKind === "playlist" ? "playlist" : "next" : "next";
+        setQueueItems(sessionItems);
+        setQueueIndex(resolvedIndex);
+        setQueueContinuation(sessionContinuation);
+        setQueueContinuationKind(sessionContinuation ? sessionKind : null);
+        resumePositionRef.current = typeof storedSession?.position === "number" && Number.isFinite(storedSession.position) ? Math.max(0, storedSession.position) : null;
+        resumePlayingRef.current = storedSession?.playing !== false;
+        resumePendingRef.current = true;
+        void playItem(sessionItem, sessionItems, resolvedIndex, sessionContinuation, false, sessionKind);
+      }
     } catch {
       localStorage.removeItem("meld:persistentQueue");
     }
@@ -1627,18 +1683,29 @@ function App() {
   useEffect(() => {
     if (settings.persistentQueue !== true) {
       localStorage.removeItem("meld:persistentQueue");
+      localStorage.removeItem("meld:persistentPlayback");
       return;
     }
-    if (persistentQueueSkipWriteRef.current) {
-      persistentQueueSkipWriteRef.current = false;
+    if (persistentQueueSkipWriteRef.current) persistentQueueSkipWriteRef.current = false;
+    else {
+      try {
+        localStorage.setItem("meld:persistentQueue", JSON.stringify({ items: queueItems, index: queueIndex, continuation: queueContinuation, continuationKind: queueContinuationKind }));
+      } catch (error) {
+        setNotice(`Persistent queue could not be saved: ${errorMessage(error)}`);
+      }
+    }
+    if (!persistentSessionLoadedRef.current) return;
+    if (persistentSessionSkipWriteRef.current) {
+      persistentSessionSkipWriteRef.current = false;
       return;
     }
     try {
-      localStorage.setItem("meld:persistentQueue", JSON.stringify({ items: queueItems, index: queueIndex, continuation: queueContinuation, continuationKind: queueContinuationKind }));
+      const sessionItem = player?.item ?? (queueIndex >= 0 ? queueItems[queueIndex] : null);
+      localStorage.setItem("meld:persistentPlayback", JSON.stringify({ items: queueItems, index: queueIndex, continuation: queueContinuation, continuationKind: queueContinuationKind, item: sessionItem, position: audioRef.current?.currentTime ?? playbackSeconds, playing: isPlaying } satisfies PersistentPlayback));
     } catch (error) {
-      setNotice(`Persistent queue could not be saved: ${errorMessage(error)}`);
+      setNotice(`Persistent playback session could not be saved: ${errorMessage(error)}`);
     }
-  }, [settings.persistentQueue, queueItems, queueIndex, queueContinuation, queueContinuationKind]);
+  }, [settings.persistentQueue, queueItems, queueIndex, queueContinuation, queueContinuationKind, player, playbackSeconds, isPlaying]);
 
   const togglePlayback = () => {
     const audio = audioRef.current;
@@ -2047,7 +2114,7 @@ function App() {
         <header className="topbar">
           <div className="topbar-title"><div><p className="eyebrow">Meld Desktop</p><h1>{visibleTitle}</h1></div><div className="nav-history-controls" role="group" aria-label="Navigation history"><button className="topbar-button icon-button" onClick={goBack} disabled={!hasTransientLayer && backStack.length === 0} title="Back" aria-label="Back">‹</button><button className="topbar-button icon-button" onClick={navigateForward} disabled={forwardStack.length === 0} title="Forward" aria-label="Forward">›</button></div></div>
           <div ref={searchBoxRef} className="search-box"><form className="search-form" onSubmit={(event) => { setSearchFocused(false); void runSearch(event); }}><span>⌕</span><input value={query} onFocus={() => setSearchFocused(true)} onChange={(event) => setQuery(event.target.value)} placeholder="Search songs, albums, artists and playlists" aria-label="Search" /><button type="submit">Search</button></form>{searchFocused && searchHistory.filter((value) => !query.trim() || value.toLowerCase().startsWith(query.trim().toLowerCase())).length > 0 && <div className="search-history-popover" role="listbox" aria-label="Recent searches">{searchHistory.filter((value) => !query.trim() || value.toLowerCase().startsWith(query.trim().toLowerCase())).slice(0, 8).map((value, index) => <button type="button" role="option" key={`${value}-${index}`} onClick={() => setQuery(value)}>{value}</button>)}</div>}</div>
-          <div className="topbar-actions"><button className="topbar-button" onClick={() => { setSettingsPage("main"); setSettingsOpen(true); setMenuItem(null); setLyrics(null); setQueueOpen(false); setPlayerExpanded(false); setDetail(null); setPlaylist(null); setInfoItem(null); }} title="Settings">Settings</button><div className="account-label"><span className="account-avatar">{sessionStatus.authenticated ? (sessionStatus.accountName?.slice(0, 1).toUpperCase() || "G") : "G"}</span><span>{sessionStatus.authenticated ? (sessionStatus.accountName || sessionStatus.accountEmail || "Connected") : "Guest"}</span></div></div>
+          <div className="topbar-actions"><button className="topbar-button" onClick={() => { setSettingsPage("main"); setSettingsOpen(true); setMenuItem(null); setLyrics(null); setQueueOpen(false); setPlayerExpanded(false); setDetail(null); setPlaylist(null); setInfoItem(null); }} title="Settings">Settings</button><div className="account-label">{sessionStatus.accountAvatar ? <img className="account-avatar account-avatar-image" src={mediaSrc(sessionStatus.accountAvatar) as string} alt="" /> : <span className="account-avatar">{sessionStatus.authenticated ? (sessionStatus.accountName?.slice(0, 1).toUpperCase() || "G") : "G"}</span>}<span>{sessionStatus.authenticated ? (sessionStatus.accountName || sessionStatus.accountEmail || "Connected") : "Guest"}</span></div></div>
         </header>
 
         {notice && <div className="notice" role="status"><span title={notice}>{noticeSummary(notice)}</span><button className="notice-dismiss" onClick={() => setNotice("")} title="Dismiss message" aria-label="Dismiss message">×</button></div>}

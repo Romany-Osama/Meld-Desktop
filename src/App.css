@@ -50,6 +50,7 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 .search-form button:hover, .primary-button:hover { background: #c1c8ff; }
 .account-button { display: flex; align-items: center; gap: 9px; padding: 5px 0 5px 8px; background: none; color: #d6d8e7; font-size: 13px; white-space: nowrap; }
 .account-avatar { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: #353a52; color: #bac2ff; font-weight: 800; }
+.account-avatar-image { object-fit: cover; border: 1px solid rgba(186, 194, 255, .34); }
 .topbar-actions { display: flex; align-items: center; gap: 12px; }
 .topbar-button { padding: 9px 13px; border: 1px solid #454b6f; border-radius: 16px; background: transparent; color: #b6bdf6; font-size: 12px; }
 .topbar-button:hover { background: #282d4b; }
