@@ -1653,7 +1653,7 @@ function App() {
     if (settings.autoLoadMore === false || !settings.similarContent || (settings.disableLoadMoreWhenRepeatAll && repeatMode === "all") || !current.videoId || automixLoadingRef.current) return [];
     automixLoadingRef.current = true;
     try {
-      const page = await invoke<QueuePage>("ytm_next", { videoId: current.videoId, playlistId: current.playPlaylistId ?? current.playlistId ?? null, setVideoId: current.setVideoId ?? null, index: null, params: current.params ?? null, continuation: null });
+      const page = await invoke<QueuePage>("ytm_next", { videoId: current.videoId, playlistId: current.playPlaylistId ?? current.playlistId ?? `RDAMVM${current.videoId}`, setVideoId: current.setVideoId ?? null, index: null, params: current.params ?? null, continuation: null });
       let additions = page.items.filter((value) => value.videoId && value.id !== current.id && !existing.some((item) => item.id === value.id));
       if (additions.length === 0 && page.relatedBrowseId) {
         additions = (await invoke<YtItem[]>("ytm_related", { browseId: page.relatedBrowseId })).filter((value) => value.videoId && value.id !== current.id && !existing.some((item) => item.id === value.id));
