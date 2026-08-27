@@ -1900,18 +1900,30 @@ async fn ytm_podcast_episodes(state: tauri::State<'_, RuntimeState>) -> Result<V
     Ok(fetch_all_library_items(&session, "FEmusic_library_non_music_audio_list", 0).await?.into_iter().filter(|item| item.kind == "episode").collect())
 }
 
+fn saved_podcast_rows(db: &Connection) -> Result<Vec<YtItem>, String> {
+    let mut statement = db.prepare("SELECT id, title, COALESCE(author, ''), thumbnail FROM podcasts WHERE bookmarked_at IS NOT NULL ORDER BY bookmarked_at DESC, saved_at DESC").map_err(|error| format!("saved podcast query failed: {error}"))?;
+    let rows = statement.query_map([], |row| Ok(YtItem { id: row.get(0)?, kind: "podcast".to_owned(), title: row.get(1)?, subtitle: row.get(2)?, thumbnail: row.get(3)?, artists: Vec::new(), browse_id: row.get(0)?, playlist_id: row.get(0)?, video_id: None, set_video_id: None, play_playlist_id: row.get(0)?, play_video_id: None, params: None, explicit: false, music_video_type: None, history_remove_token: None, album_id: None, album_title: None })).map_err(|error| format!("saved podcast rows failed: {error}"))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("saved podcast row decode failed: {error}"))
+}
+
 #[tauri::command]
 async fn ytm_podcast_channels(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
-    let session = auth_session(&state)?.ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
-    Ok(fetch_all_library_items(&session, "FEmusic_library_non_music_audio_channels_list", 0).await?.into_iter().filter(|item| item.kind == "podcast" || item.kind == "artist").collect())
+    let local = {
+        let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+        saved_podcast_rows(&db)?
+    };
+    let Some(session) = auth_session(&state)? else { return Ok(local); };
+    let remote = fetch_all_library_items(&session, "FEmusic_library_non_music_audio_channels_list", 0).await.unwrap_or_default().into_iter().filter(|item| item.kind == "podcast" || item.kind == "artist").collect::<Vec<_>>();
+    if remote.is_empty() { return Ok(local); }
+    let mut result = remote;
+    for item in local { if !result.iter().any(|existing| existing.id == item.id) { result.push(item); } }
+    Ok(result)
 }
 
 #[tauri::command]
 fn library_saved_podcasts(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
     let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-    let mut statement = db.prepare("SELECT id, title, COALESCE(author, ''), thumbnail FROM podcasts WHERE bookmarked_at IS NOT NULL ORDER BY bookmarked_at DESC, saved_at DESC").map_err(|error| format!("saved podcast query failed: {error}"))?;
-    let rows = statement.query_map([], |row| Ok(YtItem { id: row.get(0)?, kind: "podcast".to_owned(), title: row.get(1)?, subtitle: row.get(2)?, thumbnail: row.get(3)?, artists: Vec::new(), browse_id: row.get(0)?, playlist_id: row.get(0)?, video_id: None, set_video_id: None, play_playlist_id: row.get(0)?, play_video_id: None, params: None, explicit: false, music_video_type: None, history_remove_token: None, album_id: None, album_title: None })).map_err(|error| format!("saved podcast rows failed: {error}"))?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("saved podcast row decode failed: {error}"))
+    saved_podcast_rows(&db)
 }
 
 async fn fetch_all_library_songs(session: &AuthSession, browse_id: &str, tab_index: Option<i32>) -> Result<Vec<YtItem>, String> {
