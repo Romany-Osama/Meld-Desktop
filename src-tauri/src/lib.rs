@@ -1913,10 +1913,26 @@ async fn fetch_all_library_items(session: &AuthSession, browse_id: &str, tab_ind
     Ok(items)
 }
 
+fn saved_episode_rows(db: &Connection) -> Result<Vec<YtItem>, String> {
+    let mut statement = db.prepare("SELECT id, kind, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, explicit, music_video_type FROM songs WHERE in_library = 1 AND kind = 'episode' ORDER BY saved_at DESC").map_err(|error| format!("saved episode query failed: {error}"))?;
+    let rows = statement.query_map([], |row| Ok(YtItem {
+        id: row.get(0)?, kind: row.get(1)?, title: row.get(2)?, subtitle: row.get(3)?, thumbnail: row.get(4)?, artists: Vec::new(), browse_id: row.get(5)?, playlist_id: row.get(6)?, video_id: row.get(7)?, set_video_id: row.get(8)?, play_playlist_id: Some("SE".to_owned()), play_video_id: row.get(7)?, params: None, explicit: row.get::<_, i64>(9)? != 0, music_video_type: row.get(10)?, history_remove_token: None, album_id: None, album_title: None,
+    })).map_err(|error| format!("saved episode rows failed: {error}"))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("saved episode row decode failed: {error}"))
+}
+
 #[tauri::command]
 async fn ytm_podcast_episodes(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
-    let session = auth_session(&state)?.ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
-    Ok(fetch_all_library_items(&session, "FEmusic_library_non_music_audio_list", 0).await?.into_iter().filter(|item| item.kind == "episode").collect())
+    let local = {
+        let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+        saved_episode_rows(&db)?
+    };
+    let Some(session) = auth_session(&state)? else { return Ok(local); };
+    let remote = fetch_all_library_items(&session, "FEmusic_library_non_music_audio_list", 0).await.unwrap_or_default().into_iter().filter(|item| item.kind == "episode").collect::<Vec<_>>();
+    if remote.is_empty() { return Ok(local); }
+    let mut result = remote;
+    for item in local { if !result.iter().any(|existing| existing.id == item.id || existing.video_id == item.video_id) { result.push(item); } }
+    Ok(result)
 }
 
 fn saved_podcast_rows(db: &Connection) -> Result<Vec<YtItem>, String> {
