@@ -1163,7 +1163,7 @@ function App() {
   const performMenuAction = async (action: "open" | "play" | "share" | "copy_link" | "download" | "download_cancel" | "download_remove" | "cache_remove" | "album" | "episode_save" | "podcast_save" | "queue" | "play_next" | "radio" | "playlist" | "remove_from_playlist" | "remove_history" | "pin" | "unpin" | "artist" | "info" | "edit" | "refetch" | "delete_uploaded" | "change_youtube_version" | "meld_like" | "add_library" | "remove_library", item: YtItem) => {
     if (!action.startsWith("download")) setMenuItem(null);
     if (action === "open") return openItem(item);
-    if (action === "play") return playItem(item, [item], 0, null, active === "home" || active === "search_input");
+    if (action === "play") return playItem(item, [item], 0, null, (active === "home" && item.kind === "song") || (active === "search_input" && (item.kind === "song" || item.kind === "episode")));
     if (action === "share") return shareItem(item);
     if (action === "copy_link") return copyLink(item);
     if (action === "download") {
@@ -1770,7 +1770,7 @@ function App() {
       return;
     }
     if ((item.kind === "song" || item.kind === "episode") && item.videoId) {
-      await playItem(item, libraryQueue, libraryIndex >= 0 ? libraryIndex : sourceIndex, null, active === "home" || active === "search_input");
+      await playItem(item, libraryQueue, libraryIndex >= 0 ? libraryIndex : sourceIndex, null, (active === "home" && item.kind === "song") || (active === "search_input" && (item.kind === "song" || item.kind === "episode")));
       return;
     }
     setNotice(`Meld could not open this ${item.kind}: the live item did not include a supported navigation endpoint.`);
