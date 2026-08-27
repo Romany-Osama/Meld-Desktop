@@ -1724,7 +1724,12 @@ function App() {
     }
     setNotice(`Meld could not open this ${item.kind}: the live item did not include a supported navigation endpoint.`);
   };
-
+  const openDetailItem = async (item: YtItem) => {
+    const detailItems = detail?.status === "ready" ? detail.data.items : [];
+    const queue = detailItems.filter((value) => value.videoId || value.localPath);
+    const index = queue.findIndex((value) => value.id === item.id);
+    await openItem(item, queue.length > 0 ? queue : [item], index >= 0 ? index : 0);
+  };
   const activeLyricIndex = useMemo(() => {
     if (!lyrics || lyrics.status !== "ready" || !lyrics.data.synced || lyrics.data.lines.length === 0) return -1;
     const position = playbackSeconds * 1000;
@@ -1896,7 +1901,7 @@ function App() {
                 <div className="playlist-songs">
                   {detail.data.items.length === 0 ? <div className="state-panel"><p>This browse response contained no typed items.</p></div> : detail.data.items.map((item, itemIndex) => (
                     <div className="song-row-wrap" key={`${item.kind}-${item.id}-${itemIndex}`}>
-                      <button className="song-row" onClick={() => void openItem(item)}>
+                      <button className="song-row" onClick={() => void openDetailItem(item)}>
                         {mediaSrc(item.thumbnail) && <img src={mediaSrc(item.thumbnail) as string} alt="" />}
                         <span className="song-copy"><strong>{item.title}</strong><small>{item.subtitle}</small></span>
                         <span className="song-kind">{item.kind}</span>
