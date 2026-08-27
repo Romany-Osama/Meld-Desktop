@@ -186,7 +186,7 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 .lyrics-text { max-height: 56vh; overflow: auto; margin: 0; padding: 18px; border-radius: 10px; background: #0e1019; color: #d9dcf6; font: 13px/2 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
 @media (max-width: 1180px) { .sidebar { width: 200px; } .topbar { gap: 16px; padding-left: 24px; padding-right: 24px; } .page-scroll { padding-left: 24px; padding-right: 24px; } .notice { margin-left: 24px; margin-right: 24px; } .search-form { min-width: 280px; } .player-dock { left: 200px; gap: 12px; padding-left: 18px; padding-right: 18px; } .dock-copy { min-width: 150px; } }
 @media (max-width: 860px) { .topbar { flex-wrap: wrap; min-height: 128px; } .topbar > div:first-child { min-width: 120px; } .search-form { order: 3; width: 100%; max-width: none; } .player-dock { left: 0; } .dock-copy { min-width: 110px; } .volume-control { display: none; } }
-.library-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.library-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
 .history-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 .history-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
 .history-search { min-width: 180px; display: flex; align-items: center; gap: 8px; padding: 7px 11px; border: 1px solid #2c3150; border-radius: 999px; background: #121629; color: #85899e; font-size: 11px; }
@@ -194,9 +194,9 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 .history-search input::placeholder { color: #686c7b; }
 .history-section { margin-top: 28px; }
 .history-section h3 { margin: 0 0 12px; color: #dce0ff; font-size: 16px; }
-.library-tab { border: 1px solid #2c3150; border-radius: 999px; padding: 8px 13px; background: #121629; color: #9ca3c8; font-weight: 700; font-size: 12px; }
+.library-tab { border: 1px solid #30364f; border-radius: 16px; padding: 7px 12px; background: #171a29; color: #aeb4cc; font-weight: 600; font-size: 12px; transition: background .16s ease, border-color .16s ease, color .16s ease; }
 .library-tab:hover { border-color: #6e78cf; color: #eef0ff; }
-.library-tab.active { border-color: #8790ee; background: #29305e; color: #f4f5ff; }
+.library-tab.active { border-color: #727bc5; background: #353b68; color: #f4f5ff; }
 @media (max-width: 720px) { .library-tabs { gap: 6px; } .library-tab { padding: 7px 10px; } }
 .library-mix-toolbar, .library-playlists-toolbar { display: flex; align-items: center; gap: 10px; margin: 4px 0 20px; flex-wrap: wrap; }
 .library-playlists-toolbar .library-search { flex: 1 1 260px; }
@@ -209,7 +209,7 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 .library-playlists-list .playlist-list-row > span { color: #85899e; font-size: 12px; }
 .library-mix-toolbar .library-search { flex: 1 1 260px; }
 .library-result-count { flex: 0 0 auto; color: #85899e; font-size: 12px; white-space: nowrap; }
-.library-auto-row { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 9px 12px; border: 1px solid rgba(255,255,255,.07); border-radius: 10px; background: rgba(255,255,255,.025); color: #eef0ff; text-align: left; }
+.library-auto-row { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 9px 12px; border: 1px solid transparent; border-radius: 10px; background: rgba(255,255,255,.025); color: #eef0ff; text-align: left; }
 .library-auto-row:hover { border-color: #7e88d2; background: #242a45; }
 .library-auto-row > span:last-child { min-width: 0; display: grid; gap: 3px; }
 .library-auto-row strong, .library-auto-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -290,7 +290,7 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 .local-import-button { margin-left: auto; }
 @media (max-width: 720px) { .local-import-button { margin-left: 0; } }
 
-.library-song-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 14px 0 6px; padding: 10px 12px; border: 1px solid #262a38; border-radius: 14px; background: #10121b; }
+.library-song-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 8px; padding: 4px 0 10px; border-bottom: 1px solid rgba(255,255,255,.08); background: transparent; }
 .library-filter-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .library-search { display: flex; align-items: center; gap: 8px; margin-left: auto; color: #8e92a5; font-size: 12px; }
 .library-search input { min-width: 190px; }
