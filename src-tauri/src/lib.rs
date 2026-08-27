@@ -470,6 +470,7 @@ struct DetailPage {
     thumbnail: Option<String>,
     items: Vec<YtItem>,
     continuation: Option<String>,
+    browse_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1642,7 +1643,7 @@ fn first_continuation(value: &Value) -> Option<String> {
     None
 }
 
-fn parse_detail(response: &Value, kind: &str) -> DetailPage {
+fn parse_detail(response: &Value, kind: &str, browse_id: Option<&str>) -> DetailPage {
     let section_list = detail_section_list(response);
     let header = section_list
         .and_then(|value| value.get("contents"))
@@ -1667,6 +1668,7 @@ fn parse_detail(response: &Value, kind: &str) -> DetailPage {
         thumbnail: thumbnail(active_header.and_then(|v| v.get("thumbnail")).and_then(|v| v.get("musicThumbnailRenderer")).and_then(|v| v.get("thumbnail"))),
         items,
         continuation,
+        browse_id: browse_id.map(str::to_owned),
     }
 }
 
@@ -1699,7 +1701,7 @@ async fn ytm_detail(kind: String, browse_id: String, state: tauri::State<'_, Run
             return Err(error);
         }
     };
-    let page = parse_detail(&response, &normalized_kind);
+    let page = parse_detail(&response, &normalized_kind, Some(id));
     if normalized_kind == "podcast" {
         if let Ok(serialized) = serde_json::to_string(&page) {
             if let Ok(db) = state.db.lock() {
@@ -2166,7 +2168,30 @@ async fn ytm_detail_continuation(kind: String, continuation: String, state: taur
     let request_session = browse_session(&state, auth_session(&state)?)?;
     let data_sync_id = request_session.as_ref().map(|value| value.data_sync_id.as_str());
     let response = post("browse", json!({ "context": context(&visitor_data, request_session.is_some(), data_sync_id), "continuation": token }), request_session.as_ref()).await?;
-    Ok(parse_detail(&response, &normalized_kind))
+    Ok(parse_detail(&response, &normalized_kind, None))
+}
+
+#[tauri::command]
+fn ytm_podcast_cache_detail_page(browse_id: String, page: DetailPage, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+    let id = browse_id.trim();
+    if id.is_empty() { return Err("podcast browse id is empty".to_owned()); }
+    if page.kind != "podcast" { return Err("podcast detail cache received a non-podcast page".to_owned()); }
+    let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+    let cached = db.query_row("SELECT detail_json FROM podcasts WHERE id = ?1 AND detail_json IS NOT NULL", params![id], |row| row.get::<_, String>(0)).optional().map_err(|error| format!("podcast detail cache read failed: {error}"))?;
+    let Some(serialized) = cached else { return Ok(()); };
+    let mut merged: DetailPage = serde_json::from_str(&serialized).map_err(|error| format!("cached podcast detail decode failed: {error}"))?;
+    let mut seen = merged.items.iter().map(|item| item.id.clone()).collect::<std::collections::HashSet<_>>();
+    for item in page.items {
+        if seen.insert(item.id.clone()) { merged.items.push(item); }
+    }
+    if !page.title.is_empty() { merged.title = page.title; }
+    if !page.subtitle.is_empty() { merged.subtitle = page.subtitle; }
+    if page.thumbnail.is_some() { merged.thumbnail = page.thumbnail; }
+    merged.continuation = page.continuation;
+    merged.browse_id = Some(id.to_owned());
+    let updated = serde_json::to_string(&merged).map_err(|error| format!("podcast detail cache encode failed: {error}"))?;
+    db.execute("UPDATE podcasts SET detail_json = ?1 WHERE id = ?2", params![updated, id]).map_err(|error| format!("podcast detail cache write failed: {error}"))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -4057,7 +4082,7 @@ fn clear_guest_session(state: tauri::State<'_, RuntimeState>) -> Result<(), Stri
 pub fn run() {
     tauri::Builder::default()
         .manage(RuntimeState::new())
-        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
+        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

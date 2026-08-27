@@ -47,7 +47,7 @@ type RemoteHistoryPage = { sections: RemoteHistorySection[] };
 type StatsRow = { item: YtItem; plays: number; minutes: number };
 type StatsGroup = { id: string; title: string; subtitle: string; thumbnail?: string | null; plays: number };
 type StatsPayload = { period: string; totalPlays: number; totalMinutes: number; uniqueSongs: number; rows: StatsRow[]; artists: StatsGroup[]; albums: StatsGroup[] };
-type DetailPage = { kind: string; title: string; subtitle: string; thumbnail?: string | null; items: YtItem[]; continuation?: string | null };
+type DetailPage = { kind: string; title: string; subtitle: string; thumbnail?: string | null; items: YtItem[]; continuation?: string | null; browseId?: string | null };
 type LyricsPayload = { provider: string; text: string; synced: boolean; matchedTitle: string; matchedArtist: string; lines: { timeMs: number; text: string }[] };
 type SettingEntry = { key: string; value: string };
 type SessionStatus = { authenticated: boolean; accountName?: string | null; accountEmail?: string | null; accountChannelHandle?: string | null };
@@ -1663,6 +1663,9 @@ function App() {
     setDetailMoreLoading(true);
     try {
       const next = await invoke<DetailPage>("ytm_detail_continuation", { kind: detail.data.kind, continuation: detail.data.continuation });
+      if (detail.data.kind === "podcast" && detail.data.browseId) {
+        await invoke("ytm_podcast_cache_detail_page", { browseId: detail.data.browseId, page: next });
+      }
       setDetail((current) => {
         if (!current || current.status !== "ready") return current;
         const items = [...current.data.items];
@@ -1695,12 +1698,12 @@ function App() {
     if (item.localPath) { await playItem(item, libraryQueue, libraryIndex >= 0 ? libraryIndex : sourceIndex); return; }
     if (["album", "artist", "podcast"].includes(item.kind) && (item.browseId || item.id)) {
       setPlaylist(null);
-      setDetail({ status: "loading", data: { kind: item.kind, title: item.title, subtitle: item.subtitle, thumbnail: item.thumbnail, items: [] } });
+      setDetail({ status: "loading", data: { kind: item.kind, title: item.title, subtitle: item.subtitle, thumbnail: item.thumbnail, items: [], browseId: item.browseId ?? null } });
       try {
         const data = await invoke<DetailPage>("ytm_detail", { kind: item.kind, browseId: item.browseId ?? item.id });
-        setDetail({ status: "ready", data });
+        setDetail({ status: "ready", data: { ...data, browseId: data.browseId ?? item.browseId ?? null } });
       } catch (error) {
-        setDetail({ status: "error", data: { kind: item.kind, title: item.title, subtitle: item.subtitle, thumbnail: item.thumbnail, items: [] }, error: errorMessage(error) });
+        setDetail({ status: "error", data: { kind: item.kind, title: item.title, subtitle: item.subtitle, thumbnail: item.thumbnail, items: [], browseId: item.browseId ?? null }, error: errorMessage(error) });
       }
       return;
     }
