@@ -6,7 +6,7 @@ This project is an independent desktop adaptation and is **not an official Meld 
 
 ## Current native scope
 
-The desktop client currently includes YouTube Music home/search/detail/playlist flows, local SQLite library state, Meld-style liked songs and library filters, local playlists, downloads, a separate playback cache, lyrics provider ordering and local lyrics caching, synchronized lyrics presentation, queue/automix controls, history, statistics, Google/YouTube Music session flow, Spotify library folders/playlists/liked songs, podcast library entry points, settings, backup/restore, and native Windows navigation controls.
+The desktop client currently includes YouTube Music home/search/detail/playlist flows, local SQLite library state, Meld-style liked songs and library filters, local playlists, downloads, a separate playback cache, lyrics provider ordering and local lyrics caching, synchronized lyrics presentation, queue/automix controls, history, statistics, Google/YouTube Music session flow, Spotify library folders/playlists/liked songs, podcast library entry points, settings, backup/restore, native Windows navigation controls, and an Advanced playback speed control with a persisted varispeed preference.
 
 An explicit offline download stores the audio file locally. It also attempts to store the source thumbnail as a local artwork file and caches lyrics in SQLite through the configured Meld lyrics provider chain. The Downloaded library plays a verified `localPath` directly, without calling the remote player resolver. Downloaded media and player-cache media remain separate. Backups intentionally contain the SQLite database and allowlisted non-sensitive settings only; they do not embed media files or authentication/session material.
 
@@ -34,4 +34,4 @@ Meld Desktop is distributed under the GNU General Public License v3.0. See [LICE
 
 ## Status
 
-This repository contains an active native port, not a claim of complete feature parity or public release readiness. External integrations such as Last.fm, Discord RPC, Listen Together, Qobuz, Cast, updater signing, Wrapped, Android Auto, ShazamKit, and Android-specific media/session features require separate real contracts or platform equivalents and are not represented as complete features here.
+This repository contains an active native port, not a claim of complete feature parity or public release readiness. External integrations such as Last.fm, Discord RPC, Listen Together, Qobuz, Cast, updater signing, Wrapped, Android Auto, ShazamKit, and Android-specific media/session features require separate real contracts or platform equivalents and are not represented as complete features here. The Advanced playback control uses native audio playbackRate; Android's independent tempo/pitch processor and system equalizer are not claimed as identical.

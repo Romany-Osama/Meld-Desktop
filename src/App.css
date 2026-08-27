@@ -218,7 +218,11 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 .library-mix-list { margin-top: 2px; }
 .library-mix-list .result-row { min-height: 62px; }
 .sleep-timer-panel { width: min(560px, calc(100vw - 48px)); }
-.sleep-timer-value { display: grid; gap: 10px; margin: 18px 0; color: #f4f5ff; }
+.sleep-timer-value, .speed-control { display: grid; gap: 8px; margin: 22px 0; }
+.speed-control strong { color: #dfe2f7; font-size: 24px; }
+.speed-control input { width: 100%; accent-color: #aab3f2; }
+.speed-dialog { max-width: 520px; }
+.sleep-timer-value strong { color: #f4f5ff; }
 .sleep-timer-value input[type="range"] { width: 100%; }
 .sleep-timer-panel .setting-row { margin-top: 8px; }
 .sleep-timer-panel .dialog-actions { flex-wrap: wrap; justify-content: flex-end; }
