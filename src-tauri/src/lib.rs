@@ -1140,6 +1140,10 @@ fn download_cancel_map() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     DOWNLOAD_CANCELS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn download_is_active(song_id: &str) -> bool {
+    download_cancel_map().lock().map(|active| active.contains_key(song_id)).unwrap_or(false)
+}
+
 fn read_download_info(db: &Connection, song_id: &str) -> Result<Option<DownloadInfo>, String> {
     db.query_row("SELECT song_id, path, bytes, total_bytes, state, error, lyrics_cached, artwork_path FROM downloads WHERE song_id = ?1", params![song_id], download_info_from_row).optional().map_err(|error| format!("download state read failed: {error}"))
 }
@@ -1150,8 +1154,16 @@ fn emit_download(app: &tauri::AppHandle, info: &DownloadInfo) {
 
 #[tauri::command]
 fn download_info(song_id: String, state: tauri::State<'_, RuntimeState>) -> Result<Option<DownloadInfo>, String> {
+    let id = song_id.trim();
     let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-    read_download_info(&db, song_id.trim())
+    let Some(info) = read_download_info(&db, id)? else { return Ok(None); };
+    if info.state == "downloading" && !download_is_active(id) {
+        let partial_path = format!("{}.part", info.path);
+        let retained_bytes = fs::metadata(&partial_path).map(|metadata| metadata.len() as i64).unwrap_or(info.bytes);
+        db.execute("UPDATE downloads SET bytes = ?1, state = 'cancelled', error = ?2 WHERE song_id = ?3", params![retained_bytes, "download interrupted; retry to resume", id]).map_err(|error| format!("download recovery state failed: {error}"))?;
+        return read_download_info(&db, id);
+    }
+    Ok(Some(info))
 }
 
 #[tauri::command]
