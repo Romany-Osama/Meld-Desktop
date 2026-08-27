@@ -1684,9 +1684,14 @@ function App() {
     }
   };
 
-  const openItem = async (item: YtItem) => {
+  const openItem = async (item: YtItem, sourceQueue: YtItem[] = [item], sourceIndex = 0) => {
     setNotice("");
-    if (item.localPath) { await playItem(item); return; }
+    const libraryQueueModes = ["songs", "liked", "uploaded", "downloads", "cache", "local", "top"];
+    const libraryQueue = active === "library" && libraryQueueModes.includes(libraryMode) && filteredLibraryData.some((value) => value.id === item.id)
+      ? filteredLibraryData
+      : sourceQueue;
+    const libraryIndex = libraryQueue.findIndex((value) => value.id === item.id);
+    if (item.localPath) { await playItem(item, libraryQueue, libraryIndex >= 0 ? libraryIndex : sourceIndex); return; }
     if (["album", "artist", "podcast"].includes(item.kind) && (item.browseId || item.id)) {
       setPlaylist(null);
       setDetail({ status: "loading", data: { kind: item.kind, title: item.title, subtitle: item.subtitle, thumbnail: item.thumbnail, items: [] } });
@@ -1710,7 +1715,7 @@ function App() {
       return;
     }
     if ((item.kind === "song" || item.kind === "episode") && item.videoId) {
-      await playItem(item);
+      await playItem(item, libraryQueue, libraryIndex >= 0 ? libraryIndex : sourceIndex);
       return;
     }
     setNotice(`Meld could not open this ${item.kind}: the live item did not include a supported navigation endpoint.`);
