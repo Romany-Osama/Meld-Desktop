@@ -138,10 +138,9 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 .seek-slider { min-width: 80px; flex: 1; accent-color: #aab3f2; }
 .player-lyrics-button { padding: 7px 11px; border: 1px solid #454b6f; border-radius: 15px; background: transparent; color: #b6bdf6; font-size: 11px; }
 .player-lyrics-button:hover { background: #282d4b; }
-.player-action { min-width: 34px; height: 32px; padding: 0 10px; border: 1px solid #454b6f; border-radius: 16px; background: #1c2031; color: #c5cbf6; font-size: 12px; line-height: 1; transition: background .16s ease, border-color .16s ease, color .16s ease; }
+.player-action { width: 32px; min-width: 32px; height: 32px; padding: 0; display: inline-grid; place-items: center; border: 1px solid #454b6f; border-radius: 50%; background: #1c2031; color: #c5cbf6; font-size: 12px; line-height: 1; transition: background .16s ease, border-color .16s ease, color .16s ease; }
 .player-action:hover { border-color: #8790ee; background: #30365a; color: #f4f5ff; }
 .player-action.active-control { border-color: #aab3f2; background: #30365a; color: #f2f3ff; }
-.player-action { width: 32px; min-width: 32px; height: 32px; padding: 0; display: inline-grid; place-items: center; border-radius: 50%; }
 .volume-control { display: flex; align-items: center; gap: 6px; color: #85899e; font-size: 10px; }
 .volume-control input { width: 76px; accent-color: #aab3f2; }
 .native-audio { display: none; }
