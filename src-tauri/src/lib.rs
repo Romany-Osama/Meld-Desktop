@@ -135,7 +135,8 @@ impl RuntimeState {
              CREATE TABLE IF NOT EXISTS history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 song_id TEXT NOT NULL,
-                played_at INTEGER NOT NULL
+                played_at INTEGER NOT NULL,
+                play_time_ms INTEGER NOT NULL DEFAULT 0
              );
              CREATE TABLE IF NOT EXISTS search_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -261,6 +262,7 @@ impl RuntimeState {
         let _ = db.execute("ALTER TABLE albums ADD COLUMN liked INTEGER NOT NULL DEFAULT 0", []);
         let _ = db.execute("ALTER TABLE playlists ADD COLUMN source TEXT NOT NULL DEFAULT 'local'", []);
         let _ = db.execute("ALTER TABLE podcasts ADD COLUMN detail_json TEXT", []);
+        let _ = db.execute("ALTER TABLE history ADD COLUMN play_time_ms INTEGER NOT NULL DEFAULT 0", []);
         Self { visitor_data: Mutex::new(None), db: Mutex::new(db) }
     }
 }
@@ -3586,11 +3588,19 @@ fn search_history_clear(state: tauri::State<'_, RuntimeState>) -> Result<(), Str
 }
 
 #[tauri::command]
-fn history_add(item: YtItem, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+fn history_add(item: YtItem, state: tauri::State<'_, RuntimeState>) -> Result<i64, String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let is_video = item.music_video_type.as_deref().is_some_and(|value| value != "MUSIC_VIDEO_TYPE_ATV");
     db.execute("INSERT INTO songs (id, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, kind, saved_at, explicit, music_video_type, liked, liked_date, in_library, is_video) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, NULL, 0, ?13) ON CONFLICT(id) DO UPDATE SET title=excluded.title, subtitle=excluded.subtitle, thumbnail=excluded.thumbnail, browse_id=excluded.browse_id, playlist_id=excluded.playlist_id, video_id=excluded.video_id, set_video_id=excluded.set_video_id, kind=excluded.kind, explicit=excluded.explicit, music_video_type=excluded.music_video_type, is_video=excluded.is_video", params![item.id, item.title, item.subtitle, item.thumbnail, item.browse_id, item.playlist_id, item.video_id, item.set_video_id, item.kind, now_seconds(), if item.explicit { 1 } else { 0 }, item.music_video_type, if is_video { 1 } else { 0 }]).map_err(|e| format!("history song save failed: {e}"))?;
-    db.execute("INSERT INTO history (song_id, played_at) VALUES (?1, ?2)", params![item.id, now_seconds()]).map_err(|e| format!("history write failed: {e}"))?;
+    db.execute("INSERT INTO history (song_id, played_at, play_time_ms) VALUES (?1, ?2, 0)", params![item.id, now_seconds()]).map_err(|e| format!("history write failed: {e}"))?;
+    Ok(db.last_insert_rowid())
+}
+
+#[tauri::command]
+fn history_record_playtime(history_id: i64, play_time_ms: i64, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+    if history_id <= 0 || play_time_ms <= 0 { return Ok(()); }
+    let db = state.db.lock().map_err(|_| "database state poisoned")?;
+    db.execute("UPDATE history SET play_time_ms = play_time_ms + ?1 WHERE id = ?2", params![play_time_ms, history_id]).map_err(|error| format!("history playtime update failed: {error}"))?;
     Ok(())
 }
 
@@ -3615,9 +3625,9 @@ fn library_stats(period: String, state: tauri::State<'_, RuntimeState>) -> Resul
     };
     let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
     let total_plays: i64 = db.query_row("SELECT COUNT(*) FROM history WHERE played_at >= ?1", params![cutoff], |row| row.get(0)).map_err(|error| format!("stats total plays query failed: {error}"))?;
-    let total_minutes: i64 = db.query_row("SELECT COALESCE(SUM(MAX(s.duration, 0)), 0) / 60 FROM history h INNER JOIN songs s ON s.id = h.song_id WHERE h.played_at >= ?1", params![cutoff], |row| row.get(0)).map_err(|error| format!("stats total time query failed: {error}"))?;
+    let total_minutes: i64 = db.query_row("SELECT COALESCE(SUM(CASE WHEN h.play_time_ms > 0 THEN h.play_time_ms ELSE MAX(s.duration, 0) * 1000 END), 0) / 60000 FROM history h INNER JOIN songs s ON s.id = h.song_id WHERE h.played_at >= ?1", params![cutoff], |row| row.get(0)).map_err(|error| format!("stats total time query failed: {error}"))?;
     let unique_songs: i64 = db.query_row("SELECT COUNT(DISTINCT song_id) FROM history WHERE played_at >= ?1", params![cutoff], |row| row.get(0)).map_err(|error| format!("stats unique songs query failed: {error}"))?;
-    let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.browse_id, s.playlist_id, s.video_id, s.set_video_id, s.explicit, s.music_video_type, COUNT(h.id) AS plays, COALESCE(MAX(s.duration, 0), 0) * COUNT(h.id) / 60 AS minutes FROM history h INNER JOIN songs s ON s.id = h.song_id WHERE h.played_at >= ?1 GROUP BY s.id ORDER BY plays DESC, MAX(h.played_at) DESC LIMIT 100").map_err(|error| format!("stats rows query failed: {error}"))?;
+    let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.browse_id, s.playlist_id, s.video_id, s.set_video_id, s.explicit, s.music_video_type, COUNT(h.id) AS plays, COALESCE(SUM(CASE WHEN h.play_time_ms > 0 THEN h.play_time_ms ELSE MAX(s.duration, 0) * 1000 END), 0) / 60000 AS minutes FROM history h INNER JOIN songs s ON s.id = h.song_id WHERE h.played_at >= ?1 GROUP BY s.id ORDER BY plays DESC, MAX(h.played_at) DESC LIMIT 100").map_err(|error| format!("stats rows query failed: {error}"))?;
     let rows = statement.query_map(params![cutoff], |row| Ok(StatsRow { item: YtItem { id: row.get(0)?, kind: row.get(1)?, title: row.get(2)?, subtitle: row.get(3)?, thumbnail: row.get(4)?, artists: Vec::new(), browse_id: row.get(5)?, playlist_id: row.get(6)?, video_id: row.get(7)?, set_video_id: row.get(8)?, play_playlist_id: None, play_video_id: None, params: None, explicit: row.get::<_, i64>(9)? != 0, music_video_type: row.get(10)?, history_remove_token: None, album_id: None, album_title: None }, plays: row.get(11)?, minutes: row.get(12)? })).map_err(|error| format!("stats rows decode failed: {error}"))?;
     let rows = rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("stats rows collect failed: {error}"))?;
     let mut artist_statement = db.prepare("SELECT a.id, a.name, a.thumbnail, COUNT(h.id) AS plays FROM history h INNER JOIN songs s ON s.id = h.song_id INNER JOIN song_artists sa ON sa.song_id = s.id INNER JOIN artists a ON a.id = sa.artist_id WHERE h.played_at >= ?1 GROUP BY a.id, a.name, a.thumbnail ORDER BY plays DESC, MAX(h.played_at) DESC LIMIT 100").map_err(|error| format!("stats artists query failed: {error}"))?;
@@ -4082,7 +4092,7 @@ fn clear_guest_session(state: tauri::State<'_, RuntimeState>) -> Result<(), Stri
 pub fn run() {
     tauri::Builder::default()
         .manage(RuntimeState::new())
-        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
+        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
