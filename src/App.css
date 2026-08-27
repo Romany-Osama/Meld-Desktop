@@ -591,3 +591,11 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
   z-index: 40;
   margin: 0;
 }
+
+
+.detail-header-actions { display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.recap-panel { max-width: 620px; }
+.recap-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
+.recap-highlight { display: grid; gap: 4px; margin: 10px 0; padding: 14px 16px; border: 1px solid rgba(133, 171, 221, .18); border-radius: 12px; background: rgba(10, 26, 48, .65); }
+.recap-highlight span, .recap-highlight small { color: var(--muted-text, #91a5c2); }
+@media (max-width: 680px) { .recap-grid { grid-template-columns: 1fr; } .detail-header-actions { margin-left: 0; width: 100%; } }

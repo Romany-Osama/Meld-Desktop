@@ -3727,7 +3727,7 @@ fn history_items(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, S
 }
 
 fn allowed_setting(key: &str) -> bool {
-    matches!(key, "ytmSync" | "useLoginForBrowse" | "hideExplicit" | "hideVideoSongs" | "enableBetterLyrics" | "enablePaxsenix" | "enableLrclib" | "enableKugou" | "enableLyricsPlus" | "enableMusixmatch" | "shuffleMode" | "repeatMode" | "similarContent" | "autoLoadMore" | "disableLoadMoreWhenRepeatAll" | "autoDownloadOnLike" | "autoSkipNextOnError" | "persistentShuffleAcrossQueues" | "rememberShuffleAndRepeat" | "shufflePlaylistFirst" | "preventDuplicateTracksInQueue" | "varispeed" | "seekExtraSeconds" | "audioQuality" | "playerVolume" | "pauseOnMute" | "persistentQueue" | "pauseListenHistory" | "pauseSearchHistory" | "sleepTimerDefault" | "lyricsProviderOrder" | "show_liked_playlist" | "show_downloaded_playlist" | "show_uploaded_playlist" | "show_top_playlist" | "show_cached_playlist")
+    matches!(key, "ytmSync" | "useLoginForBrowse" | "hideExplicit" | "hideVideoSongs" | "enableBetterLyrics" | "enablePaxsenix" | "enableLrclib" | "enableKugou" | "enableLyricsPlus" | "enableMusixmatch" | "shuffleMode" | "repeatMode" | "similarContent" | "autoLoadMore" | "disableLoadMoreWhenRepeatAll" | "autoDownloadOnLike" | "autoSkipNextOnError" | "persistentShuffleAcrossQueues" | "rememberShuffleAndRepeat" | "shufflePlaylistFirst" | "preventDuplicateTracksInQueue" | "varispeed" | "seekExtraSeconds" | "audioQuality" | "playerVolume" | "equalizerEnabled" | "equalizerLow" | "equalizerMid" | "equalizerHigh" | "pauseOnMute" | "persistentQueue" | "pauseListenHistory" | "pauseSearchHistory" | "sleepTimerDefault" | "lyricsProviderOrder" | "show_liked_playlist" | "show_downloaded_playlist" | "show_uploaded_playlist" | "show_top_playlist" | "show_cached_playlist")
 }
 
 #[tauri::command]
@@ -3836,7 +3836,7 @@ fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, Strin
 #[tauri::command]
 fn settings_get(state: tauri::State<'_, RuntimeState>) -> Result<Vec<SettingEntry>, String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    let mut statement = db.prepare("SELECT key, value FROM settings WHERE key IN ('ytmSync', 'useLoginForBrowse', 'hideExplicit', 'hideVideoSongs', 'enableBetterLyrics', 'enablePaxsenix', 'enableLrclib', 'enableKugou', 'enableLyricsPlus', 'enableMusixmatch', 'shuffleMode', 'repeatMode', 'similarContent', 'autoLoadMore', 'disableLoadMoreWhenRepeatAll', 'autoDownloadOnLike', 'autoSkipNextOnError', 'persistentShuffleAcrossQueues', 'rememberShuffleAndRepeat', 'shufflePlaylistFirst', 'preventDuplicateTracksInQueue', 'varispeed', 'seekExtraSeconds', 'audioQuality', 'playerVolume', 'pauseOnMute', 'persistentQueue', 'pauseListenHistory', 'pauseSearchHistory', 'sleepTimerDefault', 'lyricsProviderOrder', 'show_liked_playlist', 'show_downloaded_playlist', 'show_uploaded_playlist', 'show_top_playlist', 'show_cached_playlist') ORDER BY key").map_err(|e| format!("settings read failed: {e}"))?;
+    let mut statement = db.prepare("SELECT key, value FROM settings WHERE key IN ('ytmSync', 'useLoginForBrowse', 'hideExplicit', 'hideVideoSongs', 'enableBetterLyrics', 'enablePaxsenix', 'enableLrclib', 'enableKugou', 'enableLyricsPlus', 'enableMusixmatch', 'shuffleMode', 'repeatMode', 'similarContent', 'autoLoadMore', 'disableLoadMoreWhenRepeatAll', 'autoDownloadOnLike', 'autoSkipNextOnError', 'persistentShuffleAcrossQueues', 'rememberShuffleAndRepeat', 'shufflePlaylistFirst', 'preventDuplicateTracksInQueue', 'varispeed', 'seekExtraSeconds', 'audioQuality', 'playerVolume', 'equalizerEnabled', 'equalizerLow', 'equalizerMid', 'equalizerHigh', 'pauseOnMute', 'persistentQueue', 'pauseListenHistory', 'pauseSearchHistory', 'sleepTimerDefault', 'lyricsProviderOrder', 'show_liked_playlist', 'show_downloaded_playlist', 'show_uploaded_playlist', 'show_top_playlist', 'show_cached_playlist') ORDER BY key").map_err(|e| format!("settings read failed: {e}"))?;
     let rows = statement.query_map([], |row| Ok(SettingEntry { key: row.get(0)?, value: row.get(1)? })).map_err(|e| format!("settings query failed: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("settings row failed: {e}"))
 }
@@ -3844,7 +3844,7 @@ fn settings_get(state: tauri::State<'_, RuntimeState>) -> Result<Vec<SettingEntr
 #[tauri::command]
 fn settings_set(key: String, value: String, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
     if !allowed_setting(&key) { return Err(format!("unsupported Meld setting: {key}")); }
-    if key == "repeatMode" { if !matches!(value.as_str(), "0" | "1" | "2") { return Err("Meld repeatMode must be 0 (off), 1 (one), or 2 (all)".to_owned()); } } else if key == "audioQuality" { if !matches!(value.as_str(), "auto" | "high" | "low") { return Err("audioQuality must be auto, high, or low".to_owned()); } } else if key == "playerVolume" { let volume = value.parse::<f32>().map_err(|_| "playerVolume must be a number between 0 and 1".to_owned())?; if !volume.is_finite() || !(0.0..=1.0).contains(&volume) { return Err("playerVolume must be a number between 0 and 1".to_owned()); } } else if key == "lyricsProviderOrder" { let allowed = ["BetterLyrics", "Paxsenix", "LrcLib", "KuGou", "LyricsPlus", "Musixmatch", "YouTubeSubtitle", "YouTube"]; if value.split(',').map(str::trim).any(|provider| !provider.is_empty() && !allowed.contains(&provider)) { return Err("unsupported lyrics provider in provider order".to_owned()); } } else if key == "sleepTimerDefault" { let minutes = value.parse::<f32>().map_err(|_| "sleepTimerDefault must be a number of minutes".to_owned())?; if !minutes.is_finite() || !(5.0..=120.0).contains(&minutes) { return Err("sleepTimerDefault must be between 5 and 120 minutes".to_owned()); } } else if !matches!(value.as_str(), "true" | "false") { return Err("Meld boolean settings require true or false".to_owned()); }
+    if key == "repeatMode" { if !matches!(value.as_str(), "0" | "1" | "2") { return Err("Meld repeatMode must be 0 (off), 1 (one), or 2 (all)".to_owned()); } } else if key == "audioQuality" { if !matches!(value.as_str(), "auto" | "high" | "low") { return Err("audioQuality must be auto, high, or low".to_owned()); } } else if key == "playerVolume" { let volume = value.parse::<f32>().map_err(|_| "playerVolume must be a number between 0 and 1".to_owned())?; if !volume.is_finite() || !(0.0..=1.0).contains(&volume) { return Err("playerVolume must be a number between 0 and 1".to_owned()); } } else if matches!(key.as_str(), "equalizerLow" | "equalizerMid" | "equalizerHigh") { let gain = value.parse::<f32>().map_err(|_| "equalizer gain must be a number between -12 and 12".to_owned())?; if !gain.is_finite() || !(-12.0..=12.0).contains(&gain) { return Err("equalizer gain must be a number between -12 and 12".to_owned()); } } else if key == "lyricsProviderOrder" { let allowed = ["BetterLyrics", "Paxsenix", "LrcLib", "KuGou", "LyricsPlus", "Musixmatch", "YouTubeSubtitle", "YouTube"]; if value.split(',').map(str::trim).any(|provider| !provider.is_empty() && !allowed.contains(&provider)) { return Err("unsupported lyrics provider in provider order".to_owned()); } } else if key == "sleepTimerDefault" { let minutes = value.parse::<f32>().map_err(|_| "sleepTimerDefault must be a number of minutes".to_owned())?; if !minutes.is_finite() || !(5.0..=120.0).contains(&minutes) { return Err("sleepTimerDefault must be between 5 and 120 minutes".to_owned()); } } else if !matches!(value.as_str(), "true" | "false") { return Err("Meld boolean settings require true or false".to_owned()); }
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key, value]).map_err(|e| format!("settings write failed: {e}"))?;
     Ok(())
@@ -4010,7 +4010,7 @@ fn library_albums(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, 
 #[tauri::command]
 fn library_artists(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    let mut statement = db.prepare("SELECT a.id, a.name, a.thumbnail, a.channel_id, COUNT(sa.song_id) FROM artists a INNER JOIN song_artists sa ON sa.artist_id = a.id INNER JOIN songs s ON s.id = sa.song_id WHERE s.in_library = 1 GROUP BY a.id, a.name, a.thumbnail, a.channel_id ORDER BY a.saved_at DESC").map_err(|error| format!("artists query failed: {error}"))?;
+    let mut statement = db.prepare("SELECT a.id, a.name, a.thumbnail, a.channel_id, COUNT(CASE WHEN s.in_library = 1 THEN sa.song_id END) FROM artists a LEFT JOIN song_artists sa ON sa.artist_id = a.id LEFT JOIN songs s ON s.id = sa.song_id WHERE a.bookmarked_at IS NOT NULL OR s.in_library = 1 GROUP BY a.id, a.name, a.thumbnail, a.channel_id ORDER BY a.bookmarked_at DESC, a.saved_at DESC").map_err(|error| format!("artists query failed: {error}"))?;
     let rows = statement.query_map([], |row| Ok(YtItem {
         id: row.get(0)?, kind: "artist".to_owned(), title: row.get(1)?, subtitle: format!("{} songs", row.get::<_, i64>(4)?), thumbnail: row.get(2)?, artists: Vec::new(), browse_id: row.get(0)?, playlist_id: None, video_id: None, set_video_id: None, play_playlist_id: None, play_video_id: None, params: None, explicit: false, music_video_type: None, history_remove_token: None, album_id: None, album_title: None,
     })).map_err(|error| format!("artists rows failed: {error}"))?;
@@ -4032,6 +4032,56 @@ fn library_playlists(state: tauri::State<'_, RuntimeState>) -> Result<Vec<Librar
         song_count: row.get(6)?,
     })).map_err(|e| format!("playlists rows failed: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("playlist row decode failed: {e}"))
+}
+
+#[tauri::command]
+fn library_artist_state(artist_id: String, state: tauri::State<'_, RuntimeState>) -> Result<bool, String> {
+    let artist_id = artist_id.trim();
+    if artist_id.is_empty() { return Err("artist id is empty".to_owned()); }
+    let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+    db.query_row("SELECT EXISTS(SELECT 1 FROM artists WHERE id = ?1 AND bookmarked_at IS NOT NULL)", params![artist_id], |row| row.get::<_, bool>(0)).map_err(|error| format!("artist bookmark state failed: {error}"))
+}
+
+#[tauri::command]
+async fn library_toggle_artist_bookmarked(artist_id: String, name: String, thumbnail: Option<String>, channel_id: Option<String>, bookmarked: bool, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+    let artist_id = artist_id.trim();
+    let name = name.trim();
+    if artist_id.is_empty() || name.is_empty() { return Err("artist id or name is empty".to_owned()); }
+    let channel_id = channel_id.as_deref().map(str::trim).filter(|value| value.starts_with("UC") && value.len() > 2).map(str::to_owned);
+    {
+        let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+        db.execute("INSERT INTO artists (id, name, thumbnail, channel_id, bookmarked_at, podcast_channel, saved_at) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6) ON CONFLICT(id) DO UPDATE SET name=excluded.name, thumbnail=excluded.thumbnail, channel_id=COALESCE(excluded.channel_id, artists.channel_id), bookmarked_at=excluded.bookmarked_at, saved_at=excluded.saved_at", params![artist_id, name, thumbnail, channel_id, if bookmarked { Some(now_seconds()) } else { None }, now_seconds()]).map_err(|error| format!("artist bookmark save failed: {error}"))?;
+    }
+    if let Some(channel_id) = channel_id {
+        if let Some(session) = auth_session(&state)? {
+            let endpoint = if bookmarked { "subscription/subscribe" } else { "subscription/unsubscribe" };
+            post(endpoint, json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "channelIds": [channel_id] }), Some(&session)).await?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn ytm_refresh_saved_podcasts(state: tauri::State<'_, RuntimeState>) -> Result<i64, String> {
+    let ids = {
+        let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+        let mut statement = db.prepare("SELECT id FROM podcasts WHERE bookmarked_at IS NOT NULL ORDER BY bookmarked_at DESC").map_err(|error| format!("saved podcast refresh query failed: {error}"))?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0)).map_err(|error| format!("saved podcast refresh rows failed: {error}"))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("saved podcast refresh ids failed: {error}"))?
+    };
+    if ids.is_empty() { return Ok(0); }
+    let Some(session) = auth_session(&state)? else { return Ok(0); };
+    let visitor_data = visitor(&state).await?;
+    let mut refreshed = 0i64;
+    for id in ids {
+        let response = post("browse", json!({ "context": context(&visitor_data, true, Some(&session.data_sync_id)), "browseId": id }), Some(&session)).await?;
+        let page = parse_detail(&response, "podcast", Some(&id));
+        let serialized = serde_json::to_string(&page).map_err(|error| format!("podcast detail encode failed: {error}"))?;
+        let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+        db.execute("UPDATE podcasts SET title=CASE WHEN ?1 <> '' THEN ?1 ELSE title END, author=CASE WHEN ?2 <> '' THEN ?2 ELSE author END, thumbnail=COALESCE(?3, thumbnail), detail_json=?4, saved_at=?5 WHERE id=?6", params![page.title, page.subtitle, page.thumbnail, serialized, now_seconds(), id]).map_err(|error| format!("podcast detail refresh save failed: {error}"))?;
+        refreshed += 1;
+    }
+    Ok(refreshed)
 }
 
 #[tauri::command]
@@ -4174,7 +4224,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(RuntimeState::new())
         .plugin(tauri_plugin_taskbar::init())
-        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_browse, ytm_browse_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
+        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, ytm_refresh_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_browse, ytm_browse_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, library_artist_state, library_toggle_artist_bookmarked, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
