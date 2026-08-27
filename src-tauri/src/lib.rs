@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::ItemKey;
@@ -20,6 +21,8 @@ use hmac::{Hmac, Mac as HmacMac};
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
 use tauri::{Emitter, Manager, Url, WebviewUrl};
 use tauri::webview::{PageLoadEvent, WebviewWindowBuilder};
+use zip::write::SimpleFileOptions;
+use zip::{ZipArchive, ZipWriter};
 
 const API_BASE: &str = "https://music.youtube.com/youtubei/v1/";
 const ORIGIN: &str = "https://music.youtube.com";
@@ -38,6 +41,8 @@ const VISIONOS_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_
 static HTTP: OnceLock<Client> = OnceLock::new();
 static MUSIXMATCH_TOKEN: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static DOWNLOAD_CANCELS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+static PLAYER_CACHE_ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static PLAYER_CACHE_BLOCKED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn http() -> &'static Client {
     HTTP.get_or_init(|| {
@@ -166,7 +171,14 @@ impl RuntimeState {
                  state TEXT NOT NULL DEFAULT 'completed',
                  error TEXT,
                  lyrics_cached INTEGER NOT NULL DEFAULT 0,
+                 artwork_path TEXT,
                  downloaded_at INTEGER NOT NULL
+              );
+              CREATE TABLE IF NOT EXISTS player_cache (
+                 song_id TEXT PRIMARY KEY,
+                 path TEXT NOT NULL,
+                 bytes INTEGER NOT NULL DEFAULT 0,
+                 cached_at INTEGER NOT NULL
               );
               CREATE TABLE IF NOT EXISTS podcasts (
                  id TEXT PRIMARY KEY,
@@ -244,6 +256,7 @@ impl RuntimeState {
         let _ = db.execute("ALTER TABLE downloads ADD COLUMN state TEXT NOT NULL DEFAULT 'completed'", []);
         let _ = db.execute("ALTER TABLE downloads ADD COLUMN error TEXT", []);
         let _ = db.execute("ALTER TABLE downloads ADD COLUMN lyrics_cached INTEGER NOT NULL DEFAULT 0", []);
+        let _ = db.execute("ALTER TABLE downloads ADD COLUMN artwork_path TEXT", []);
         let _ = db.execute("ALTER TABLE albums ADD COLUMN liked INTEGER NOT NULL DEFAULT 0", []);
         let _ = db.execute("ALTER TABLE playlists ADD COLUMN source TEXT NOT NULL DEFAULT 'local'", []);
         Self { visitor_data: Mutex::new(None), db: Mutex::new(db) }
@@ -305,6 +318,36 @@ struct LibraryPlaylistItem {
     item: YtItem,
     song_count: i64,
     saved_at: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct StatsRow {
+    item: YtItem,
+    plays: i64,
+    minutes: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct StatsGroup {
+    id: String,
+    title: String,
+    subtitle: String,
+    thumbnail: Option<String>,
+    plays: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct StatsPayload {
+    period: String,
+    total_plays: i64,
+    total_minutes: i64,
+    unique_songs: i64,
+    rows: Vec<StatsRow>,
+    artists: Vec<StatsGroup>,
+    albums: Vec<StatsGroup>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -439,7 +482,7 @@ struct PlayerPayload {
     expires_in_seconds: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SettingEntry {
     key: String,
@@ -1029,10 +1072,11 @@ struct DownloadInfo {
     state: String,
     error: Option<String>,
     lyrics_cached: bool,
+    artwork_path: Option<String>,
 }
 
 fn download_info_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DownloadInfo> {
-    Ok(DownloadInfo { song_id: row.get(0)?, path: row.get(1)?, bytes: row.get(2)?, total_bytes: row.get(3)?, state: row.get(4)?, error: row.get(5)?, lyrics_cached: row.get::<_, i64>(6)? != 0 })
+    Ok(DownloadInfo { song_id: row.get(0)?, path: row.get(1)?, bytes: row.get(2)?, total_bytes: row.get(3)?, state: row.get(4)?, error: row.get(5)?, lyrics_cached: row.get::<_, i64>(6)? != 0, artwork_path: row.get(7)? })
 }
 
 fn download_cache_path(song_id: &str) -> PathBuf {
@@ -1040,12 +1084,56 @@ fn download_cache_path(song_id: &str) -> PathBuf {
     database_path().parent().map(|value| value.join("downloads")).unwrap_or_else(|| PathBuf::from("downloads")).join(format!("{digest:x}.audio"))
 }
 
+fn player_cache_path(song_id: &str) -> PathBuf {
+    let digest = Sha1::digest(song_id.as_bytes());
+    database_path().parent().map(|value| value.join("player-cache")).unwrap_or_else(|| PathBuf::from("player-cache")).join(format!("{digest:x}.audio"))
+}
+
+fn download_artwork_path(song_id: &str, extension: &str) -> PathBuf {
+    let digest = Sha1::digest(song_id.as_bytes());
+    let safe_extension = match extension { "jpg" | "jpeg" => "jpg", "png" => "png", "webp" => "webp", _ => "cover" };
+    database_path().parent().map(|value| value.join("downloads")).unwrap_or_else(|| PathBuf::from("downloads")).join(format!("{digest:x}.{safe_extension}"))
+}
+
+fn artwork_extension(content_type: &str) -> &'static str {
+    let mime = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    match mime.as_str() { "image/jpeg" => "jpg", "image/png" => "png", "image/webp" => "webp", _ => "cover" }
+}
+
+async fn cache_download_artwork(song_id: &str, source_url: Option<&str>) -> Option<String> {
+    let url = source_url?.trim();
+    if !(url.starts_with("https://") || url.starts_with("http://")) { return None; }
+    let response = http().get(url).send().await.ok()?.error_for_status().ok()?;
+    let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("").to_owned();
+    if !content_type.to_ascii_lowercase().starts_with("image/") { return None; }
+    let bytes = response.bytes().await.ok()?;
+    if bytes.is_empty() || bytes.len() > 10 * 1024 * 1024 { return None; }
+    let path = download_artwork_path(song_id, artwork_extension(&content_type));
+    if let Some(parent) = path.parent() { tokio::fs::create_dir_all(parent).await.ok()?; }
+    let partial = PathBuf::from(format!("{}.part", path.to_string_lossy()));
+    tokio::fs::write(&partial, &bytes).await.ok()?;
+    if tokio::fs::rename(&partial, &path).await.is_err() { let _ = tokio::fs::remove_file(&partial).await; return None; }
+    Some(path.to_string_lossy().to_string())
+}
+
+fn player_cache_active() -> &'static Mutex<HashSet<String>> {
+    PLAYER_CACHE_ACTIVE.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn player_cache_blocked() -> &'static Mutex<HashSet<String>> {
+    PLAYER_CACHE_BLOCKED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn player_cache_is_blocked(song_id: &str) -> bool {
+    player_cache_blocked().lock().map(|blocked| blocked.contains(song_id)).unwrap_or(true)
+}
+
 fn download_cancel_map() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     DOWNLOAD_CANCELS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn read_download_info(db: &Connection, song_id: &str) -> Result<Option<DownloadInfo>, String> {
-    db.query_row("SELECT song_id, path, bytes, total_bytes, state, error, lyrics_cached FROM downloads WHERE song_id = ?1", params![song_id], download_info_from_row).optional().map_err(|error| format!("download state read failed: {error}"))
+    db.query_row("SELECT song_id, path, bytes, total_bytes, state, error, lyrics_cached, artwork_path FROM downloads WHERE song_id = ?1", params![song_id], download_info_from_row).optional().map_err(|error| format!("download state read failed: {error}"))
 }
 
 fn emit_download(app: &tauri::AppHandle, info: &DownloadInfo) {
@@ -1067,12 +1155,42 @@ fn download_cancel(song_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn library_player_cache(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
+    let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+    let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.browse_id, s.playlist_id, s.video_id, s.set_video_id, s.explicit, s.music_video_type, pc.path FROM player_cache pc INNER JOIN songs s ON s.id = pc.song_id WHERE pc.bytes > 0 AND NOT EXISTS (SELECT 1 FROM downloads d WHERE d.song_id = pc.song_id AND d.state = 'completed') ORDER BY pc.cached_at DESC").map_err(|error| format!("player cache query failed: {error}"))?;
+    let rows = statement.query_map([], |row| Ok((YtItem { id: row.get(0)?, kind: row.get(1)?, title: row.get(2)?, subtitle: row.get(3)?, thumbnail: row.get(4)?, artists: Vec::new(), browse_id: row.get(5)?, playlist_id: row.get(6)?, video_id: row.get(7)?, set_video_id: row.get(8)?, play_playlist_id: None, play_video_id: None, params: None, explicit: row.get::<_, i64>(9)? != 0, music_video_type: row.get(10)?, history_remove_token: None, album_id: None, album_title: None }, row.get::<_, String>(11)?))).map_err(|error| format!("player cache rows failed: {error}"))?;
+    let mut items = Vec::new();
+    for row in rows {
+        let (item, path) = row.map_err(|error| format!("player cache row decode failed: {error}"))?;
+        if Path::new(&path).is_file() { items.push(item); } else { let _ = db.execute("DELETE FROM player_cache WHERE song_id = ?1", params![item.id]); }
+    }
+    Ok(items)
+}
+
+#[tauri::command]
+fn player_cache_remove(song_id: String, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+    let id = song_id.trim();
+    if id.is_empty() { return Err("player cache song id is empty".to_owned()); }
+    player_cache_blocked().lock().map_err(|_| "player cache state poisoned".to_owned())?.insert(id.to_owned());
+    let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+    if let Some(path) = db.query_row("SELECT path FROM player_cache WHERE song_id = ?1", params![id], |row| row.get::<_, String>(0)).optional().map_err(|error| format!("player cache path read failed: {error}"))? { let _ = fs::remove_file(path); let _ = fs::remove_file(format!("{}.part", player_cache_path(id).to_string_lossy())); }
+    db.execute("DELETE FROM player_cache WHERE song_id = ?1", params![id]).map_err(|error| format!("player cache removal failed: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
 fn download_remove(song_id: String, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
     let id = song_id.trim();
     if id.is_empty() { return Err("download song id is empty".to_owned()); }
     if download_cancel_map().lock().map_err(|_| "download cancellation state poisoned".to_owned())?.contains_key(id) { return Err("cancel the active download before removing its cache".to_owned()); }
     let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-    if let Some(info) = read_download_info(&db, id)? { let path = info.path; let _ = fs::remove_file(&path); let _ = fs::remove_file(format!("{}.part", path)); }
+    if let Some(info) = read_download_info(&db, id)? {
+        let path = info.path;
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(format!("{}.part", path));
+        if let Some(artwork_path) = info.artwork_path { let _ = fs::remove_file(&artwork_path); let _ = fs::remove_file(format!("{}.part", artwork_path)); }
+        for extension in ["jpg", "png", "webp", "cover"] { let artwork = download_artwork_path(id, extension); let _ = fs::remove_file(&artwork); let _ = fs::remove_file(format!("{}.part", artwork.to_string_lossy())); }
+    }
     db.execute("DELETE FROM downloads WHERE song_id = ?1", params![id]).map_err(|error| format!("download cache removal failed: {error}"))?;
     Ok(())
 }
@@ -1093,13 +1211,14 @@ async fn download_start(item: YtItem, app: tauri::AppHandle, state: tauri::State
     if let Some(parent) = final_path.parent() { fs::create_dir_all(parent).map_err(|error| format!("download cache directory failed: {error}"))?; }
     {
         let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+        if let Some(old_artwork) = db.query_row("SELECT artwork_path FROM downloads WHERE song_id = ?1", params![song_id], |row| row.get::<_, Option<String>>(0)).optional().map_err(|error| format!("download artwork state read failed: {error}"))?.flatten() { let _ = fs::remove_file(old_artwork); }
         db.execute("INSERT INTO songs (id, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, kind, saved_at, explicit, music_video_type, liked, liked_date, in_library, is_video, uploaded, youtube_liked, album_id, duration) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, NULL, 0, 0, 0, 0, ?13, ?14) ON CONFLICT(id) DO UPDATE SET title=excluded.title, subtitle=excluded.subtitle, thumbnail=excluded.thumbnail, video_id=excluded.video_id, set_video_id=excluded.set_video_id, kind=excluded.kind, album_id=excluded.album_id, duration=excluded.duration", params![song_id, item.title, item.subtitle, item.thumbnail, item.browse_id, item.playlist_id, item.video_id, item.set_video_id, item.kind, now_seconds(), if item.explicit { 1 } else { 0 }, item.music_video_type, item.album_id, 0]).map_err(|error| format!("download metadata save failed: {error}"))?;
-        db.execute("INSERT INTO downloads (song_id, path, bytes, total_bytes, state, error, lyrics_cached, downloaded_at)
- VALUES (?1, ?2, 0, NULL, 'downloading', NULL, 0, ?3) ON CONFLICT(song_id) DO UPDATE SET path=excluded.path, bytes=0, total_bytes=NULL, state='downloading', error=NULL, lyrics_cached=0, downloaded_at=excluded.downloaded_at", params![song_id, final_path.to_string_lossy().to_string(), now_seconds()]).map_err(|error| format!("download state init failed: {error}"))?;
+        db.execute("INSERT INTO downloads (song_id, path, bytes, total_bytes, state, error, lyrics_cached, artwork_path, downloaded_at)
+ VALUES (?1, ?2, 0, NULL, 'downloading', NULL, 0, NULL, ?3) ON CONFLICT(song_id) DO UPDATE SET path=excluded.path, bytes=0, total_bytes=NULL, state='downloading', error=NULL, lyrics_cached=0, artwork_path=NULL, downloaded_at=excluded.downloaded_at", params![song_id, final_path.to_string_lossy().to_string(), now_seconds()]).map_err(|error| format!("download state init failed: {error}"))?;
         if let Some(info) = read_download_info(&db, &song_id)? { emit_download(&app, &info); }
     }
     let state_for_lyrics = state.clone();
-    let result: Result<(i64, Option<i64>, bool), String> = async {
+    let result: Result<(i64, Option<i64>, bool, Option<String>), String> = async {
         let payload = resolve_player_payload(video_id, &state).await?;
         let response = http().get(&payload.stream_url).send().await.map_err(|error| format!("audio cache request failed: {error}"))?.error_for_status().map_err(|error| format!("audio cache response failed: {error}"))?;
         let total_bytes = response.content_length().map(|value| value as i64);
@@ -1124,19 +1243,22 @@ async fn download_start(item: YtItem, app: tauri::AppHandle, state: tauri::State
         file.flush().await.map_err(|error| format!("download cache flush failed: {error}"))?;
         drop(file);
         fs::rename(&partial_path, &final_path).map_err(|error| format!("download cache finalize failed: {error}"))?;
+        let artwork_path = cache_download_artwork(&song_id, item.thumbnail.as_deref()).await;
         let artist = item.artists.iter().map(|value| value.name.as_str()).collect::<Vec<_>>().join(", ");
+        let artist = if artist.trim().is_empty() { item.subtitle.clone() } else { artist };
         let lyrics_cached = fetch_lyrics_inner(item.title.clone(), artist, 0, item.album_title.clone(), Some(video_id.to_owned()), state_for_lyrics).await.is_ok();
         let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-        db.execute("UPDATE downloads SET bytes = ?1, total_bytes = ?2, state = 'completed', error = NULL, lyrics_cached = ?3 WHERE song_id = ?4", params![bytes, total_bytes.or(Some(bytes)), if lyrics_cached { 1 } else { 0 }, song_id]).map_err(|error| format!("download completion state failed: {error}"))?;
+        db.execute("UPDATE downloads SET bytes = ?1, total_bytes = ?2, state = 'completed', error = NULL, lyrics_cached = ?3, artwork_path = ?4 WHERE song_id = ?5", params![bytes, total_bytes.or(Some(bytes)), if lyrics_cached { 1 } else { 0 }, artwork_path, song_id]).map_err(|error| format!("download completion state failed: {error}"))?;
         if let Some(info) = read_download_info(&db, &song_id)? { emit_download(&app, &info); }
-        Ok((bytes, total_bytes, lyrics_cached))
+        Ok((bytes, total_bytes, lyrics_cached, artwork_path))
     }.await;
     download_cancel_map().lock().map_err(|_| "download cancellation state poisoned".to_owned())?.remove(&song_id);
     if let Err(error) = &result {
         let _ = fs::remove_file(&partial_path);
         let state_name = if error == "download cancelled" { "cancelled" } else { "failed" };
         let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-        db.execute("UPDATE downloads SET state = ?1, error = ?2 WHERE song_id = ?3", params![state_name, error, song_id]).map_err(|db_error| format!("download failure state failed: {db_error}"))?;
+        if let Some(info) = read_download_info(&db, &song_id)? { if let Some(artwork_path) = info.artwork_path { let _ = fs::remove_file(&artwork_path); let _ = fs::remove_file(format!("{}.part", artwork_path)); } }
+        db.execute("UPDATE downloads SET state = ?1, error = ?2, artwork_path = NULL WHERE song_id = ?3", params![state_name, error, song_id]).map_err(|db_error| format!("download failure state failed: {db_error}"))?;
         if let Some(info) = read_download_info(&db, &song_id)? { emit_download(&app, &info); }
     }
     result.map(|_| ())
@@ -1144,7 +1266,51 @@ async fn download_start(item: YtItem, app: tauri::AppHandle, state: tauri::State
 
 #[tauri::command]
 async fn ytm_player(video_id: String, state: tauri::State<'_, RuntimeState>) -> Result<PlayerPayload, String> {
-    resolve_player_payload(&video_id, &state).await
+    let id = video_id.trim().to_owned();
+    if id.is_empty() { return Err("video id is empty".to_owned()); }
+    player_cache_blocked().lock().map_err(|_| "player cache state poisoned".to_owned())?.remove(&id);
+    let cached = {
+        let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+        db.query_row("SELECT path, bytes FROM player_cache WHERE song_id = ?1", params![id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))).optional().map_err(|error| format!("player cache state read failed: {error}"))?
+    };
+    if let Some((path, _bytes)) = cached.filter(|(path, bytes)| *bytes > 0 && Path::new(path).is_file()) {
+        return Ok(PlayerPayload { video_id: id, title: None, artist: None, stream_url: path, mime_type: "audio/mpeg".to_owned(), bitrate: 0, expires_in_seconds: 0 });
+    }
+    let payload = resolve_player_payload(&id, &state).await?;
+    let cache_url = payload.stream_url.clone();
+    let cache_id = id.clone();
+    let cache_path = player_cache_path(&cache_id);
+    let should_start = {
+        let mut active = player_cache_active().lock().map_err(|_| "player cache state poisoned".to_owned())?;
+        active.insert(cache_id.clone())
+    };
+    if should_start {
+        tokio::spawn(async move {
+            let result: Result<(), String> = async {
+                if let Some(parent) = cache_path.parent() { tokio::fs::create_dir_all(parent).await.map_err(|error| format!("player cache directory failed: {error}"))?; }
+                let response = http().get(&cache_url).send().await.map_err(|error| format!("player cache request failed: {error}"))?.error_for_status().map_err(|error| format!("player cache response failed: {error}"))?;
+                let mut file = tokio::fs::File::create(format!("{}.part", cache_path.to_string_lossy())).await.map_err(|error| format!("player cache file failed: {error}"))?;
+                let mut stream = response.bytes_stream();
+                let mut bytes = 0_i64;
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk.map_err(|error| format!("player cache stream failed: {error}"))?;
+                    file.write_all(&chunk).await.map_err(|error| format!("player cache write failed: {error}"))?;
+                    bytes += chunk.len() as i64;
+                }
+                file.flush().await.map_err(|error| format!("player cache flush failed: {error}"))?;
+                drop(file);
+                if player_cache_is_blocked(&cache_id) { return Err("player cache was removed".to_owned()); }
+                fs::rename(format!("{}.part", cache_path.to_string_lossy()), &cache_path).map_err(|error| format!("player cache finalize failed: {error}"))?;
+                if player_cache_is_blocked(&cache_id) { let _ = fs::remove_file(&cache_path); return Err("player cache was removed".to_owned()); }
+                let db = Connection::open(database_path()).map_err(|error| format!("player cache database open failed: {error}"))?;
+                db.execute("INSERT INTO player_cache (song_id, path, bytes, cached_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(song_id) DO UPDATE SET path=excluded.path, bytes=excluded.bytes, cached_at=excluded.cached_at", params![cache_id, cache_path.to_string_lossy().to_string(), bytes, now_seconds()]).map_err(|error| format!("player cache state write failed: {error}"))?;
+                Ok(())
+            }.await;
+            if result.is_err() { let _ = fs::remove_file(format!("{}.part", cache_path.to_string_lossy())); }
+            if let Ok(mut active) = player_cache_active().lock() { active.remove(&cache_id); }
+        });
+    }
+    Ok(payload)
 }
 
 fn parse_queue_panel_item(renderer: &Value) -> Option<YtItem> {
@@ -1700,6 +1866,14 @@ async fn ytm_podcast_episodes(state: tauri::State<'_, RuntimeState>) -> Result<V
 async fn ytm_podcast_channels(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
     let session = auth_session(&state)?.ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
     Ok(fetch_all_library_items(&session, "FEmusic_library_non_music_audio_channels_list", 0).await?.into_iter().filter(|item| item.kind == "podcast" || item.kind == "artist").collect())
+}
+
+#[tauri::command]
+fn library_saved_podcasts(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
+    let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+    let mut statement = db.prepare("SELECT id, title, COALESCE(author, ''), thumbnail FROM podcasts WHERE bookmarked_at IS NOT NULL ORDER BY bookmarked_at DESC, saved_at DESC").map_err(|error| format!("saved podcast query failed: {error}"))?;
+    let rows = statement.query_map([], |row| Ok(YtItem { id: row.get(0)?, kind: "podcast".to_owned(), title: row.get(1)?, subtitle: row.get(2)?, thumbnail: row.get(3)?, artists: Vec::new(), browse_id: row.get(0)?, playlist_id: row.get(0)?, video_id: None, set_video_id: None, play_playlist_id: row.get(0)?, play_video_id: None, params: None, explicit: false, music_video_type: None, history_remove_token: None, album_id: None, album_title: None })).map_err(|error| format!("saved podcast rows failed: {error}"))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("saved podcast row decode failed: {error}"))
 }
 
 async fn fetch_all_library_songs(session: &AuthSession, browse_id: &str, tab_index: Option<i32>) -> Result<Vec<YtItem>, String> {
@@ -2785,6 +2959,51 @@ struct SpotifyPlaylistItem {
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+struct SpotifyFolderItem {
+    uri: String,
+    name: String,
+    total_children: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SpotifyLibraryNode {
+    folders: Vec<SpotifyFolderItem>,
+    playlists: Vec<SpotifyPlaylistItem>,
+    total_count: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SpotifyTrackItem {
+    id: String,
+    uri: String,
+    uid: Option<String>,
+    name: String,
+    artist: String,
+    album: String,
+    image: Option<String>,
+    duration_ms: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SpotifyLikedTracks {
+    tracks: Vec<SpotifyTrackItem>,
+    total_count: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SpotifyTrackPage {
+    tracks: Vec<SpotifyTrackItem>,
+    total_count: i64,
+    offset: i64,
+    limit: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct SpotifyTrackMatch {
     id: String,
     uri: String,
@@ -2793,17 +3012,40 @@ struct SpotifyTrackMatch {
     duration_ms: i64,
 }
 
+fn spotify_playlist_from_wrapper(wrapper: &Value) -> Option<SpotifyPlaylistItem> {
+    if !wrapper.get("__typename").and_then(Value::as_str).is_some_and(|value| value.contains("Playlist")) { return None; }
+    let data = wrapper.get("data")?;
+    let uri = wrapper.get("_uri").and_then(Value::as_str).or_else(|| data.get("uri").and_then(Value::as_str))?;
+    let id = uri.rsplit(':').next()?.to_owned();
+    let image = data.pointer("/images/items/0/sources/0/url").and_then(Value::as_str).or_else(|| data.pointer("/images/sources/0/url").and_then(Value::as_str)).map(str::to_owned);
+    let owner = data.pointer("/ownerV2/data/name").and_then(Value::as_str).map(str::to_owned);
+    Some(SpotifyPlaylistItem { id, name: data.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(), description: data.get("description").and_then(Value::as_str).map(str::to_owned), image, owner })
+}
+
 fn spotify_playlist_items(response: &Value) -> Vec<SpotifyPlaylistItem> {
-    response.pointer("/data/me/libraryV3/items").and_then(Value::as_array).into_iter().flatten().filter_map(|entry| {
-        let wrapper = entry.get("item")?;
-        if !wrapper.get("__typename").and_then(Value::as_str).is_some_and(|value| value.contains("Playlist")) { return None; }
-        let data = wrapper.get("data")?;
-        let uri = wrapper.get("_uri").and_then(Value::as_str).or_else(|| data.get("uri").and_then(Value::as_str))?;
-        let id = uri.rsplit(':').next()?.to_owned();
-        let image = data.pointer("/images/items/0/sources/0/url").and_then(Value::as_str).or_else(|| data.pointer("/images/sources/0/url").and_then(Value::as_str)).map(str::to_owned);
-        let owner = data.pointer("/ownerV2/data/name").and_then(Value::as_str).map(str::to_owned);
-        Some(SpotifyPlaylistItem { id, name: data.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(), description: data.get("description").and_then(Value::as_str).map(str::to_owned), image, owner })
-    }).collect()
+    response.pointer("/data/me/libraryV3/items").and_then(Value::as_array).into_iter().flatten().filter_map(|entry| spotify_playlist_from_wrapper(entry.get("item")?)).collect()
+}
+
+fn parse_spotify_library_node(response: &Value) -> SpotifyLibraryNode {
+    let library = response.pointer("/data/me/libraryV3");
+    let total_count = library.and_then(|value| value.get("totalCount")).and_then(Value::as_i64).unwrap_or(0);
+    let mut folders = Vec::new();
+    let mut playlists = Vec::new();
+    for entry in library.and_then(|value| value.get("items")).and_then(Value::as_array).into_iter().flatten() {
+        let Some(wrapper) = entry.get("item") else { continue; };
+        let type_name = wrapper.get("__typename").and_then(Value::as_str).unwrap_or_default();
+        if type_name.contains("Folder") {
+            let Some(uri) = wrapper.get("_uri").and_then(Value::as_str) else { continue; };
+            let data = wrapper.get("data");
+            let name = data.and_then(|value| value.get("name")).and_then(Value::as_str).or_else(|| wrapper.get("name").and_then(Value::as_str));
+            let Some(name) = name else { continue; };
+            let total_children = data.and_then(|value| value.get("totalLength")).and_then(Value::as_i64).or_else(|| data.and_then(|value| value.get("numberOfItems")).and_then(Value::as_i64)).or_else(|| wrapper.get("totalLength").and_then(Value::as_i64)).unwrap_or(0);
+            folders.push(SpotifyFolderItem { uri: uri.to_owned(), name: name.to_owned(), total_children });
+        } else if let Some(playlist) = spotify_playlist_from_wrapper(wrapper) {
+            playlists.push(playlist);
+        }
+    }
+    SpotifyLibraryNode { folders, playlists, total_count }
 }
 
 fn spotify_track_matches(response: &Value) -> Vec<SpotifyTrackMatch> {
@@ -2818,6 +3060,98 @@ fn spotify_track_matches(response: &Value) -> Vec<SpotifyTrackMatch> {
         let duration_ms = data.pointer("/duration/totalMilliseconds").and_then(Value::as_i64).or_else(|| data.get("durationMs").and_then(Value::as_i64)).unwrap_or(0);
         Some(SpotifyTrackMatch { id, uri, name: data.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(), artist, duration_ms })
     }).collect()
+}
+
+fn parse_spotify_playlist_tracks(response: &Value) -> Vec<SpotifyTrackItem> {
+    response.pointer("/data/playlistV2/content/items").and_then(Value::as_array).into_iter().flatten().filter_map(|entry| {
+        let wrapper = entry.get("itemV2")?;
+        let data = wrapper.get("data")?;
+        let uri = wrapper.get("_uri").and_then(Value::as_str).or_else(|| data.get("uri").and_then(Value::as_str))?.to_owned();
+        let id = uri.rsplit(':').next()?.to_owned();
+        let image = data.pointer("/albumOfTrack/coverArt/sources/0/url").and_then(Value::as_str).or_else(|| data.pointer("/albumOfTrack/coverArt/sources/0/uri").and_then(Value::as_str)).map(str::to_owned);
+        let artist = data.pointer("/artists/items/0/profile/name").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let album = data.pointer("/albumOfTrack/name").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let duration_ms = data.pointer("/duration/totalMilliseconds").and_then(Value::as_i64).or_else(|| data.get("durationMs").and_then(Value::as_i64)).unwrap_or(0);
+        Some(SpotifyTrackItem { id, uri, uid: entry.get("uid").and_then(Value::as_str).map(str::to_owned), name: data.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(), artist, album, image, duration_ms })
+    }).collect()
+}
+
+#[tauri::command]
+async fn spotify_playlist_tracks(playlist_id: String, offset: Option<i64>, state: tauri::State<'_, RuntimeState>) -> Result<SpotifyTrackPage, String> {
+    let playlist_id = playlist_id.trim();
+    if playlist_id.is_empty() { return Err("Spotify playlist id is required".to_owned()); }
+    let token = spotify_token(&state)?;
+    let offset = offset.unwrap_or(0).max(0);
+    let limit = 100_i64;
+    let variables = json!({ "uri": format!("spotify:playlist:{playlist_id}"), "offset": offset, "limit": limit, "enableWatchFeedEntrypoint": false });
+    let response = spotify_graphql_post("fetchPlaylist", variables, &token).await?;
+    let total_count = response.pointer("/data/playlistV2/content/totalCount").and_then(Value::as_i64).unwrap_or(0);
+    Ok(SpotifyTrackPage { tracks: parse_spotify_playlist_tracks(&response), total_count, offset, limit })
+}
+
+fn parse_spotify_liked_tracks(response: &Value) -> SpotifyLikedTracks {
+    let tracks_data = response.pointer("/data/me/library/tracks");
+    let total_count = tracks_data.and_then(|value| value.get("totalCount")).and_then(Value::as_i64).unwrap_or(0);
+    let tracks = tracks_data.and_then(|value| value.get("items")).and_then(Value::as_array).into_iter().flatten().filter_map(|entry| {
+        let wrapper = entry.get("track")?;
+        let data = wrapper.get("data")?;
+        let uri = wrapper.get("_uri").and_then(Value::as_str).or_else(|| wrapper.get("uri").and_then(Value::as_str)).or_else(|| data.get("uri").and_then(Value::as_str))?.to_owned();
+        let id = uri.rsplit(':').next()?.to_owned();
+        let image = data.pointer("/albumOfTrack/coverArt/sources/0/url").and_then(Value::as_str).map(str::to_owned);
+        let artist = data.pointer("/artists/items/0/profile/name").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let album = data.pointer("/albumOfTrack/name").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let duration_ms = data.pointer("/duration/totalMilliseconds").and_then(Value::as_i64).or_else(|| data.get("durationMs").and_then(Value::as_i64)).unwrap_or(0);
+        Some(SpotifyTrackItem { id, uri, uid: None, name: data.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(), artist, album, image, duration_ms })
+    }).collect();
+    SpotifyLikedTracks { tracks, total_count }
+}
+
+#[tauri::command]
+async fn spotify_remove_from_playlist(playlist_id: String, uid: String, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+    let playlist_id = playlist_id.trim();
+    let uid = uid.trim();
+    if playlist_id.is_empty() || uid.is_empty() { return Err("Spotify playlist or track uid is empty".to_owned()); }
+    let token = spotify_token(&state)?;
+    let variables = json!({ "playlistUri": format!("spotify:playlist:{playlist_id}"), "uids": [uid] });
+    spotify_graphql_post("removeFromPlaylist", variables, &token).await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn spotify_move_in_playlist(playlist_id: String, uids: Vec<String>, before_uid: Option<String>, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+    let playlist_id = playlist_id.trim();
+    let uids: Vec<String> = uids.into_iter().map(|value| value.trim().to_owned()).filter(|value| !value.is_empty()).collect();
+    if playlist_id.is_empty() || uids.is_empty() { return Err("Spotify playlist id and item uid are required".to_owned()); }
+    let token = spotify_token(&state)?;
+    let variables = json!({ "playlistUri": format!("spotify:playlist:{playlist_id}"), "uids": uids, "newPosition": { "moveType": if before_uid.is_some() { "BEFORE_UID" } else { "BOTTOM_OF_PLAYLIST" }, "fromUid": before_uid } });
+    spotify_graphql_post("moveItemsInPlaylist", variables, &token).await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn spotify_rename_playlist(playlist_id: String, new_name: String, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+    let playlist_id = playlist_id.trim();
+    let new_name = new_name.trim();
+    if playlist_id.is_empty() || new_name.is_empty() { return Err("Spotify playlist id and name are required".to_owned()); }
+    let token = spotify_token(&state)?;
+    let variables = json!({ "playlistUri": format!("spotify:playlist:{playlist_id}"), "newName": new_name });
+    spotify_graphql_post("editPlaylistAttributes", variables, &token).await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn spotify_liked_tracks(state: tauri::State<'_, RuntimeState>) -> Result<SpotifyLikedTracks, String> {
+    let token = spotify_token(&state)?;
+    let response = spotify_graphql_post("fetchLibraryTracks", json!({ "offset": 0, "limit": 100 }), &token).await?;
+    Ok(parse_spotify_liked_tracks(&response))
+}
+
+#[tauri::command]
+async fn spotify_library_node(folder_uri: Option<String>, state: tauri::State<'_, RuntimeState>) -> Result<SpotifyLibraryNode, String> {
+    let token = spotify_token(&state)?;
+    let variables = json!({ "filters": ["Playlists"], "order": Value::Null, "textFilter": "", "features": ["LIKED_SONGS", "YOUR_EPISODES_V2", "PRERELEASES", "EVENTS"], "limit": 100, "offset": 0, "flatten": false, "expandedFolders": [], "folderUri": folder_uri, "includeFoldersWhenFlattening": true });
+    let response = spotify_graphql_post("libraryV3", variables, &token).await?;
+    Ok(parse_spotify_library_node(&response))
 }
 
 #[tauri::command]
@@ -3150,6 +3484,31 @@ fn history_clear(state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn library_stats(period: String, state: tauri::State<'_, RuntimeState>) -> Result<StatsPayload, String> {
+    let period = period.trim().to_lowercase();
+    let cutoff = match period.as_str() {
+        "day" => now_seconds() - 86_400,
+        "week" => now_seconds() - 604_800,
+        "month" => now_seconds() - 2_592_000,
+        "year" => now_seconds() - 31_536_000,
+        "all" => 0,
+        _ => return Err("unsupported stats period".to_owned()),
+    };
+    let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+    let total_plays: i64 = db.query_row("SELECT COUNT(*) FROM history WHERE played_at >= ?1", params![cutoff], |row| row.get(0)).map_err(|error| format!("stats total plays query failed: {error}"))?;
+    let total_minutes: i64 = db.query_row("SELECT COALESCE(SUM(MAX(s.duration, 0)), 0) / 60 FROM history h INNER JOIN songs s ON s.id = h.song_id WHERE h.played_at >= ?1", params![cutoff], |row| row.get(0)).map_err(|error| format!("stats total time query failed: {error}"))?;
+    let unique_songs: i64 = db.query_row("SELECT COUNT(DISTINCT song_id) FROM history WHERE played_at >= ?1", params![cutoff], |row| row.get(0)).map_err(|error| format!("stats unique songs query failed: {error}"))?;
+    let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.browse_id, s.playlist_id, s.video_id, s.set_video_id, s.explicit, s.music_video_type, COUNT(h.id) AS plays, COALESCE(MAX(s.duration, 0), 0) * COUNT(h.id) / 60 AS minutes FROM history h INNER JOIN songs s ON s.id = h.song_id WHERE h.played_at >= ?1 GROUP BY s.id ORDER BY plays DESC, MAX(h.played_at) DESC LIMIT 100").map_err(|error| format!("stats rows query failed: {error}"))?;
+    let rows = statement.query_map(params![cutoff], |row| Ok(StatsRow { item: YtItem { id: row.get(0)?, kind: row.get(1)?, title: row.get(2)?, subtitle: row.get(3)?, thumbnail: row.get(4)?, artists: Vec::new(), browse_id: row.get(5)?, playlist_id: row.get(6)?, video_id: row.get(7)?, set_video_id: row.get(8)?, play_playlist_id: None, play_video_id: None, params: None, explicit: row.get::<_, i64>(9)? != 0, music_video_type: row.get(10)?, history_remove_token: None, album_id: None, album_title: None }, plays: row.get(11)?, minutes: row.get(12)? })).map_err(|error| format!("stats rows decode failed: {error}"))?;
+    let rows = rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("stats rows collect failed: {error}"))?;
+    let mut artist_statement = db.prepare("SELECT a.id, a.name, a.thumbnail, COUNT(h.id) AS plays FROM history h INNER JOIN songs s ON s.id = h.song_id INNER JOIN song_artists sa ON sa.song_id = s.id INNER JOIN artists a ON a.id = sa.artist_id WHERE h.played_at >= ?1 GROUP BY a.id, a.name, a.thumbnail ORDER BY plays DESC, MAX(h.played_at) DESC LIMIT 100").map_err(|error| format!("stats artists query failed: {error}"))?;
+    let artists = artist_statement.query_map(params![cutoff], |row| Ok(StatsGroup { id: row.get(0)?, title: row.get(1)?, subtitle: "Artist".to_owned(), thumbnail: row.get(2)?, plays: row.get(3)? })).map_err(|error| format!("stats artist rows failed: {error}"))?.collect::<Result<Vec<_>, _>>().map_err(|error| format!("stats artist decode failed: {error}"))?;
+    let mut album_statement = db.prepare("SELECT a.id, a.title, a.thumbnail, COUNT(h.id) AS plays FROM history h INNER JOIN songs s ON s.id = h.song_id INNER JOIN song_albums sa ON sa.song_id = s.id INNER JOIN albums a ON a.id = sa.album_id WHERE h.played_at >= ?1 GROUP BY a.id, a.title, a.thumbnail ORDER BY plays DESC, MAX(h.played_at) DESC LIMIT 100").map_err(|error| format!("stats albums query failed: {error}"))?;
+    let albums = album_statement.query_map(params![cutoff], |row| Ok(StatsGroup { id: row.get(0)?, title: row.get(1)?, subtitle: "Album".to_owned(), thumbnail: row.get(2)?, plays: row.get(3)? })).map_err(|error| format!("stats album rows failed: {error}"))?.collect::<Result<Vec<_>, _>>().map_err(|error| format!("stats album decode failed: {error}"))?;
+    Ok(StatsPayload { period, total_plays, total_minutes, unique_songs, rows, artists, albums })
+}
+
+#[tauri::command]
 fn history_items(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.browse_id, s.playlist_id, s.video_id, s.set_video_id, s.explicit, s.music_video_type FROM history h INNER JOIN songs s ON s.id = h.song_id ORDER BY h.played_at DESC, h.id DESC LIMIT 200").map_err(|e| format!("history query failed: {e}"))?;
@@ -3158,13 +3517,116 @@ fn history_items(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, S
 }
 
 fn allowed_setting(key: &str) -> bool {
-    matches!(key, "ytmSync" | "useLoginForBrowse" | "hideExplicit" | "hideVideoSongs" | "enableBetterLyrics" | "enablePaxsenix" | "enableLrclib" | "enableKugou" | "enableLyricsPlus" | "enableMusixmatch" | "shuffleMode" | "repeatMode" | "similarContent" | "autoLoadMore" | "disableLoadMoreWhenRepeatAll" | "autoDownloadOnLike" | "autoSkipNextOnError" | "persistentShuffleAcrossQueues" | "rememberShuffleAndRepeat" | "shufflePlaylistFirst" | "preventDuplicateTracksInQueue" | "pauseListenHistory" | "pauseSearchHistory" | "sleepTimerDefault" | "lyricsProviderOrder" | "show_liked_playlist" | "show_downloaded_playlist" | "show_uploaded_playlist" | "show_top_playlist")
+    matches!(key, "ytmSync" | "useLoginForBrowse" | "hideExplicit" | "hideVideoSongs" | "enableBetterLyrics" | "enablePaxsenix" | "enableLrclib" | "enableKugou" | "enableLyricsPlus" | "enableMusixmatch" | "shuffleMode" | "repeatMode" | "similarContent" | "autoLoadMore" | "disableLoadMoreWhenRepeatAll" | "autoDownloadOnLike" | "autoSkipNextOnError" | "persistentShuffleAcrossQueues" | "rememberShuffleAndRepeat" | "shufflePlaylistFirst" | "preventDuplicateTracksInQueue" | "pauseListenHistory" | "pauseSearchHistory" | "sleepTimerDefault" | "lyricsProviderOrder" | "show_liked_playlist" | "show_downloaded_playlist" | "show_uploaded_playlist" | "show_top_playlist" | "show_cached_playlist")
+}
+
+#[tauri::command]
+fn backup_create(state: tauri::State<'_, RuntimeState>) -> Result<String, String> {
+    let output_path = FileDialog::new().set_title("Create Meld Desktop backup").add_filter("Meld Desktop backup", &["backup"]).save_file().ok_or_else(|| "Backup cancelled".to_owned())?;
+    let temp_db = output_path.with_extension("sqlite3.part");
+    let _ = fs::remove_file(&temp_db);
+    let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+    db.execute("VACUUM INTO ?1", params![temp_db.to_string_lossy().to_string()]).map_err(|error| format!("database backup failed: {error}"))?;
+    let settings: Vec<SettingEntry> = {
+        let mut statement = db.prepare("SELECT key, value FROM settings WHERE key NOT IN ('cookie', 'dataSyncId', 'visitorData', 'accountName', 'accountEmail', 'accountChannelHandle', 'spotifySpDc', 'spotifySpKey', 'spotifyAccessToken', 'spotifyTokenExpiry', 'spotifyUsername', 'spotifyUserId') ORDER BY key").map_err(|error| format!("backup settings query failed: {error}"))?;
+        let rows = statement.query_map([], |row| Ok(SettingEntry { key: row.get(0)?, value: row.get(1)? })).map_err(|error| format!("backup settings rows failed: {error}"))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("backup settings decode failed: {error}"))?
+    };
+    drop(db);
+    let result = (|| -> Result<(), String> {
+        let file = fs::File::create(&output_path).map_err(|error| format!("backup archive create failed: {error}"))?;
+        let mut archive = ZipWriter::new(file);
+        let options = SimpleFileOptions::default();
+        archive.start_file("settings.json", options).map_err(|error| format!("backup settings entry failed: {error}"))?;
+        archive.write_all(&serde_json::to_vec_pretty(&settings).map_err(|error| format!("backup settings encode failed: {error}"))?).map_err(|error| format!("backup settings write failed: {error}"))?;
+        archive.start_file("song.db", options).map_err(|error| format!("backup database entry failed: {error}"))?;
+        let mut database_file = fs::File::open(&temp_db).map_err(|error| format!("backup database open failed: {error}"))?;
+        let mut database_bytes = Vec::new();
+        database_file.read_to_end(&mut database_bytes).map_err(|error| format!("backup database read failed: {error}"))?;
+        archive.write_all(&database_bytes).map_err(|error| format!("backup database write failed: {error}"))?;
+        archive.finish().map_err(|error| format!("backup archive finalize failed: {error}"))?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&temp_db);
+    result.map(|_| output_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, String> {
+    let input_path = FileDialog::new().set_title("Restore Meld Desktop backup").add_filter("Meld Desktop backup", &["backup"]).pick_file().ok_or_else(|| "Restore cancelled".to_owned())?;
+    let file = fs::File::open(&input_path).map_err(|error| format!("backup open failed: {error}"))?;
+    let mut archive = ZipArchive::new(file).map_err(|error| format!("invalid Meld Desktop backup: {error}"))?;
+    let mut database_bytes = Vec::new();
+    let mut settings_bytes = Vec::new();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| format!("backup entry read failed: {error}"))?;
+        match entry.name() {
+            "song.db" => { entry.read_to_end(&mut database_bytes).map_err(|error| format!("backup database read failed: {error}"))?; }
+            "settings.json" => { entry.read_to_end(&mut settings_bytes).map_err(|error| format!("backup settings read failed: {error}"))?; }
+            _ => {}
+        }
+    }
+    if database_bytes.is_empty() || settings_bytes.is_empty() { return Err("backup is missing song.db or settings.json".to_owned()); }
+    let imported_settings: Vec<SettingEntry> = serde_json::from_slice(&settings_bytes).map_err(|error| format!("backup settings are invalid: {error}"))?;
+    let temp_db = database_path().with_extension("restore.part");
+    let _ = fs::remove_file(&temp_db);
+    fs::write(&temp_db, &database_bytes).map_err(|error| format!("backup database temp write failed: {error}"))?;
+    let candidate = match Connection::open(&temp_db) {
+        Ok(connection) => connection,
+        Err(error) => { let _ = fs::remove_file(&temp_db); return Err(format!("backup database validation failed: {error}")); }
+    };
+    let integrity: String = match candidate.query_row("PRAGMA integrity_check", [], |row| row.get(0)) {
+        Ok(value) => value,
+        Err(error) => { drop(candidate); let _ = fs::remove_file(&temp_db); return Err(format!("backup database integrity check failed: {error}")); }
+    };
+    if integrity != "ok" { drop(candidate); let _ = fs::remove_file(&temp_db); return Err(format!("backup database integrity check failed: {integrity}")); }
+    let required_tables: i64 = match candidate.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('songs', 'settings', 'history', 'downloads')", [], |row| row.get(0)) {
+        Ok(value) => value,
+        Err(error) => { drop(candidate); let _ = fs::remove_file(&temp_db); return Err(format!("backup database schema validation failed: {error}")); }
+    };
+    if required_tables != 4 { let _ = fs::remove_file(&temp_db); return Err("backup database is missing required Meld tables".to_owned()); }
+    candidate.execute("DELETE FROM settings", []).map_err(|error| format!("restored settings clear failed: {error}"))?;
+    for setting in imported_settings {
+        if allowed_setting(&setting.key) {
+            candidate.execute("INSERT INTO settings (key, value) VALUES (?1, ?2)", params![setting.key, setting.value]).map_err(|error| format!("restored setting write failed: {error}"))?;
+        }
+    }
+    candidate.execute("DELETE FROM settings WHERE key IN ('cookie', 'dataSyncId', 'visitorData', 'accountName', 'accountEmail', 'accountChannelHandle', 'spotifySpDc', 'spotifySpKey', 'spotifyAccessToken', 'spotifyTokenExpiry', 'spotifyUsername', 'spotifyUserId')", []).map_err(|error| format!("restored auth clear failed: {error}"))?;
+    drop(candidate);
+
+    let db_path = database_path();
+    let previous_path = db_path.with_extension("restore.previous");
+    let mut db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+    let replacement = Connection::open_in_memory().map_err(|error| format!("restore temporary connection failed: {error}"))?;
+    let old = std::mem::replace(&mut *db, replacement);
+    drop(old);
+    let _ = fs::remove_file(&previous_path);
+    let swap_result = fs::rename(&db_path, &previous_path).and_then(|_| fs::rename(&temp_db, &db_path));
+    if let Err(error) = swap_result {
+        let _ = fs::rename(&temp_db, &db_path);
+        let _ = fs::rename(&previous_path, &db_path);
+        if let Ok(old_connection) = Connection::open(&db_path) { *db = old_connection; }
+        return Err(format!("database restore swap failed: {error}"));
+    }
+    match Connection::open(&db_path) {
+        Ok(restored) => {
+            *db = restored;
+            let _ = fs::remove_file(&previous_path);
+            Ok(input_path.to_string_lossy().to_string())
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&db_path);
+            let _ = fs::rename(&previous_path, &db_path);
+            if let Ok(old_connection) = Connection::open(&db_path) { *db = old_connection; }
+            Err(format!("restored database reopen failed: {error}"))
+        }
+    }
 }
 
 #[tauri::command]
 fn settings_get(state: tauri::State<'_, RuntimeState>) -> Result<Vec<SettingEntry>, String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    let mut statement = db.prepare("SELECT key, value FROM settings WHERE key IN ('ytmSync', 'useLoginForBrowse', 'hideExplicit', 'hideVideoSongs', 'enableBetterLyrics', 'enablePaxsenix', 'enableLrclib', 'enableKugou', 'enableLyricsPlus', 'enableMusixmatch', 'shuffleMode', 'repeatMode', 'similarContent', 'autoLoadMore', 'disableLoadMoreWhenRepeatAll', 'autoDownloadOnLike', 'autoSkipNextOnError', 'persistentShuffleAcrossQueues', 'rememberShuffleAndRepeat', 'shufflePlaylistFirst', 'preventDuplicateTracksInQueue', 'pauseListenHistory', 'pauseSearchHistory', 'sleepTimerDefault', 'lyricsProviderOrder', 'show_liked_playlist', 'show_downloaded_playlist', 'show_uploaded_playlist', 'show_top_playlist') ORDER BY key").map_err(|e| format!("settings read failed: {e}"))?;
+    let mut statement = db.prepare("SELECT key, value FROM settings WHERE key IN ('ytmSync', 'useLoginForBrowse', 'hideExplicit', 'hideVideoSongs', 'enableBetterLyrics', 'enablePaxsenix', 'enableLrclib', 'enableKugou', 'enableLyricsPlus', 'enableMusixmatch', 'shuffleMode', 'repeatMode', 'similarContent', 'autoLoadMore', 'disableLoadMoreWhenRepeatAll', 'autoDownloadOnLike', 'autoSkipNextOnError', 'persistentShuffleAcrossQueues', 'rememberShuffleAndRepeat', 'shufflePlaylistFirst', 'preventDuplicateTracksInQueue', 'pauseListenHistory', 'pauseSearchHistory', 'sleepTimerDefault', 'lyricsProviderOrder', 'show_liked_playlist', 'show_downloaded_playlist', 'show_uploaded_playlist', 'show_top_playlist', 'show_cached_playlist') ORDER BY key").map_err(|e| format!("settings read failed: {e}"))?;
     let rows = statement.query_map([], |row| Ok(SettingEntry { key: row.get(0)?, value: row.get(1)? })).map_err(|e| format!("settings query failed: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("settings row failed: {e}"))
 }
@@ -3217,12 +3679,28 @@ fn local_files_pick(state: tauri::State<'_, RuntimeState>) -> Result<Vec<LocalIt
 }
 
 #[tauri::command]
-fn library_downloads(state: tauri::State<'_, RuntimeState>) -> Result<Vec<LocalItem>, String> {
+fn library_downloaded_podcasts(state: tauri::State<'_, RuntimeState>) -> Result<Vec<LocalItem>, String> {
     let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-    let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.video_id, s.set_video_id, s.playlist_id, s.explicit, s.music_video_type, s.album_id, d.path, d.bytes, d.total_bytes, d.lyrics_cached FROM downloads d INNER JOIN songs s ON s.id = d.song_id WHERE d.state = 'completed' ORDER BY d.downloaded_at DESC").map_err(|error| format!("downloaded catalog query failed: {error}"))?;
+    let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.video_id, s.set_video_id, s.playlist_id, s.explicit, s.music_video_type, s.album_id, d.path FROM downloads d INNER JOIN songs s ON s.id = d.song_id WHERE d.state = 'completed' AND s.kind = 'episode' ORDER BY d.downloaded_at DESC").map_err(|error| format!("downloaded podcast query failed: {error}"))?;
     let rows = statement.query_map([], |row| {
         let path: String = row.get(11)?;
         Ok(LocalItem { id: row.get(0)?, kind: row.get(1)?, title: row.get(2)?, subtitle: row.get(3)?, thumbnail: row.get(4)?, artists: Vec::new(), browse_id: None, playlist_id: row.get(7)?, video_id: row.get(5)?, set_video_id: row.get(6)?, play_playlist_id: row.get(7)?, play_video_id: row.get(5)?, params: None, explicit: row.get::<_, i64>(8)? != 0, music_video_type: row.get(9)?, history_remove_token: None, album_id: row.get(10)?, album_title: None, local_path: path, duration: 0 })
+    }).map_err(|error| format!("downloaded podcast rows failed: {error}"))?;
+    let mut items = Vec::new();
+    for row in rows { let item = row.map_err(|error| format!("downloaded podcast row decode failed: {error}"))?; if Path::new(&item.local_path).is_file() { items.push(item); } }
+    Ok(items)
+}
+
+#[tauri::command]
+fn library_downloads(state: tauri::State<'_, RuntimeState>) -> Result<Vec<LocalItem>, String> {
+    let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+    let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, d.artwork_path, s.video_id, s.set_video_id, s.playlist_id, s.explicit, s.music_video_type, s.album_id, d.path, d.bytes, d.total_bytes, d.lyrics_cached FROM downloads d INNER JOIN songs s ON s.id = d.song_id WHERE d.state = 'completed' ORDER BY d.downloaded_at DESC").map_err(|error| format!("downloaded catalog query failed: {error}"))?;
+    let rows = statement.query_map([], |row| {
+        let path: String = row.get(12)?;
+        let remote_thumbnail: Option<String> = row.get(4)?;
+        let artwork_path: Option<String> = row.get(5)?;
+        let thumbnail = artwork_path.filter(|value| Path::new(value).is_file()).or(remote_thumbnail);
+        Ok(LocalItem { id: row.get(0)?, kind: row.get(1)?, title: row.get(2)?, subtitle: row.get(3)?, thumbnail, artists: Vec::new(), browse_id: None, playlist_id: row.get(8)?, video_id: row.get(6)?, set_video_id: row.get(7)?, play_playlist_id: row.get(8)?, play_video_id: row.get(6)?, params: None, explicit: row.get::<_, i64>(9)? != 0, music_video_type: row.get(10)?, history_remove_token: None, album_id: row.get(11)?, album_title: None, local_path: path, duration: 0 })
     }).map_err(|error| format!("downloaded catalog rows failed: {error}"))?;
     let mut items = Vec::new();
     for row in rows { let item = row.map_err(|error| format!("downloaded catalog row decode failed: {error}"))?; if Path::new(&item.local_path).is_file() { items.push(item); } }
@@ -3485,7 +3963,7 @@ fn clear_guest_session(state: tauri::State<'_, RuntimeState>) -> Result<(), Stri
 pub fn run() {
     tauri::Builder::default()
         .manage(RuntimeState::new())
-        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_playlists, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, ytm_podcast_channels, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_items, history_clear, library_top_songs, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
+        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -3493,6 +3971,14 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn artwork_extension_accepts_common_image_mimes() {
+        assert_eq!(artwork_extension("image/jpeg; charset=binary"), "jpg");
+        assert_eq!(artwork_extension("image/png"), "png");
+        assert_eq!(artwork_extension("image/webp"), "webp");
+        assert_eq!(artwork_extension("image/unknown"), "cover");
+    }
 
     #[test]
     fn library_parser_selects_requested_initial_tab() {

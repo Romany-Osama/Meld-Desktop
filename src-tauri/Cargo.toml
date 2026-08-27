@@ -26,6 +26,7 @@ hmac = "0.12"
 rusqlite = { version = "0.32", features = ["bundled"] }
 lofty = "0.22"
 rfd = "0.15"
+zip = "2"
 futures-util = "0.3"
 
 [target.'cfg(windows)'.dependencies]

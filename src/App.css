@@ -36,6 +36,11 @@ h1, h2, p { margin-top: 0; }
 h1 { margin-bottom: 0; font-size: 28px; letter-spacing: -.04em; }
 h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 .topbar > div:first-child { min-width: 0; flex: 0 0 auto; }
+.topbar-title { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.nav-history-controls, .lyrics-navigation { display: flex; align-items: center; gap: 6px; }
+.icon-button { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; border-radius: 50%; font-size: 24px; line-height: 1; }
+.icon-button:disabled { cursor: not-allowed; opacity: .35; }
+.lyrics-navigation .icon-button { width: 30px; height: 30px; font-size: 21px; }
 .search-form { height: 42px; min-width: 360px; max-width: 660px; flex: 1; display: flex; align-items: center; gap: 10px; padding: 0 6px 0 14px; border: 1px solid #303349; border-radius: 22px; background: #151723; color: #8f93ac; }
 .search-form input { min-width: 0; flex: 1; border: 0; outline: 0; background: none; color: #f3f4ff; font-size: 13px; }
 .search-form input::placeholder { color: #707487; }
@@ -410,3 +415,50 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 .playlist-picker-toolbar { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 .playlist-picker-toolbar .library-search { flex: 1 1 220px; }
 .playlist-picker-toolbar .library-sort { flex: 0 0 auto; }
+
+/* Spotify library hierarchy and detail surfaces */
+.podcast-auto-playlists { display: grid; gap: 8px; margin: 12px 0 24px; }
+.auto-podcast-row { display: grid; grid-template-columns: 42px minmax(0,1fr) auto; align-items: center; gap: 12px; width: 100%; padding: 10px 14px; border: 1px solid #2d3249; border-radius: 12px; background: #171a29; color: #eef0ff; text-align: left; }
+.auto-podcast-row:hover { border-color: #7e88d2; background: #242a45; }
+.auto-podcast-row > span:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
+.auto-podcast-row small { color: #85899e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.spotify-library-block { margin-top: 28px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.08); }
+.spotify-library-items { display: grid; gap: 8px; }
+.spotify-library-items .playlist-list-row { width: 100%; }
+.spotify-folder-row, .spotify-playlist-row { display: grid; grid-template-columns: 42px minmax(0,1fr) auto; align-items: center; gap: 12px; text-align: left; }
+.spotify-folder-row > span:nth-child(2), .spotify-playlist-row > span:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
+.spotify-folder-row small, .spotify-playlist-row small { color: #85899e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.small-art-wrap { width: 42px; height: 42px; }
+.spotify-playlist-panel { width: min(760px, calc(100vw - 48px)); }
+.spotify-track-list { display: grid; gap: 6px; max-height: min(62vh, 620px); overflow-y: auto; }
+.spotify-track-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,.04); }
+.spotify-track-copy { min-width: 0; display: grid; gap: 4px; }
+.spotify-track-copy strong, .spotify-track-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spotify-track-copy span { color: #85899e; font-size: .86rem; }
+.spotify-track-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.danger-action { border-color: rgba(227, 133, 145, .55); color: #e5a0aa; }
+.danger-action:hover { border-color: #e5a0aa; background: rgba(166, 63, 78, .22); }
+.storage-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+.stats-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0 20px; }
+.stats-summary-card { display: flex; flex-direction: column; gap: 4px; padding: 16px; border: 1px solid #2a2f4b; border-radius: 12px; background: #151827; }
+.stats-summary-card strong { color: #f2f3ff; font-size: 1.35rem; }
+.stats-summary-card span, .stats-metrics { color: #8f94ae; font-size: .84rem; }
+.stats-breakdown-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0 0 20px; }
+.stats-breakdown { min-width: 0; padding: 14px; border: 1px solid #2a2f4b; border-radius: 12px; background: #151827; }
+.stats-breakdown h3 { margin: 0 0 8px; font-size: .95rem; color: #f2f3ff; }
+.stats-breakdown-row { width: 100%; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 4px; border: 0; border-radius: 7px; background: transparent; color: #e7e9fb; text-align: left; }
+.stats-breakdown-row:hover { background: #292e4a; }
+.stats-breakdown-row span, .stats-breakdown-row small { color: #8f94ae; font-size: .78rem; }
+.stats-breakdown-row strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-row { align-items: center; }
+.stats-rank { width: 28px; color: #8f94ae; font-variant-numeric: tabular-nums; }
+.stats-metrics { white-space: nowrap; margin-left: auto; }
+.spotify-detail-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 10px; }
+.spotify-detail-toolbar input { min-width: 160px; flex: 1 1 200px; padding: 8px 10px; border: 1px solid #454b6f; border-radius: 9px; background: #10121d; color: #eef0ff; }
+.spotify-detail-toolbar select { padding: 8px 10px; border: 1px solid #454b6f; border-radius: 9px; background: #10121d; color: #eef0ff; }
+.spotify-download-button { margin: 0 0 12px; }
+.spotify-rename-row { display: flex; gap: 8px; margin: 12px 0 16px; }
+.spotify-rename-row input { min-width: 0; flex: 1; padding: 9px 11px; border: 1px solid #454b6f; border-radius: 9px; background: #10121d; color: #eef0ff; }
+.spotify-rename-row .row-action:disabled { cursor: not-allowed; opacity: .45; }
+@media (max-width: 700px) { .spotify-track-row { grid-template-columns: minmax(0,1fr); } .stats-summary-grid, .stats-breakdown-grid { grid-template-columns: 1fr; } .stats-row { flex-wrap: wrap; } .stats-metrics { margin-left: 0; width: 100%; padding-left: 28px; } }
