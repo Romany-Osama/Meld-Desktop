@@ -969,7 +969,7 @@ async fn player_post(video_id: &str, playlist_id: Option<&str>, visitor_data: &s
         .map_err(|e| format!("YouTube player JSON failed for {}: {e}", client.name))
 }
 
-fn parse_direct_audio(response: &Value, video_id: &str) -> Result<PlayerPayload, String> {
+fn parse_direct_audio(response: &Value, video_id: &str, audio_quality: &str) -> Result<PlayerPayload, String> {
     let status = response.get("playabilityStatus").and_then(|v| v.get("status")).and_then(Value::as_str).unwrap_or("UNKNOWN");
     if status != "OK" {
         let reason = response.get("playabilityStatus").and_then(|v| v.get("reason")).and_then(Value::as_str).unwrap_or("unknown reason");
@@ -985,7 +985,19 @@ fn parse_direct_audio(response: &Value, video_id: &str) -> Result<PlayerPayload,
         if format.get("audioTrack").and_then(|v| v.get("isAutoDubbed")).and_then(Value::as_bool) == Some(true) { return None; }
         Some((format, url, mime.to_owned()))
     }).collect::<Vec<_>>();
-    candidates.sort_by_key(|(format, _, _)| std::cmp::Reverse(format.get("bitrate").and_then(Value::as_i64).unwrap_or(0)));
+    // Meld's AUTO switches on metered network state. Desktop currently has no native metered signal, so AUTO intentionally falls back to HIGH rather than pretending to provide that policy.
+    let prefer_low = audio_quality.eq_ignore_ascii_case("low");
+    candidates.sort_by(|(left_format, _, left_mime), (right_format, _, right_mime)| {
+        let left_bitrate = left_format.get("bitrate").and_then(Value::as_i64).unwrap_or(0);
+        let right_bitrate = right_format.get("bitrate").and_then(Value::as_i64).unwrap_or(0);
+        let left_opus = left_mime.starts_with("audio/webm");
+        let right_opus = right_mime.starts_with("audio/webm");
+        if prefer_low {
+            left_bitrate.cmp(&right_bitrate).then_with(|| right_opus.cmp(&left_opus))
+        } else {
+            right_bitrate.cmp(&left_bitrate).then_with(|| right_opus.cmp(&left_opus))
+        }
+    });
     let (format, stream_url, mime_type) = candidates.into_iter().next().ok_or_else(|| "YouTube player returned no direct original audio URL; cipher/SABR resolver is required".to_owned())?;
     let duration = details.and_then(|value| value.get("lengthSeconds")).and_then(Value::as_str).and_then(|value| value.parse::<i64>().ok()).unwrap_or(0);
     Ok(PlayerPayload {
@@ -1056,7 +1068,7 @@ async fn ytm_queue_continuation(continuation: String, state: tauri::State<'_, Ru
     Ok(parse_queue(&response))
 }
 
-async fn resolve_player_payload(video_id: &str, playlist_id: Option<&str>, state: &tauri::State<'_, RuntimeState>) -> Result<PlayerPayload, String> {
+async fn resolve_player_payload(video_id: &str, playlist_id: Option<&str>, audio_quality: &str, state: &tauri::State<'_, RuntimeState>) -> Result<PlayerPayload, String> {
     let id = video_id.trim();
     if id.is_empty() { return Err("video id is empty".to_owned()); }
     let visitor_data = visitor(state).await?;
@@ -1064,7 +1076,7 @@ async fn resolve_player_payload(video_id: &str, playlist_id: Option<&str>, state
     let mut failures = Vec::new();
     for client in PLAYER_CLIENTS {
         if client.login_required && session.is_none() { continue; }
-        match player_post(id, playlist_id, &visitor_data, client, session.as_ref()).await.and_then(|response| parse_direct_audio(&response, id)) {
+        match player_post(id, playlist_id, &visitor_data, client, session.as_ref()).await.and_then(|response| parse_direct_audio(&response, id, audio_quality)) {
             Ok(payload) => return Ok(payload),
             Err(error) => failures.push(error),
         }
@@ -1222,7 +1234,7 @@ fn download_remove(song_id: String, state: tauri::State<'_, RuntimeState>) -> Re
 }
 
 #[tauri::command]
-async fn download_start(item: YtItem, app: tauri::AppHandle, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+async fn download_start(item: YtItem, audio_quality: Option<String>, app: tauri::AppHandle, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
     let video_id = item.video_id.as_deref().map(str::trim).filter(|value| !value.is_empty()).ok_or_else(|| "offline download requires a source videoId".to_owned())?;
     let song_id = item.id.trim().to_owned();
     if song_id.is_empty() { return Err("offline download song id is empty".to_owned()); }
@@ -1246,7 +1258,7 @@ async fn download_start(item: YtItem, app: tauri::AppHandle, state: tauri::State
     }
     let state_for_lyrics = state.clone();
     let result: Result<(i64, Option<i64>, bool, Option<String>), String> = async {
-        let payload = resolve_player_payload(video_id, item.playlist_id.as_deref(), &state).await?;
+        let payload = resolve_player_payload(video_id, item.playlist_id.as_deref(), audio_quality.as_deref().unwrap_or("auto"), &state).await?;
         {
             let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
             db.execute("UPDATE songs SET duration = ?1 WHERE id = ?2 AND duration = 0", params![payload.duration, song_id]).map_err(|error| format!("download duration state failed: {error}"))?;
@@ -1309,7 +1321,7 @@ async fn download_start(item: YtItem, app: tauri::AppHandle, state: tauri::State
 }
 
 #[tauri::command]
-async fn ytm_player(video_id: String, playlist_id: Option<String>, state: tauri::State<'_, RuntimeState>) -> Result<PlayerPayload, String> {
+async fn ytm_player(video_id: String, playlist_id: Option<String>, audio_quality: Option<String>, state: tauri::State<'_, RuntimeState>) -> Result<PlayerPayload, String> {
     let id = video_id.trim().to_owned();
     if id.is_empty() { return Err("video id is empty".to_owned()); }
     player_cache_blocked().lock().map_err(|_| "player cache state poisoned".to_owned())?.remove(&id);
@@ -1320,7 +1332,7 @@ async fn ytm_player(video_id: String, playlist_id: Option<String>, state: tauri:
     if let Some((path, _bytes)) = cached.filter(|(path, bytes)| *bytes > 0 && Path::new(path).is_file()) {
         return Ok(PlayerPayload { video_id: id, title: None, artist: None, stream_url: path, mime_type: "audio/mpeg".to_owned(), bitrate: 0, expires_in_seconds: 0, duration: 0 });
     }
-    let payload = resolve_player_payload(&id, playlist_id.as_deref(), &state).await?;
+    let payload = resolve_player_payload(&id, playlist_id.as_deref(), audio_quality.as_deref().unwrap_or("auto"), &state).await?;
     let cache_url = payload.stream_url.clone();
     let cache_id = id.clone();
     let cache_path = player_cache_path(&cache_id);
@@ -4163,6 +4175,28 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_audio_quality_selects_supported_high_or_low_format() {
+        let response = json!({
+            "playabilityStatus": { "status": "OK" },
+            "videoDetails": { "title": "Quality", "author": "Artist", "lengthSeconds": "10" },
+            "streamingData": {
+                "expiresInSeconds": 60,
+                "adaptiveFormats": [
+                    { "mimeType": "audio/mp4; codecs=\\\"mp4a.40.2\\\"", "bitrate": 128000, "url": "https://example.test/low" },
+                    { "mimeType": "audio/webm; codecs=\\\"opus\\\"", "bitrate": 160000, "url": "https://example.test/high" },
+                    { "mimeType": "audio/mp4", "bitrate": 320000, "signatureCipher": "cipher", "url": "https://example.test/rejected" }
+                ]
+            }
+        });
+        let high = parse_direct_audio(&response, "video", "high").expect("high format");
+        assert_eq!(high.stream_url, "https://example.test/high");
+        let auto = parse_direct_audio(&response, "video", "auto").expect("auto format");
+        assert_eq!(auto.stream_url, high.stream_url);
+        let low = parse_direct_audio(&response, "video", "low").expect("low format");
+        assert_eq!(low.stream_url, "https://example.test/low");
+    }
 
     #[test]
     fn partial_download_resume_requires_nonempty_file_and_206() {
