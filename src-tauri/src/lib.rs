@@ -4363,6 +4363,46 @@ mod tests {
     }
 
     #[test]
+    fn browse_parser_reads_typed_items_and_continuation_pages() {
+        let song = json!({
+            "musicResponsiveListItemRenderer": {
+                "playlistItemData": { "videoId": "browse-song" },
+                "flexColumns": [
+                    { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "Browse song" }] } } },
+                    { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "Artist" }] } } }
+                ]
+            }
+        });
+        let first = json!({
+            "header": { "musicHeaderRenderer": { "title": { "runs": [{ "text": "Charts" }] } } },
+            "contents": { "singleColumnBrowseResultsRenderer": { "tabs": [{ "tabRenderer": { "content": { "sectionListRenderer": { "contents": [{ "musicShelfRenderer": { "contents": [song] } }], "continuations": [{ "nextContinuationData": { "continuation": "browse-next" } }] } } } }] } }
+        });
+        let page = parse_browse_response(&first, "FEmusic_charts");
+        assert_eq!(page.title, "Charts");
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].video_id.as_deref(), Some("browse-song"));
+        assert_eq!(page.continuation.as_deref(), Some("browse-next"));
+
+        let continuation = json!({
+            "continuationContents": { "sectionListContinuation": { "contents": [{ "musicShelfRenderer": { "contents": [song] } }], "continuations": [] } }
+        });
+        let next = parse_browse_response(&continuation, "FEmusic_charts");
+        assert_eq!(next.items.len(), 1);
+        assert_eq!(next.items[0].id, "browse-song");
+    }
+
+    #[test]
+    fn browse_parser_reads_navigation_tiles() {
+        let response = json!({
+            "contents": { "singleColumnBrowseResultsRenderer": { "tabs": [{ "tabRenderer": { "content": { "sectionListRenderer": { "contents": [{ "gridRenderer": { "items": [{ "musicNavigationButtonRenderer": { "buttonText": { "runs": [{ "text": "Moods" }] }, "clickCommand": { "browseEndpoint": { "browseId": "FEmusic_moods_and_genres" } } } }] } }] } } } }] } }
+        });
+        let page = parse_browse_response(&response, "FEmusic_explore");
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].kind, "browse");
+        assert_eq!(page.items[0].browse_id.as_deref(), Some("FEmusic_moods_and_genres"));
+    }
+
+    #[test]
     fn remote_history_parser_preserves_shelf_sections_and_song_metadata() {
         let song = |title: &str, video_id: &str| json!({
             "musicResponsiveListItemRenderer": {
