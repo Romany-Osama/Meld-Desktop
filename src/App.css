@@ -580,3 +580,14 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
   .full-player-meta,
   .full-player-lyrics { grid-column: auto; grid-row: auto; }
 }
+
+/* Targeted interaction corrections after Windows visual review. */
+.search-box { z-index: 120; }
+.search-history-popover { z-index: 140; max-height: min(260px, 34vh); overflow-y: auto; }
+.full-player-panel > .close-button {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 40;
+  margin: 0;
+}

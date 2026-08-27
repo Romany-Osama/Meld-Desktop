@@ -221,6 +221,8 @@ function App() {
   const [search, setSearch] = useState<LoadState<SearchPage>>({ status: "idle", data: { items: [], continuation: null } });
   const [searchMoreLoading, setSearchMoreLoading] = useState(false);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
   const [library, setLibrary] = useState<LoadState<YtItem[]>>({ status: "idle", data: [] });
   const [libraryMixSongs, setLibraryMixSongs] = useState<YtItem[]>([]);
   const [history, setHistory] = useState<LoadState<YtItem[]>>({ status: "idle", data: [] });
@@ -988,6 +990,15 @@ function App() {
       }
     } catch (error) { setPlaylist(null); setNotice(`Playlist could not be opened: ${errorMessage(error)}`); }
   };
+
+  useEffect(() => {
+    const handleSearchOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (searchBoxRef.current && target instanceof Node && !searchBoxRef.current.contains(target)) setSearchFocused(false);
+    };
+    document.addEventListener("pointerdown", handleSearchOutsidePointer);
+    return () => document.removeEventListener("pointerdown", handleSearchOutsidePointer);
+  }, []);
 
   useEffect(() => {
     if (active === "library") {
@@ -1904,7 +1915,7 @@ function App() {
       <main className="main-area">
         <header className="topbar">
           <div className="topbar-title"><div><p className="eyebrow">Meld Desktop</p><h1>{visibleTitle}</h1></div><div className="nav-history-controls" role="group" aria-label="Navigation history"><button className="topbar-button icon-button" onClick={goBack} disabled={!hasTransientLayer && backStack.length === 0} title="Back" aria-label="Back">‹</button><button className="topbar-button icon-button" onClick={navigateForward} disabled={forwardStack.length === 0} title="Forward" aria-label="Forward">›</button></div></div>
-          <div className="search-box"><form className="search-form" onSubmit={runSearch}><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search songs, albums, artists and playlists" aria-label="Search" /><button type="submit">Search</button></form>{searchHistory.filter((value) => !query.trim() || value.toLowerCase().startsWith(query.trim().toLowerCase())).length > 0 && <div className="search-history-popover" role="listbox" aria-label="Recent searches">{searchHistory.filter((value) => !query.trim() || value.toLowerCase().startsWith(query.trim().toLowerCase())).slice(0, 8).map((value, index) => <button type="button" role="option" key={`${value}-${index}`} onClick={() => setQuery(value)}>{value}</button>)}</div>}</div>
+          <div ref={searchBoxRef} className="search-box"><form className="search-form" onSubmit={(event) => { setSearchFocused(false); void runSearch(event); }}><span>⌕</span><input value={query} onFocus={() => setSearchFocused(true)} onChange={(event) => setQuery(event.target.value)} placeholder="Search songs, albums, artists and playlists" aria-label="Search" /><button type="submit">Search</button></form>{searchFocused && searchHistory.filter((value) => !query.trim() || value.toLowerCase().startsWith(query.trim().toLowerCase())).length > 0 && <div className="search-history-popover" role="listbox" aria-label="Recent searches">{searchHistory.filter((value) => !query.trim() || value.toLowerCase().startsWith(query.trim().toLowerCase())).slice(0, 8).map((value, index) => <button type="button" role="option" key={`${value}-${index}`} onClick={() => setQuery(value)}>{value}</button>)}</div>}</div>
           <div className="topbar-actions"><button className="topbar-button" onClick={() => { setSettingsPage("main"); setSettingsOpen(true); setMenuItem(null); setLyrics(null); setQueueOpen(false); setPlayerExpanded(false); setDetail(null); setPlaylist(null); setInfoItem(null); }} title="Settings">Settings</button><div className="account-label"><span className="account-avatar">{sessionStatus.authenticated ? (sessionStatus.accountName?.slice(0, 1).toUpperCase() || "G") : "G"}</span><span>{sessionStatus.authenticated ? (sessionStatus.accountName || sessionStatus.accountEmail || "Connected") : "Guest"}</span></div></div>
         </header>
 
