@@ -1686,9 +1686,10 @@ function App() {
 
   const openItem = async (item: YtItem, sourceQueue: YtItem[] = [item], sourceIndex = 0) => {
     setNotice("");
-    const libraryQueueModes = ["songs", "liked", "uploaded", "downloads", "cache", "local", "top"];
-    const libraryQueue = active === "library" && libraryQueueModes.includes(libraryMode) && filteredLibraryData.some((value) => value.id === item.id)
-      ? filteredLibraryData
+    const libraryQueueModes = ["mix", "songs", "liked", "uploaded", "downloads", "cache", "local", "top"];
+    const playableLibraryItems = filteredLibraryData.filter((value) => value.videoId || value.localPath);
+    const libraryQueue = active === "library" && libraryQueueModes.includes(libraryMode) && playableLibraryItems.some((value) => value.id === item.id)
+      ? playableLibraryItems
       : sourceQueue;
     const libraryIndex = libraryQueue.findIndex((value) => value.id === item.id);
     if (item.localPath) { await playItem(item, libraryQueue, libraryIndex >= 0 ? libraryIndex : sourceIndex); return; }
