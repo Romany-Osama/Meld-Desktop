@@ -29,9 +29,42 @@
       }
     }
   },
+  "plugins": {
+    "taskbar": {
+      "autoAttach": true,
+      "windowLabel": "main",
+      "events": {
+        "previous": "media-prev",
+        "toggle": "media-toggle",
+        "next": "media-next"
+      },
+      "tooltips": {
+        "previous": "Previous",
+        "play": "Play",
+        "pause": "Pause",
+        "next": "Next"
+      },
+      "icons": {
+        "previous": "icons/taskbar/PREV_THUMB.ico",
+        "previousDisabled": "icons/taskbar/PREV_THUMB_DISABLED.ico",
+        "play": "icons/taskbar/PLAY_THUMB.ico",
+        "pause": "icons/taskbar/PAUSE_THUMB.ico",
+        "next": "icons/taskbar/NEXT_THUMB.ico",
+        "nextDisabled": "icons/taskbar/NEXT_THUMB_DISABLED.ico"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": [
+      "icons/taskbar/PREV_THUMB.ico",
+      "icons/taskbar/PREV_THUMB_DISABLED.ico",
+      "icons/taskbar/PLAY_THUMB.ico",
+      "icons/taskbar/PAUSE_THUMB.ico",
+      "icons/taskbar/NEXT_THUMB.ico",
+      "icons/taskbar/NEXT_THUMB_DISABLED.ico"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -28,6 +28,7 @@ lofty = "0.22"
 rfd = "0.15"
 zip = "2"
 futures-util = "0.3"
+tauri-plugin-taskbar = "0.1.0"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38.2"
