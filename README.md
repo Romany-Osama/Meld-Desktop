@@ -1,37 +1,57 @@
 # Meld Desktop
 
-Meld Desktop is a lightweight native Windows desktop adaptation of the open-source [Meld/Metrolist](https://github.com/FrancescoGrazioso/Meld) source contracts. It uses Tauri 2, React/TypeScript, Rust, and SQLite rather than Electron, Java, a localhost playback server, or browser-based playback.
+**Meld Desktop** is a lightweight music player for Windows 10 and Windows 11. It brings the calm, dark blue-black Meld/Spotify-style experience to the desktop while keeping the application native, fast, and easy to use.
 
-This project is an independent desktop adaptation and is **not an official Meld release**. It retains the upstream GPL-3.0 licensing and attribution. The desktop implementation follows the live source where a Windows/native equivalent can be implemented honestly; it does not claim Android-level 1:1 parity where the platform or source protocol differs.
+This is an independent Windows project. It is not the official Meld mobile application, and this repository contains only the desktop implementation. It does not include Android, Kotlin, Gradle, or mobile application files.
 
-## Current native scope
+## What you can do
 
-The desktop client currently includes YouTube Music home/search/detail/playlist flows, local SQLite library state, Meld-style liked songs and library filters, local playlists, downloads, a separate playback cache, lyrics provider ordering and local lyrics caching, synchronized lyrics presentation, queue/automix controls, history, statistics, Google/YouTube Music session flow, Spotify library folders/playlists/liked songs, podcast library entry points with saved-show detail caching and continuation-page merging for saved shows, settings, backup/restore, native Windows navigation controls, Windows Media Session metadata and transport handlers where supported, an Advanced playback speed control with a persisted varispeed preference, Meld-style incremental seek gestures on player artwork, Pause on mute behavior, and a Persistent Queue enabled by default that restores queue items across restarts and can be disabled from Player settings.
+| Feature | What it provides |
+|---|---|
+| Home and Search | Discover music, albums, artists, playlists, podcasts, and episodes through real YouTube Music results. |
+| Player | Play, pause, seek, change volume, control playback speed, repeat, shuffle, and move between songs. |
+| Queue | Continue playlist playback, load more items when available, play related recommendations where appropriate, and restore the queue after restarting. |
+| Lyrics | Load lyrics from the configured provider order, save them for offline use, highlight synchronized lines, and jump to a line by clicking it. |
+| Offline listening | Save supported songs locally with artwork and lyrics so they can be played without an internet connection. |
+| Library | Use Liked Songs, Downloads, Cache, playlists, albums, artists, podcasts, history, statistics, and local audio files. |
+| Playlists | Create local playlists, add or remove songs, select multiple items, shuffle them, and manage them from the three-dot menu. |
+| Podcasts | Save shows, browse episodes, download supported episodes, and refresh saved-show information. |
+| Accounts | Connect Google/YouTube Music for library actions and connect Spotify for folders, playlists, liked songs, matching, and playlist actions. |
+| Windows controls | Use media keys and, where Windows supports it, taskbar thumbnail Previous, Play-Pause, and Next buttons. |
+| Personal controls | Adjust volume with the mouse wheel over the player volume controls, use keyboard shortcuts, manage history, and create safe backups of library data and settings. |
 
-An explicit offline download stores the audio file locally through a temporary `.part` file and resumes a retained partial file when the source honors HTTP Range (`206 Partial Content`); a server that does not honor the range causes a safe restart from byte zero. It also attempts to store the source thumbnail as a local artwork file, preserves the resolved track duration in local metadata, and caches lyrics in SQLite through the configured Meld lyrics provider chain. The Downloaded library plays a verified `localPath` directly, without calling the remote player resolver. Downloaded media and player-cache media remain separate. Starting playback from visible Library, History, Stats, playlist, or album/artist/podcast detail rows carries the visible playable list as queue context when that surface provides one. New playback history rows record measured native-audio play time in SQLite; older rows without a measurement use the known track duration as a fallback for statistics. Backups intentionally contain the SQLite database and allowlisted non-sensitive settings only; they do not embed media files or authentication/session material.
+## Offline listening
 
-When enabled in Player settings, repeated double-clicks on the left or right half of the player artwork increase the five-second seek step, matching Meld's incremental seek behavior. Pause on mute can pause native playback at zero volume and resume it when volume is raised. The player exposes now-playing metadata and media-key transport actions through the WebView2 Media Session API when supported. It passes available playlist context for playlist-owned/private tracks and uses direct original audio URLs returned by supported YouTube Music client responses. Some source responses require protected or transformed stream handling that is not part of this native port. The port therefore does not implement DRM circumvention, PoToken extraction, SABR bypass, signature-cipher/n-transform bypass, ad bypass, ripping, or browser playback. If a direct source URL cannot be resolved, the UI reports a truthful playback/download failure.
+When you choose **Download**, Meld Desktop saves a supported audio file to the Windows downloads folder. It also attempts to save the artwork and lyrics. Interrupted downloads can resume when the source supports it, and downloaded songs remain available from the Downloaded library without needing the online player.
 
-## Build on Windows
+Downloaded songs, temporary playback cache, imported local files, account sessions, and backups are kept separate. Backups include the local library and non-sensitive settings, but they intentionally do not include passwords, account sessions, or media files.
 
-The supported primary targets are Windows 10 and Windows 11. Production builds are intentionally run without bundling so the generated executable can be inspected directly:
+## Getting started
 
-```powershell
-npm ci
-npm run build
-cd src-tauri
-cargo check --release --locked
-cargo test --release --locked
-cd ..
-npx tauri build --no-bundle
-```
+Download the latest portable package from the [Releases page](https://github.com/Romany-Osama/Meld-Desktop/releases). Extract the complete ZIP folder and start `meld-desktop-0.1.0-gap-batch.exe`. Keep the `icons/taskbar` folder beside the executable so the Windows taskbar thumbnail controls can load their icons.
 
-For machines with limited free space, set `CARGO_TARGET_DIR` to a directory on a drive with sufficient capacity. Do not use `npm run dev` as a production playback dependency; the application is designed to run as a native executable.
+The first screen can be used without connecting an account for supported public browsing and playback. Connect Google/YouTube Music when you want account library actions, saved shows, subscriptions, or synchronized personal content. Connect Spotify only when you want Spotify library and playlist features.
 
-## Source and license
+## Privacy and advertising
 
-Meld Desktop is distributed under the GNU General Public License v3.0. See [LICENSE](LICENSE). Upstream source attribution and the live reference repository are preserved at [FrancescoGrazioso/Meld](https://github.com/FrancescoGrazioso/Meld). Source-dependent gaps and platform boundaries are tracked in the external implementation roadmap used during development rather than hidden behind inactive controls.
+Meld Desktop does not add advertisements, advertising SDKs, tracking accounts, or a project-owned online server. Account sessions are stored locally for the account features you choose to use. The upstream service may still control content returned by its own service; this application does not bypass those decisions.
 
-## Status
+## Important boundaries
 
-This repository contains an active native port, not a claim of complete feature parity or public release readiness. External integrations such as Last.fm, Discord RPC, Listen Together, Qobuz, Cast, updater signing, Wrapped, Android Auto, ShazamKit, and Android-specific media/session features require separate real contracts or platform equivalents and are not represented as complete features here. The Advanced playback control uses native audio playbackRate; Android's independent tempo/pitch processor and system equalizer are not claimed as identical.
+Meld Desktop uses supported direct audio responses. Some upstream responses require protected or transformed stream handling that is not included in this project. The application therefore does not provide DRM circumvention, token extraction, signature or cipher bypass, SABR bypass, ad bypass, ripping, browser-tab playback, or a localhost playback service.
+
+Some mobile-only or service-dependent features are not part of the Windows application, including Android Auto, Android notification and audio-focus services, Listen Together without a synchronization service, remote Wrapped feeds, ShazamKit recognition, and integrations that require an authorized third-party application or signing contract. The application does not show inactive buttons for features that it cannot actually perform.
+
+## Project status
+
+The current public release is [v0.1.2 — Safe parity gap batch](https://github.com/Romany-Osama/Meld-Desktop/releases/tag/v0.1.2-safe-gap-batch). Read [CHANGELOG.md](CHANGELOG.md) for the release history and the exact validation results.
+
+This project is an active independent desktop adaptation. It follows the user-facing ideas and publicly available behavior of Meld where a reliable Windows implementation is possible, but it does not claim to be the official Meld release or to be a byte-for-byte copy of the mobile application.
+
+## License and attribution
+
+Meld Desktop is distributed under the [GNU General Public License v3.0](LICENSE). The project was developed as an independent desktop adaptation using the publicly available [Meld/Metrolist project](https://github.com/FrancescoGrazioso/Meld) as a behavioral and design reference. The upstream project remains credited here in accordance with its license and attribution requirements. This repository contains the Windows desktop code only.
+
+## Feedback
+
+If you find a problem, include the Windows version, the Meld Desktop release, the screen where it happened, and the exact action that caused it. Please do not include passwords, cookies, account tokens, or private session data in an issue.
