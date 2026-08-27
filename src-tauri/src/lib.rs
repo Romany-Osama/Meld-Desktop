@@ -575,6 +575,8 @@ fn browse_kind(value: Option<&Value>, browse_id: Option<&str>) -> Option<String>
         "artist"
     } else if page_type.contains("PODCAST") {
         "podcast"
+    } else if browse_id.is_some() {
+        "browse"
     } else {
         return None;
     };
@@ -1426,6 +1428,44 @@ fn parse_multi_row_episode(renderer: &Value) -> Option<YtItem> {
     Some(YtItem { id: video_id.clone(), kind: "episode".to_owned(), title, subtitle, thumbnail: image, artists: Vec::new(), browse_id: None, playlist_id: playlist_id.clone(), video_id: Some(video_id.clone()), set_video_id: None, play_playlist_id: playlist_id, play_video_id: Some(video_id), params: None, explicit: explicit_badge(renderer), music_video_type: music_video_type(renderer.get("onTap")), history_remove_token: None, album_id: None, album_title: None })
 }
 
+fn parse_browse_item(value: &Value) -> Option<YtItem> {
+    value.get("musicTwoRowItemRenderer").and_then(parse_two_row)
+        .or_else(|| value.get("musicMultiRowListItemRenderer").and_then(parse_multi_row_episode))
+        .or_else(|| value.get("musicResponsiveListItemRenderer").and_then(parse_responsive_typed))
+}
+fn parse_browse_navigation(value: &Value) -> Option<YtItem> {
+    let title = text(value.get("buttonText"));
+    if title.is_empty() { return None; }
+    let endpoint = value.get("clickCommand").or_else(|| value.get("navigationEndpoint"));
+    let (browse_id, params) = browse_endpoint(endpoint);
+    let browse_id = browse_id?;
+    Some(YtItem { id: browse_id.clone(), kind: "browse".to_owned(), title, subtitle: "Browse".to_owned(), thumbnail: None, artists: Vec::new(), browse_id: Some(browse_id), playlist_id: None, video_id: None, set_video_id: None, play_playlist_id: None, play_video_id: None, params, explicit: false, music_video_type: None, history_remove_token: None, album_id: None, album_title: None })
+}
+fn parse_browse_response(response: &Value, browse_id: &str) -> DetailPage {
+    let section_list = response.get("contents").and_then(|v| v.get("singleColumnBrowseResultsRenderer")).and_then(|v| v.get("tabs")).and_then(|v| v.get(0)).and_then(|v| v.get("tabRenderer")).and_then(|v| v.get("content")).and_then(|v| v.get("sectionListRenderer")).or_else(|| response.get("continuationContents").and_then(|v| v.get("sectionListContinuation")));
+    let mut items = Vec::new();
+    if let Some(contents) = section_list.and_then(|v| v.get("contents")).and_then(Value::as_array) {
+        for section in contents {
+            if let Some(grid) = section.get("gridRenderer") {
+                items.extend(grid.get("items").and_then(Value::as_array).into_iter().flatten().filter_map(|item| parse_browse_item(item).or_else(|| item.get("musicNavigationButtonRenderer").and_then(parse_browse_navigation))));
+            }
+            if let Some(carousel) = section.get("musicCarouselShelfRenderer") {
+                items.extend(carousel.get("contents").and_then(Value::as_array).into_iter().flatten().filter_map(|item| parse_browse_item(item).or_else(|| item.get("musicNavigationButtonRenderer").and_then(parse_browse_navigation))));
+            }
+            if let Some(shelf) = section.get("musicShelfRenderer") {
+                items.extend(shelf.get("contents").and_then(Value::as_array).into_iter().flatten().filter_map(parse_browse_item));
+            }
+            if let Some(playlist_shelf) = section.get("musicPlaylistShelfRenderer") {
+                items.extend(playlist_shelf.get("contents").and_then(Value::as_array).into_iter().flatten().filter_map(parse_browse_item));
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|item| seen.insert((item.kind.clone(), item.id.clone())));
+    let title = response.get("header").and_then(|v| v.get("musicHeaderRenderer")).map(|v| text(v.get("title"))).filter(|v| !v.is_empty()).unwrap_or_else(|| browse_id.to_owned());
+    let continuation = section_list.and_then(|v| v.get("continuations")).and_then(Value::as_array).and_then(|values| values.first()).and_then(|value| value.get("nextContinuationData")).and_then(|v| v.get("continuation")).and_then(Value::as_str).map(str::to_owned);
+    DetailPage { kind: "browse".to_owned(), title, subtitle: "Meld browse results".to_owned(), thumbnail: None, items, continuation, browse_id: Some(browse_id.to_owned()) }
+}
 fn parse_home_sections(contents: Option<&Value>) -> Vec<HomeSection> {
     let Some(contents) = contents.and_then(Value::as_array) else { return Vec::new(); };
     let mut sections = Vec::new();
@@ -1674,6 +1714,29 @@ fn parse_detail(response: &Value, kind: &str, browse_id: Option<&str>) -> Detail
     }
 }
 
+#[tauri::command]
+async fn ytm_browse(browse_id: String, params: Option<String>, state: tauri::State<'_, RuntimeState>) -> Result<DetailPage, String> {
+    let id = browse_id.trim();
+    if id.is_empty() { return Err("browse id is empty".to_owned()); }
+    let visitor_data = visitor(&state).await?;
+    let request_session = browse_session(&state, auth_session(&state)?)?;
+    let data_sync_id = request_session.as_ref().map(|value| value.data_sync_id.as_str());
+    let mut body = json!({ "context": context(&visitor_data, request_session.is_some(), data_sync_id), "browseId": id });
+    if let Some(value) = params.filter(|value| !value.trim().is_empty()) { body["params"] = json!(value); }
+    let response = post("browse", body, request_session.as_ref()).await?;
+    Ok(parse_browse_response(&response, id))
+}
+#[tauri::command]
+async fn ytm_browse_continuation(browse_id: String, continuation: String, state: tauri::State<'_, RuntimeState>) -> Result<DetailPage, String> {
+    let id = browse_id.trim();
+    let token = continuation.trim();
+    if id.is_empty() || token.is_empty() { return Err("browse continuation arguments are empty".to_owned()); }
+    let visitor_data = visitor(&state).await?;
+    let request_session = browse_session(&state, auth_session(&state)?)?;
+    let data_sync_id = request_session.as_ref().map(|value| value.data_sync_id.as_str());
+    let response = post("browse", json!({ "context": context(&visitor_data, request_session.is_some(), data_sync_id), "continuation": token }), request_session.as_ref()).await?;
+    Ok(parse_browse_response(&response, id))
+}
 #[tauri::command]
 async fn ytm_detail(kind: String, browse_id: String, state: tauri::State<'_, RuntimeState>) -> Result<DetailPage, String> {
     let id = browse_id.trim();
@@ -4092,7 +4155,7 @@ fn clear_guest_session(state: tauri::State<'_, RuntimeState>) -> Result<(), Stri
 pub fn run() {
     tauri::Builder::default()
         .manage(RuntimeState::new())
-        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
+        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_browse, ytm_browse_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -184,7 +184,7 @@ function Section({ section, onOpen, onMenu, shouldHide }: { section: HomeSection
           <h2>{section.title}</h2>
           {section.label && <p>{section.label}</p>}
         </div>
-        {section.browseId && section.browseKind && <button className="text-button" onClick={() => onOpen({ id: section.browseId!, kind: section.browseKind!, title: section.title, subtitle: section.label ?? "", thumbnail: section.thumbnail, artists: [], browseId: section.browseId })}>Show all</button>}
+        {section.browseId && section.browseKind && <button className="text-button" onClick={() => onOpen({ id: section.browseId!, kind: section.browseKind!, title: section.title, subtitle: section.label ?? "", thumbnail: section.thumbnail, artists: [], browseId: section.browseId, params: section.params })}>Show all</button>}
       </div>
       <div className="card-row">
         {section.items.filter((item) => !shouldHide(item)).map((item) => <ItemCard key={`${item.kind}-${item.id}`} item={item} onOpen={onOpen} onMenu={onMenu} />)}
@@ -1697,7 +1697,9 @@ function App() {
     if (!detail || detail.status !== "ready" || !detail.data.continuation || detailMoreLoading) return;
     setDetailMoreLoading(true);
     try {
-      const next = await invoke<DetailPage>("ytm_detail_continuation", { kind: detail.data.kind, continuation: detail.data.continuation });
+      const next = detail.data.kind === "browse"
+        ? await invoke<DetailPage>("ytm_browse_continuation", { browseId: detail.data.browseId ?? "", continuation: detail.data.continuation })
+        : await invoke<DetailPage>("ytm_detail_continuation", { kind: detail.data.kind, continuation: detail.data.continuation });
       if (detail.data.kind === "podcast" && detail.data.browseId) {
         await invoke("ytm_podcast_cache_detail_page", { browseId: detail.data.browseId, page: next });
       }
@@ -1731,6 +1733,17 @@ function App() {
       : sourceQueue;
     const libraryIndex = libraryQueue.findIndex((value) => value.id === item.id);
     if (item.localPath) { await playItem(item, libraryQueue, libraryIndex >= 0 ? libraryIndex : sourceIndex); return; }
+    if (item.kind === "browse" && (item.browseId || item.id)) {
+      setPlaylist(null);
+      setDetail({ status: "loading", data: { kind: "browse", title: item.title, subtitle: item.subtitle, thumbnail: item.thumbnail, items: [], browseId: item.browseId ?? item.id } });
+      try {
+        const data = await invoke<DetailPage>("ytm_browse", { browseId: item.browseId ?? item.id, params: item.params ?? null });
+        setDetail({ status: "ready", data: { ...data, browseId: data.browseId ?? item.browseId ?? item.id } });
+      } catch (error) {
+        setDetail({ status: "error", data: { kind: "browse", title: item.title, subtitle: item.subtitle, thumbnail: item.thumbnail, items: [], browseId: item.browseId ?? item.id }, error: errorMessage(error) });
+      }
+      return;
+    }
     if (["album", "artist", "podcast"].includes(item.kind) && (item.browseId || item.id)) {
       setPlaylist(null);
       setDetail({ status: "loading", data: { kind: item.kind, title: item.title, subtitle: item.subtitle, thumbnail: item.thumbnail, items: [], browseId: item.browseId ?? null } });
