@@ -794,9 +794,9 @@ function App() {
   const removeSelectedDownloads = async () => {
     try {
       for (const item of selectedItems) await invoke("download_remove", { songId: item.id });
-      setNotice(`Removed offline cache for ${selectedItems.length} selected item${selectedItems.length === 1 ? "" : "s"}.`);
+      setNotice(`Removed offline download for ${selectedItems.length} selected item${selectedItems.length === 1 ? "" : "s"}.`);
       closeSelection();
-    } catch (error) { setNotice(`Selected offline cache removal failed: ${errorMessage(error)}`); }
+    } catch (error) { setNotice(`Selected offline download removal failed: ${errorMessage(error)}`); }
   };
 
   const moveLyricsProvider = async (provider: string, direction: -1 | 1) => {
@@ -1162,8 +1162,8 @@ function App() {
     if (action === "download") {
       if (!item.videoId || item.localPath) { setNotice("Offline download requires a remote source video."); return; }
       setMenuDownload({ songId: item.id, path: "", bytes: 0, totalBytes: null, state: "downloading", lyricsCached: false });
-      setNotice(`Downloading “${item.title}” into Meld’s native cache…`);
-      void invoke("download_start", { item }).then(() => setNotice(`Offline cache ready for “${item.title}”.`)).catch((error) => setNotice(`Offline download failed: ${errorMessage(error)}`));
+      setNotice(`Downloading “${item.title}” for offline playback…`);
+      void invoke("download_start", { item }).then(() => setNotice(`Offline download ready for “${item.title}”.`)).catch((error) => setNotice(`Offline download failed: ${errorMessage(error)}`));
       return;
     }
     if (action === "download_cancel") {
@@ -1171,7 +1171,7 @@ function App() {
       return;
     }
     if (action === "download_remove") {
-      try { await invoke("download_remove", { songId: item.id }); setMenuDownload(null); setNotice(`Removed offline cache for “${item.title}”.`); } catch (error) { setNotice(`Could not remove offline cache: ${errorMessage(error)}`); }
+      try { await invoke("download_remove", { songId: item.id }); setMenuDownload(null); setNotice(`Removed offline download for “${item.title}”.`); } catch (error) { setNotice(`Could not remove offline download: ${errorMessage(error)}`); }
       return;
     }
     if (action === "cache_remove") {
