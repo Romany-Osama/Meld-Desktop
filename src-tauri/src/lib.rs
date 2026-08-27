@@ -260,6 +260,7 @@ impl RuntimeState {
         let _ = db.execute("ALTER TABLE downloads ADD COLUMN artwork_path TEXT", []);
         let _ = db.execute("ALTER TABLE albums ADD COLUMN liked INTEGER NOT NULL DEFAULT 0", []);
         let _ = db.execute("ALTER TABLE playlists ADD COLUMN source TEXT NOT NULL DEFAULT 'local'", []);
+        let _ = db.execute("ALTER TABLE podcasts ADD COLUMN detail_json TEXT", []);
         Self { visitor_data: Mutex::new(None), db: Mutex::new(db) }
     }
 }
@@ -460,7 +461,7 @@ struct PlaylistContinuationPage {
     continuation: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DetailPage {
     kind: String,
@@ -1675,11 +1676,29 @@ async fn ytm_detail(kind: String, browse_id: String, state: tauri::State<'_, Run
     if id.is_empty() { return Err("detail browse id is empty".to_owned()); }
     let normalized_kind = kind.trim().to_lowercase();
     if !matches!(normalized_kind.as_str(), "album" | "artist" | "podcast") { return Err(format!("unsupported detail kind: {normalized_kind}")); }
+    if normalized_kind == "podcast" {
+        let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+        let cached = db.query_row("SELECT detail_json FROM podcasts WHERE id = ?1 AND detail_json IS NOT NULL", params![id], |row| row.get::<_, String>(0)).optional().map_err(|error| format!("podcast detail cache read failed: {error}"))?;
+        drop(db);
+        if auth_session(&state)?.is_none() {
+            if let Some(serialized) = cached {
+                return serde_json::from_str(&serialized).map_err(|error| format!("cached podcast detail decode failed: {error}"));
+            }
+        }
+    }
     let visitor_data = visitor(&state).await?;
     let session = auth_session(&state)?;
     let data_sync_id = session.as_ref().map(|value| value.data_sync_id.as_str());
     let response = post("browse", json!({ "context": context(&visitor_data, session.is_some(), data_sync_id), "browseId": id }), session.as_ref()).await?;
-    Ok(parse_detail(&response, &normalized_kind))
+    let page = parse_detail(&response, &normalized_kind);
+    if normalized_kind == "podcast" {
+        if let Ok(serialized) = serde_json::to_string(&page) {
+            if let Ok(db) = state.db.lock() {
+                let _ = db.execute("UPDATE podcasts SET detail_json = ?1 WHERE id = ?2", params![serialized, id]);
+            }
+        }
+    }
+    Ok(page)
 }
 
 fn parse_playlist(response: &Value, playlist_id: &str) -> PlaylistPage {
