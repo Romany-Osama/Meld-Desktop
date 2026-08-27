@@ -570,8 +570,23 @@ function App() {
     if (!spotifyOpenPlaylist || spotifyPlaylistTracks.status !== "ready") return;
     let queued = 0;
     let skipped = 0;
+    const tracks = [...spotifyPlaylistTracks.data.tracks];
+    let offset = tracks.length;
+    try {
+      while (offset < spotifyPlaylistTracks.data.totalCount) {
+        setNotice(`Loading Spotify playlist tracks for offline download… ${offset}/${spotifyPlaylistTracks.data.totalCount}`);
+        const next = await invoke<SpotifyTrackPage>("spotify_playlist_tracks", { playlistId: spotifyOpenPlaylist.id, offset });
+        if (next.tracks.length === 0) break;
+        tracks.push(...next.tracks);
+        offset = tracks.length;
+      }
+      setSpotifyPlaylistTracks({ status: "ready", data: { ...spotifyPlaylistTracks.data, tracks } });
+    } catch (error) {
+      setNotice(`Spotify playlist pages could not be loaded: ${errorMessage(error)}`);
+      return;
+    }
     setNotice(`Matching Spotify playlist “${spotifyOpenPlaylist.name}” for offline download…`);
-    for (const track of spotifyPlaylistTracks.data.tracks) {
+    for (const track of tracks) {
       try {
         const item = await findYouTubeMatchForSpotifyTrack(track);
         if (!item?.videoId) { skipped++; continue; }
