@@ -64,6 +64,7 @@ type LibraryItemState = { liked: boolean; youtubeLiked: boolean; inLibrary: bool
 type DownloadInfo = { songId: string; path: string; bytes: number; totalBytes?: number | null; state: "downloading" | "completed" | "failed" | "cancelled" | string; error?: string | null; lyricsCached: boolean; artworkPath?: string | null };
 type PlayerPayload = { videoId: string; title?: string | null; artist?: string | null; streamUrl: string; mimeType: string; bitrate: number; expiresInSeconds: number };
 type QueuePage = { title?: string | null; items: YtItem[]; currentIndex?: number | null; continuation?: string | null; relatedBrowseId?: string | null; relatedParams?: string | null };
+type PlaylistContinuationPage = { songs: YtItem[]; continuation?: string | null };
 
 type LoadState<T> = { status: "idle" | "loading" | "ready" | "error"; data: T; error?: string };
 type PlaytimeSession = { historyId: number; songId: string; lastPosition: number; pendingMs: number; playing: boolean; flushing: boolean };
@@ -301,6 +302,7 @@ function App() {
   const [player, setPlayer] = useState<{ item: YtItem; payload: PlayerPayload } | null>(null);
   const [queueItems, setQueueItems] = useState<YtItem[]>([]);
   const [queueContinuation, setQueueContinuation] = useState<string | null>(null);
+  const [queueContinuationKind, setQueueContinuationKind] = useState<"next" | "playlist" | null>(null);
   const [shuffleEnabled, setShuffleEnabled] = useState(false);
   const [repeatMode, setRepeatMode] = useState<"off" | "all" | "one">("off");
   const [queueIndex, setQueueIndex] = useState(-1);
@@ -1371,6 +1373,7 @@ function App() {
     audioRef.current?.pause();
     setQueueItems([]);
     setQueueContinuation(null);
+    setQueueContinuationKind(null);
     setQueueIndex(-1);
     setPlayer(null);
     setIsPlaying(false);
@@ -1432,7 +1435,7 @@ function App() {
       if (active === "history") void loadHistory();
     } catch { /* History must remain best-effort and never block playback. */ }
   };
-  const playItem = async (item: YtItem, sourceQueue: YtItem[] = [item], sourceIndex = 0, sourceContinuation: string | null = null, autoMixStart = false) => {
+  const playItem = async (item: YtItem, sourceQueue: YtItem[] = [item], sourceIndex = 0, sourceContinuation: string | null = null, autoMixStart = false, sourceContinuationKind: "next" | "playlist" = "next") => {
     const requestId = ++playRequestIdRef.current;
     if (sourceQueue !== queueItems) autoMixEnabledRef.current = autoMixStart;
     if (item.localPath) {
@@ -1441,6 +1444,7 @@ function App() {
       setLyricsAutoScrollEnabled(true);
       setQueueItems(sourceQueue);
       setQueueContinuation(null);
+      setQueueContinuationKind(null);
       setQueueIndex(sourceIndex);
       setPlayer({ item, payload: { videoId: item.id, title: item.title, artist: item.subtitle, streamUrl: convertFileSrc(item.localPath), mimeType: "audio/*", bitrate: 0, expiresInSeconds: 0 } });
       void beginPlaytime(item);
@@ -1488,6 +1492,7 @@ function App() {
     nextIndex = arranged.index;
     setQueueItems(nextQueue);
     setQueueContinuation(nextContinuation);
+    setQueueContinuationKind(nextContinuation ? sourceContinuationKind : null);
     setQueueIndex(nextIndex);
     try {
       const payload = await invoke<PlayerPayload>("ytm_player", { videoId: item.videoId, playlistId: item.playlistId ?? item.playPlaylistId ?? null });
@@ -1532,12 +1537,14 @@ function App() {
     // first write so the initial in-memory queue cannot overwrite stored entries.
     persistentQueueSkipWriteRef.current = true;
     try {
-      const stored = JSON.parse(localStorage.getItem("meld:persistentQueue") ?? "null") as { items?: YtItem[]; index?: number; continuation?: string | null } | null;
+      const stored = JSON.parse(localStorage.getItem("meld:persistentQueue") ?? "null") as { items?: YtItem[]; index?: number; continuation?: string | null; continuationKind?: "next" | "playlist" | null } | null;
       const items = Array.isArray(stored?.items) ? stored.items.filter((item) => item && typeof item.id === "string" && typeof item.title === "string" && typeof item.kind === "string") : [];
       if (items.length > 0) {
         setQueueItems(items);
         setQueueIndex(typeof stored?.index === "number" ? Math.min(Math.max(stored.index, -1), items.length - 1) : -1);
-        setQueueContinuation(typeof stored?.continuation === "string" ? stored.continuation : null);
+        const storedContinuation = typeof stored?.continuation === "string" ? stored.continuation : null;
+        setQueueContinuation(storedContinuation);
+        setQueueContinuationKind(storedContinuation ? stored?.continuationKind === "playlist" ? "playlist" : "next" : null);
         setNotice(`Restored ${items.length} item${items.length === 1 ? "" : "s"} in the Meld queue.`);
       }
     } catch {
@@ -1555,11 +1562,11 @@ function App() {
       return;
     }
     try {
-      localStorage.setItem("meld:persistentQueue", JSON.stringify({ items: queueItems, index: queueIndex, continuation: queueContinuation }));
+      localStorage.setItem("meld:persistentQueue", JSON.stringify({ items: queueItems, index: queueIndex, continuation: queueContinuation, continuationKind: queueContinuationKind }));
     } catch (error) {
       setNotice(`Persistent queue could not be saved: ${errorMessage(error)}`);
     }
-  }, [settings.persistentQueue, queueItems, queueIndex, queueContinuation]);
+  }, [settings.persistentQueue, queueItems, queueIndex, queueContinuation, queueContinuationKind]);
 
   const togglePlayback = () => {
     const audio = audioRef.current;
@@ -1673,15 +1680,20 @@ function App() {
   const playQueueIndex = async (index: number) => {
     let items = queueItems;
     let continuation = queueContinuation;
+    let continuationKind = queueContinuationKind ?? "next";
     try {
       while (index >= items.length && continuation && settings.autoLoadMore !== false && !(settings.disableLoadMoreWhenRepeatAll === true && repeatMode === "all")) {
         const previousContinuation = continuation;
-        const next = await invoke<QueuePage>("ytm_queue_continuation", { continuation });
-        const additions = next.items.filter((value) => value.videoId && !items.some((current) => current.id === value.id));
+        const next = continuationKind === "playlist"
+          ? await invoke<PlaylistContinuationPage>("ytm_playlist_continuation", { continuation })
+          : await invoke<QueuePage>("ytm_queue_continuation", { continuation });
+        const pageItems: YtItem[] = continuationKind === "playlist" ? (next as PlaylistContinuationPage).songs : (next as QueuePage).items;
+        const additions = pageItems.filter((value) => value.videoId && !items.some((current) => current.id === value.id));
         items = [...items, ...additions];
         continuation = next.continuation ?? null;
         setQueueItems(items);
         setQueueContinuation(continuation);
+        setQueueContinuationKind(continuation ? continuationKind : null);
         if (additions.length === 0 && continuation === previousContinuation) break;
       }
     } catch (error) {
@@ -1693,7 +1705,7 @@ function App() {
       setNotice("Meld reached the end of the available queue.");
       return;
     }
-    await playItem(item, items, index, continuation, autoMixEnabledRef.current);
+    await playItem(item, items, index, continuation, autoMixEnabledRef.current, continuationKind);
   };
 
   const loadDetailMore = async () => {
@@ -1968,7 +1980,7 @@ function App() {
           </div>
         </div>
       )}
-      {playlist && <div className="detail-overlay" role="dialog" aria-modal="true"><div className="detail-panel"><button className="close-button" title="Close" aria-label="Close" onClick={() => setPlaylist(null)}>×</button>{playlist.status === "loading" && <div className="state-panel"><div className="spinner" /><p>Loading playlist songs…</p></div>}{playlist.status === "error" && <div className="state-panel error"><h2>Playlist unavailable</h2><p>{playlist.error}</p></div>}{playlist.status === "ready" && <><div className="playlist-header">{mediaSrc(playlist.data.playlist.thumbnail) && <img src={mediaSrc(playlist.data.playlist.thumbnail) as string} alt="" />}<div><p className="eyebrow">Playlist</p><h2>{playlist.data.playlist.title}</h2><p>{playlist.data.playlist.subtitle}</p></div></div><div className="playlist-songs">{playlist.data.songs.length === 0 ? <div className="state-panel"><p>YouTube Music returned no playlist songs.</p></div> : playlist.data.songs.map((song, index) => <div className="song-row-wrap" key={`${song.id}-${index}`}>{selectionMode && <input className="selection-checkbox" type="checkbox" checked={selectedItems.some((value) => value.id === song.id)} onChange={() => toggleSelectedItem(song)} aria-label={`Select ${song.title}`} />}<button className="song-row" onClick={() => void playItem(song, playlist.data.songs, index, playlist.data.continuation ?? null, false)}><span className="song-index">{index + 1}</span>{mediaSrc(song.thumbnail) && <img src={mediaSrc(song.thumbnail) as string} alt="" />}<span className="song-copy"><strong>{song.title}</strong><small>{song.subtitle}</small></span><span className="song-kind">{song.kind}</span></button>{song.kind === "song" && <InlineLikeButton item={song} autoDownloadOnLike={settings.autoDownloadOnLike === true} />}<button className="song-row-menu" onClick={() => void openMenu(song)} title={`More options for ${song.title}`} aria-label={`More options for ${song.title}`}>⋮</button></div>)}</div>{playlist.data.continuation && <button className="primary-button playlist-more" onClick={() => void loadPlaylistMore()}>Load more songs</button>}</>}</div></div>}
+      {playlist && <div className="detail-overlay" role="dialog" aria-modal="true"><div className="detail-panel"><button className="close-button" title="Close" aria-label="Close" onClick={() => setPlaylist(null)}>×</button>{playlist.status === "loading" && <div className="state-panel"><div className="spinner" /><p>Loading playlist songs…</p></div>}{playlist.status === "error" && <div className="state-panel error"><h2>Playlist unavailable</h2><p>{playlist.error}</p></div>}{playlist.status === "ready" && <><div className="playlist-header">{mediaSrc(playlist.data.playlist.thumbnail) && <img src={mediaSrc(playlist.data.playlist.thumbnail) as string} alt="" />}<div><p className="eyebrow">Playlist</p><h2>{playlist.data.playlist.title}</h2><p>{playlist.data.playlist.subtitle}</p></div></div><div className="playlist-songs">{playlist.data.songs.length === 0 ? <div className="state-panel"><p>YouTube Music returned no playlist songs.</p></div> : playlist.data.songs.map((song, index) => <div className="song-row-wrap" key={`${song.id}-${index}`}>{selectionMode && <input className="selection-checkbox" type="checkbox" checked={selectedItems.some((value) => value.id === song.id)} onChange={() => toggleSelectedItem(song)} aria-label={`Select ${song.title}`} />}<button className="song-row" onClick={() => void playItem(song, playlist.data.songs, index, playlist.data.continuation ?? null, false, "playlist")}><span className="song-index">{index + 1}</span>{mediaSrc(song.thumbnail) && <img src={mediaSrc(song.thumbnail) as string} alt="" />}<span className="song-copy"><strong>{song.title}</strong><small>{song.subtitle}</small></span><span className="song-kind">{song.kind}</span></button>{song.kind === "song" && <InlineLikeButton item={song} autoDownloadOnLike={settings.autoDownloadOnLike === true} />}<button className="song-row-menu" onClick={() => void openMenu(song)} title={`More options for ${song.title}`} aria-label={`More options for ${song.title}`}>⋮</button></div>)}</div>{playlist.data.continuation && <button className="primary-button playlist-more" onClick={() => void loadPlaylistMore()}>Load more songs</button>}</>}</div></div>}
       {player && <div className="player-dock"><button className="transport-button" disabled={queueIndex <= 0} onClick={() => void playQueueIndex(queueIndex - 1)} title="Previous">‹</button><div className="dock-copy">{mediaSrc(player.item.thumbnail) && <img src={mediaSrc(player.item.thumbnail) as string} alt="" />}<div><strong>{player.payload.title || player.item.title}</strong><span>{player.payload.artist || player.item.subtitle}</span></div></div><div className="player-controls"><button className="transport-button play-button" onClick={togglePlayback} title={isPlaying ? "Pause" : "Play"}>{isPlaying ? "Ⅱ" : "▶"}</button><span className="time-label">{formatTime(playbackSeconds)}</span><input className="seek-slider" type="range" min="0" max={Math.max(durationSeconds, 1)} step="0.1" value={Math.min(playbackSeconds, Math.max(durationSeconds, 1))} onChange={(event) => seekPlayback(Number(event.currentTarget.value))} aria-label="Seek" /><span className="time-label">{formatTime(durationSeconds)}</span><button className="player-lyrics-button" onClick={() => { setPlayerExpanded(true); setLyricsAutoScrollEnabled(true); if (!lyrics) void openLyrics(player.item); }} title="Open synchronized lyrics" aria-label="Open synchronized lyrics">♫</button><button className={playerItemState?.liked ? "player-action active-control" : "player-action"} onClick={() => void togglePlayerFavorite()} title={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"} aria-label={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}>{playerItemState?.liked ? "♥" : "♡"}</button><button className="player-action" onClick={() => void shareItem(player.item)} title="Share" aria-label="Share">↗</button><button className="player-action" onClick={() => void openPlayerMenu()} title="More actions" aria-label="More actions">⋮</button><label className="volume-control" title="Volume"><span>Vol</span><input type="range" min="0" max="1" step="0.01" value={volume} onChange={(event) => updateVolume(Number(event.currentTarget.value))} aria-label="Volume" /></label></div>            <audio className="native-audio" ref={audioRef} preload="auto" onLoadedMetadata={(event) => setDurationSeconds(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)} onTimeUpdate={(event) => { setPlaybackSeconds(event.currentTarget.currentTime); recordPlaytime(event.currentTarget.currentTime); }} onPlay={() => { setIsPlaying(true); if (playtimeRef.current) playtimeRef.current.playing = true; }} onPause={() => { setIsPlaying(false); if (playtimeRef.current) playtimeRef.current.playing = false; void flushPlaytime(); }} onEnded={async () => { recordPlaytime(audioRef.current?.currentTime ?? playbackSeconds); if (playtimeRef.current) playtimeRef.current.playing = false; await flushPlaytime(); if (sleepTimerEndOfSong) { clearSleepTimer(); setIsPlaying(false); return; } if (repeatMode === "one") { if (audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } return; } setIsPlaying(false); if (queueIndex + 1 < queueItems.length || (queueContinuation && settings.autoLoadMore !== false && !(settings.disableLoadMoreWhenRepeatAll === true && repeatMode === "all"))) { void playQueueIndex(queueIndex + 1); return; } if (repeatMode === "all" && queueItems.length > 0) { void playQueueIndex(0); return; } if (!autoMixEnabledRef.current) return; const current = player?.item; if (!current?.videoId) return; const existing = queueItems; const additions = await loadAutomixItems(current, existing); if (additions.length > 0) { const nextItems = [...existing, ...additions]; setQueueItems(nextItems); setQueueContinuation(null); void playItem(additions[0], nextItems, existing.length, null, true); } }} onError={() => { setNotice("The native audio element could not read the resolved stream URL."); if (settings.autoSkipNextOnError && (queueIndex + 1 < queueItems.length || queueContinuation)) void playQueueIndex(queueIndex + 1); }} /><div className="dock-transport-actions"><button className="transport-button" disabled={queueIndex < 0 || (queueIndex + 1 >= queueItems.length && !queueContinuation)} onClick={() => void playQueueIndex(queueIndex + 1)} title="Next">›</button><button className={shuffleEnabled ? "queue-button active-control" : "queue-button"} onClick={() => void toggleShuffle()} title={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"} aria-label={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"}>⤨</button><button className={repeatMode === "off" ? "queue-button" : "queue-button active-control"} onClick={() => void cycleRepeat()} title={`Repeat mode: ${repeatMode}`} aria-label={`Repeat mode: ${repeatMode}`}>↻</button><button className="queue-button" onClick={() => setQueueOpen(true)} title="Open queue" aria-label="Open queue">☰</button><button className="player-expand" onClick={() => { setPlayerExpanded(true); setLyricsAutoScrollEnabled(true); if (!lyrics) void openLyrics(player.item); }} title="Open full player" aria-label="Open full player">↗</button></div><button className="dock-close" onClick={() => { audioRef.current?.pause(); setPlayer(null); setPlayerExpanded(false); setIsPlaying(false); }} title="Close player" aria-label="Close player">×</button></div>}
       {queueOpen && player && <div className="detail-overlay queue-overlay" role="dialog" aria-modal="true" onClick={() => setQueueOpen(false)}><div className="queue-panel" onClick={(event) => event.stopPropagation()}><button className="close-button" title="Close" aria-label="Close" onClick={() => setQueueOpen(false)}>×</button><div className="queue-heading"><div><p className="eyebrow">Queue</p><h2>{queueItems.length > 0 ? `${queueItems.length} songs` : "Queue"}</h2></div>{queueItems.length > 0 && <button className="secondary-button" onClick={clearQueue}>Clear queue</button>}</div><div className="queue-list">{queueItems.length === 0 ? <div className="state-panel"><p>No songs are queued.</p></div> : queueItems.map((item, index) => <div key={`${item.id}-${index}`} className={index === queueIndex ? "queue-item active" : "queue-item"}><button className="queue-item-play" onClick={() => { setQueueOpen(false); void playQueueIndex(index); }}><span>{index + 1}</span>{mediaSrc(item.thumbnail) && <img src={mediaSrc(item.thumbnail) as string} alt="" />}<span><strong>{item.title}</strong><small>{item.subtitle}</small></span></button><span className="queue-item-actions"><button className="queue-item-action" disabled={index === 0} onClick={() => moveQueueItem(index, index - 1)} title="Move up" aria-label={`Move ${item.title} up`}>↑</button><button className="queue-item-action" disabled={index === queueItems.length - 1} onClick={() => moveQueueItem(index, index + 1)} title="Move down" aria-label={`Move ${item.title} down`}>↓</button><button className="queue-item-action" onClick={() => removeQueueItem(index)} title="Remove from queue" aria-label={`Remove ${item.title} from queue`}>×</button></span></div>)}</div></div></div>}
       {playerExpanded && player && <div className="detail-overlay player-overlay" role="dialog" aria-modal="true" onClick={() => { setPlayerExpanded(false); setLyrics(null); }}><div className="full-player-panel" onClick={(event) => event.stopPropagation()}><button className="close-button" title="Close" aria-label="Close" onClick={() => { setPlayerExpanded(false); setLyrics(null); }}>×</button><div className="full-player-art" onDoubleClick={(event) => { const bounds = event.currentTarget.getBoundingClientRect(); seekByPlayerGesture(event.clientX < bounds.left + bounds.width / 2 ? -1 : 1); }} title="Double-click the left or right side to seek">{mediaSrc(player.item.thumbnail) ? <img src={mediaSrc(player.item.thumbnail) as string} alt="" /> : <div className="item-art empty-art">M</div>}</div><div className="full-player-meta"><p className="eyebrow">Now playing in Meld</p><h2>{player.payload.title || player.item.title}</h2><p>{player.payload.artist || player.item.subtitle}</p><div className="full-player-actions"><button className="player-action" onClick={() => void shareItem(player.item)} title="Share" aria-label="Share">↗</button><button className={playerItemState?.liked ? "player-action active-control" : "player-action"} onClick={() => void togglePlayerFavorite()} title={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"} aria-label={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}>{playerItemState?.liked ? "♥" : "♡"}</button><button className="player-action" onClick={() => void openPlayerMenu()} title="More actions" aria-label="More actions">⋮</button></div><div className="full-player-controls"><button className="transport-button" disabled={queueIndex <= 0} onClick={() => void playQueueIndex(queueIndex - 1)} title="Previous">‹</button><button className="transport-button play-button" onClick={togglePlayback} title={isPlaying ? "Pause" : "Play"}>{isPlaying ? "Ⅱ" : "▶"}</button><button className="transport-button" disabled={queueIndex < 0 || (queueIndex + 1 >= queueItems.length && !queueContinuation)} onClick={() => void playQueueIndex(queueIndex + 1)} title="Next">›</button><button className={shuffleEnabled ? "queue-button active-control" : "queue-button"} onClick={() => void toggleShuffle()} title={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"} aria-label={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"}>⤨</button><button className={repeatMode === "off" ? "queue-button" : "queue-button active-control"} onClick={() => void cycleRepeat()} title={`Repeat mode: ${repeatMode}`} aria-label={`Repeat mode: ${repeatMode}`}>↻</button><button className="queue-button" onClick={() => setQueueOpen(true)} title="Open queue" aria-label="Open queue">☷</button></div><div className="full-player-progress"><span>{formatTime(playbackSeconds)}</span><input className="seek-slider" type="range" min="0" max={Math.max(durationSeconds, 1)} step="0.1" value={Math.min(playbackSeconds, Math.max(durationSeconds, 1))} onChange={(event) => seekPlayback(Number(event.currentTarget.value))} aria-label="Seek" /><span>{formatTime(durationSeconds)}</span></div><label className="full-volume-control"><span>Volume</span><input type="range" min="0" max="1" step="0.01" value={volume} onChange={(event) => updateVolume(Number(event.currentTarget.value))} aria-label="Volume" /></label></div><div className="full-player-lyrics"><div className="section-heading"><div><p className="eyebrow">Lyrics</p><h3>{lyrics?.status === "ready" ? lyrics.data.provider : "Meld lyric providers"}</h3></div><div className="lyrics-navigation"><button className="topbar-button icon-button" onClick={goBack} disabled={!hasTransientLayer && backStack.length === 0} title="Back" aria-label="Back">‹</button><button className="topbar-button icon-button" onClick={navigateForward} disabled={forwardStack.length === 0} title="Forward" aria-label="Forward">›</button></div>{lyrics?.status !== "ready" && <button className="text-button" onClick={() => void openLyrics(player.item)}>Load lyrics</button>}</div>{lyrics?.status === "ready" && lyrics.data.synced && lyrics.data.lines.length > 0 ? <div ref={lyricsContainerRef} className="lyrics-lines" onWheel={() => setLyricsAutoScrollEnabled(false)} onTouchMove={() => setLyricsAutoScrollEnabled(false)} onPointerDown={() => setLyricsAutoScrollEnabled(false)} onKeyDown={() => setLyricsAutoScrollEnabled(false)}>{lyrics.data.lines.map((line, index) => <button ref={index === activeLyricIndex ? activeLyricRef : undefined} key={`${line.timeMs}-${index}`} className={index === activeLyricIndex ? "lyric-line active" : "lyric-line"} onClick={() => { setLyricsAutoScrollEnabled(true); if (audioRef.current) audioRef.current.currentTime = line.timeMs / 1000; }}>{line.text}</button>)}</div> : lyrics?.status === "ready" ? <pre className="lyrics-text">{lyrics.data.text}</pre> : <div className="state-panel"><p>Open lyrics to load the source provider chain.</p></div>}</div></div></div>}
