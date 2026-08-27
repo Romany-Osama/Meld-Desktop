@@ -24,6 +24,18 @@ Equalizer/DSP, crossfade, skip silence, and loudness normalization require a tes
 
 Protected or transformed YouTube stream handling—including PoToken/BotGuard extraction, signatureCipher/n-transform resolution, SABR playback, DRM/Widevine, ad bypass, ripping, browser playback, and localhost playback—is intentionally outside this port. Meld Desktop does not insert advertisements or promise behavior controlled by the upstream service.
 
-## Unreleased next change — Lyrics provider picker
+## [0.1.3] — Lyrics provider picker
 
 The Lyrics window and Full Player now include a real Provider selector. Automatic keeps the configured provider order and normal cache behavior. Choosing a provider explicitly calls that provider, replaces the current cached lyrics with its result, and reports a truthful provider-specific error if it returns no match. Selecting Automatic again refreshes the configured order instead of remaining stuck on the manually selected cached result. The existing provider enable/disable and ordering settings remain unchanged.
+
+Some songs may not have lyrics published by any of the available providers. In that case Meld Desktop reports that no selected source returned a match; this is source availability rather than an application defect, and no invented or unrelated lyrics are shown.
+
+| Validation | Result |
+|---|---|
+| TypeScript no-emit and Vite production build | Passed |
+| Cargo check and Rust tests | Passed; 23/23 tests |
+| Linux production gates | Passed |
+| Windows release Cargo check/test and Tauri build | Passed |
+| Windows portable startup smoke | Passed; 12 seconds, zero TCP listeners, clean close |
+
+The Windows candidate is `meld-desktop-0.1.0-lyrics-provider-selector.exe`, size `21,036,032` bytes, SHA-256 `A39F73B08276914BD568DABC230ED9FF6B3D0FA26CFF61254CCB7598947619D2`. Keep the adjacent `icons/taskbar/*.ico` folder when moving the executable.
