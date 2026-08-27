@@ -1676,20 +1676,29 @@ async fn ytm_detail(kind: String, browse_id: String, state: tauri::State<'_, Run
     if id.is_empty() { return Err("detail browse id is empty".to_owned()); }
     let normalized_kind = kind.trim().to_lowercase();
     if !matches!(normalized_kind.as_str(), "album" | "artist" | "podcast") { return Err(format!("unsupported detail kind: {normalized_kind}")); }
-    if normalized_kind == "podcast" {
+    let cached_podcast_detail = if normalized_kind == "podcast" {
         let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-        let cached = db.query_row("SELECT detail_json FROM podcasts WHERE id = ?1 AND detail_json IS NOT NULL", params![id], |row| row.get::<_, String>(0)).optional().map_err(|error| format!("podcast detail cache read failed: {error}"))?;
-        drop(db);
-        if auth_session(&state)?.is_none() {
-            if let Some(serialized) = cached {
-                return serde_json::from_str(&serialized).map_err(|error| format!("cached podcast detail decode failed: {error}"));
-            }
+        db.query_row("SELECT detail_json FROM podcasts WHERE id = ?1 AND detail_json IS NOT NULL", params![id], |row| row.get::<_, String>(0)).optional().map_err(|error| format!("podcast detail cache read failed: {error}"))?
+    } else {
+        None
+    };
+    if auth_session(&state)?.is_none() {
+        if let Some(serialized) = cached_podcast_detail.as_deref() {
+            return serde_json::from_str(serialized).map_err(|error| format!("cached podcast detail decode failed: {error}"));
         }
     }
     let visitor_data = visitor(&state).await?;
     let session = auth_session(&state)?;
     let data_sync_id = session.as_ref().map(|value| value.data_sync_id.as_str());
-    let response = post("browse", json!({ "context": context(&visitor_data, session.is_some(), data_sync_id), "browseId": id }), session.as_ref()).await?;
+    let response = match post("browse", json!({ "context": context(&visitor_data, session.is_some(), data_sync_id), "browseId": id }), session.as_ref()).await {
+        Ok(response) => response,
+        Err(error) => {
+            if let Some(serialized) = cached_podcast_detail.as_deref() {
+                return serde_json::from_str(serialized).map_err(|decode_error| format!("cached podcast detail decode failed after network error: {decode_error}"));
+            }
+            return Err(error);
+        }
+    };
     let page = parse_detail(&response, &normalized_kind);
     if normalized_kind == "podcast" {
         if let Ok(serialized) = serde_json::to_string(&page) {
