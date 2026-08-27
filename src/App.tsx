@@ -313,6 +313,8 @@ function App() {
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
   const activeLyricRef = useRef<HTMLButtonElement | null>(null);
   const automixLoadingRef = useRef(false);
+  const playRequestIdRef = useRef(0);
+  const activePlayerIdRef = useRef<string | null>(null);
   const persistentQueueLoadedRef = useRef(false);
   const persistentQueueSkipWriteRef = useRef(false);
   const [sleepTimerOpen, setSleepTimerOpen] = useState(false);
@@ -1359,6 +1361,8 @@ function App() {
   };
 
   const clearQueue = () => {
+    playRequestIdRef.current += 1;
+    activePlayerIdRef.current = null;
     audioRef.current?.pause();
     setQueueItems([]);
     setQueueContinuation(null);
@@ -1390,6 +1394,7 @@ function App() {
   };
 
   const playItem = async (item: YtItem, sourceQueue: YtItem[] = [item], sourceIndex = 0, sourceContinuation: string | null = null) => {
+    const requestId = ++playRequestIdRef.current;
     if (item.localPath) {
       setNotice("");
       setLyrics(null);
@@ -1419,6 +1424,7 @@ function App() {
       try {
         const queuePlaylistId = item.playPlaylistId ?? item.playlistId ?? `RDAMVM${item.videoId}`;
         const page = await invoke<QueuePage>("ytm_next", { videoId: item.videoId, playlistId: queuePlaylistId, setVideoId: item.setVideoId ?? null, index: null, params: item.params ?? null, continuation: null });
+        if (requestId !== playRequestIdRef.current) return;
         const sourceItems = page.items.filter((value) => value.videoId);
         if (sourceItems.length > 0) {
           nextQueue = sourceItems.some((value) => value.id === item.id) ? sourceItems : [item, ...sourceItems.filter((value) => value.id !== item.id)];
@@ -1445,6 +1451,7 @@ function App() {
     setQueueIndex(nextIndex);
     try {
       const payload = await invoke<PlayerPayload>("ytm_player", { videoId: item.videoId, playlistId: item.playlistId ?? item.playPlaylistId ?? null });
+      if (requestId !== playRequestIdRef.current) return;
       setPlayer({ item, payload });
       if (keepInlineLyrics) void openLyrics(item);
       if (settings.pauseListenHistory !== true) void invoke("history_add", { item }).then(() => { if (active === "history") void loadHistory(); }).catch(() => undefined);
@@ -1455,13 +1462,15 @@ function App() {
 
   useEffect(() => {
     if (!player || !audioRef.current) return;
+    const playerId = player.item.id;
+    activePlayerIdRef.current = playerId;
     audioRef.current.src = mediaSrc(player.payload.streamUrl) ?? player.payload.streamUrl;
     audioRef.current.volume = volume;
     audioRef.current.playbackRate = playbackSpeed;
     (audioRef.current as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = settings.varispeed !== true;
     setPlaybackSeconds(0);
     setDurationSeconds(0);
-    void audioRef.current.play().then(() => setIsPlaying(true)).catch((error) => { setIsPlaying(false); setNotice(`Audio playback failed: ${errorMessage(error)}`); });
+    void audioRef.current.play().then(() => { if (activePlayerIdRef.current === playerId) setIsPlaying(true); }).catch((error) => { if (activePlayerIdRef.current === playerId) { setIsPlaying(false); setNotice(`Audio playback failed: ${errorMessage(error)}`); } });
   }, [player]);
 
   useEffect(() => {
