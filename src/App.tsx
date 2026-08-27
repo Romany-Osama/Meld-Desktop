@@ -337,7 +337,10 @@ function App() {
   const closeTransientLayers = () => { setMenuItem(null); setPlayerMenuOpen(false); setSpeedDialogOpen(false); setSleepTimerOpen(false); setLyrics(null); setQueueOpen(false); setPlayerExpanded(false); setDetail(null); setPlaylist(null); setInfoItem(null); };
 
   const navigateTo = (next: NavKey) => {
-    if (next === active) return;
+    if (next === active) {
+      closeTransientLayers();
+      return;
+    }
     setBackStack((current) => [...current, active]);
     setForwardStack([]);
     closeTransientLayers();
