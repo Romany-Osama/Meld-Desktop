@@ -565,3 +565,8 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
   .row-actions { gap: 5px; }
   .row-action { padding-left: 9px; padding-right: 9px; }
 }
+
+/* Preserve intentional layer order while keeping the global navigation visible. */
+.player-overlay { z-index: 82; }
+.queue-overlay { z-index: 84; }
+.menu-overlay { z-index: 86; }
