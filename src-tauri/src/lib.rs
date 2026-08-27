@@ -1324,7 +1324,10 @@ async fn download_start(item: YtItem, audio_quality: Option<String>, app: tauri:
         let lyrics_cached = !lyrics_results.is_empty();
         let lyrics_cache_id = format!("lyrics:{}:{}", clean_lyrics_title(&item.title).to_lowercase(), clean_lyrics_artist(&artist).to_lowercase());
         let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-        for lyrics in &lyrics_results { cache_lyrics_payload(&db, &lyrics_cache_id, lyrics)?; }
+        for (index, lyrics) in lyrics_results.iter().enumerate() {
+            if index == 0 { cache_lyrics_payload(&db, &lyrics_cache_id, lyrics)?; }
+            else { cache_lyrics_variant(&db, &lyrics_cache_id, lyrics)?; }
+        }
         db.execute("UPDATE downloads SET bytes = ?1, total_bytes = ?2, state = 'completed', error = NULL, lyrics_cached = ?3, artwork_path = ?4 WHERE song_id = ?5", params![bytes, total_bytes.or(Some(bytes)), if lyrics_cached { 1 } else { 0 }, artwork_path, song_id]).map_err(|error| format!("download completion state failed: {error}"))?;
         if let Some(info) = read_download_info(&db, &song_id)? { emit_download(&app, &info); }
         Ok((bytes, total_bytes, lyrics_cached, artwork_path))
@@ -2771,10 +2774,14 @@ async fn fetch_lyrics_provider(
     }
 }
 
-fn cache_lyrics_payload(db: &Connection, cache_id: &str, payload: &LyricsPayload) -> Result<(), String> {
-    db.execute("INSERT INTO lyrics (song_id, provider, text, synced, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(song_id) DO UPDATE SET provider=excluded.provider, text=excluded.text, synced=excluded.synced, fetched_at=excluded.fetched_at", params![cache_id, payload.provider, payload.text, if payload.synced { 1 } else { 0 }, now_seconds()]).map_err(|error| format!("lyrics cache write failed: {error}"))?;
+fn cache_lyrics_variant(db: &Connection, cache_id: &str, payload: &LyricsPayload) -> Result<(), String> {
     db.execute("INSERT INTO lyrics_variants (song_id, provider, text, synced, matched_title, matched_artist, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(song_id, provider) DO UPDATE SET text=excluded.text, synced=excluded.synced, matched_title=excluded.matched_title, matched_artist=excluded.matched_artist, fetched_at=excluded.fetched_at", params![cache_id, payload.provider, payload.text, if payload.synced { 1 } else { 0 }, payload.matched_title, payload.matched_artist, now_seconds()]).map_err(|error| format!("lyrics provider cache write failed: {error}"))?;
     Ok(())
+}
+
+fn cache_lyrics_payload(db: &Connection, cache_id: &str, payload: &LyricsPayload) -> Result<(), String> {
+    db.execute("INSERT INTO lyrics (song_id, provider, text, synced, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(song_id) DO UPDATE SET provider=excluded.provider, text=excluded.text, synced=excluded.synced, fetched_at=excluded.fetched_at", params![cache_id, payload.provider, payload.text, if payload.synced { 1 } else { 0 }, now_seconds()]).map_err(|error| format!("lyrics cache write failed: {error}"))?;
+    cache_lyrics_variant(db, cache_id, payload)
 }
 
 fn cached_lyrics_provider(db: &Connection, cache_id: &str, provider: &str) -> Result<Option<LyricsPayload>, String> {
