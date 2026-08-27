@@ -623,6 +623,8 @@ function App() {
       if (Number.isFinite(storedSleepTimerDefault)) { setSleepTimerDefault(Math.min(120, Math.max(5, Math.round(storedSleepTimerDefault / 5) * 5))); setSleepTimerMinutes(Math.min(120, Math.max(5, Math.round(storedSleepTimerDefault / 5) * 5))); }
       const storedAudioQuality = entries.find((entry) => entry.key === "audioQuality")?.value;
       if (storedAudioQuality === "auto" || storedAudioQuality === "high" || storedAudioQuality === "low") setAudioQuality(storedAudioQuality);
+      const storedVolume = Number(entries.find((entry) => entry.key === "playerVolume")?.value);
+      if (Number.isFinite(storedVolume) && storedVolume >= 0 && storedVolume <= 1) setVolume(storedVolume);
       const rememberShuffle = entries.find((entry) => entry.key === "rememberShuffleAndRepeat")?.value !== "false";
       const storedShuffle = entries.find((entry) => entry.key === "shuffleMode");
       setShuffleEnabled(rememberShuffle && storedShuffle?.value === "true");
@@ -1617,6 +1619,7 @@ function App() {
     }
     setVolume(value);
     if (audio) audio.volume = value;
+    void invoke("settings_set", { key: "playerVolume", value: String(value) }).catch(() => undefined);
   };
 
   useEffect(() => {
