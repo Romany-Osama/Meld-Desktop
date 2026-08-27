@@ -1564,6 +1564,31 @@ function App() {
   };
 
   useEffect(() => {
+    const mediaSession = navigator.mediaSession;
+    if (!mediaSession) return;
+    const setHandler = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
+      try { mediaSession.setActionHandler(action, handler); } catch { /* WebView2 may not support every action. */ }
+    };
+    if (!player) {
+      mediaSession.metadata = null;
+      for (const action of ["play", "pause", "seekbackward", "seekforward", "seekto", "previoustrack", "nexttrack"] as MediaSessionAction[]) setHandler(action, null);
+      return;
+    }
+    mediaSession.metadata = new MediaMetadata({ title: player.payload.title || player.item.title, artist: player.payload.artist || player.item.subtitle, album: player.item.albumTitle || "Meld Desktop" });
+    setHandler("play", () => { if (audioRef.current) void audioRef.current.play().catch((error) => setNotice(`Audio playback failed: ${errorMessage(error)}`)); });
+    setHandler("pause", () => audioRef.current?.pause());
+    setHandler("seekbackward", () => { const current = audioRef.current?.currentTime ?? playbackSeconds; seekPlayback(Math.max(0, current - 10)); });
+    setHandler("seekforward", () => { const current = audioRef.current?.currentTime ?? playbackSeconds; seekPlayback(Math.min(durationSeconds || Number.MAX_SAFE_INTEGER, current + 10)); });
+    setHandler("seekto", (details) => { if (details.seekTime !== undefined) seekPlayback(Math.max(0, Math.min(durationSeconds || Number.MAX_SAFE_INTEGER, details.seekTime))); });
+    setHandler("previoustrack", () => { if (queueIndex > 0) void playQueueIndex(queueIndex - 1); });
+    setHandler("nexttrack", () => { if (queueIndex + 1 < queueItems.length || queueContinuation) void playQueueIndex(queueIndex + 1); });
+    return () => {
+      mediaSession.metadata = null;
+      for (const action of ["play", "pause", "seekbackward", "seekforward", "seekto", "previoustrack", "nexttrack"] as MediaSessionAction[]) setHandler(action, null);
+    };
+  }, [durationSeconds, playbackSeconds, player?.item.id, player?.item.title, player?.item.subtitle, player?.item.albumTitle, player?.payload.artist, player?.payload.title, queueContinuation, queueIndex, queueItems.length]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT" || target?.isContentEditable;
