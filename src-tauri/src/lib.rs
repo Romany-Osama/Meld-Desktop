@@ -180,7 +180,8 @@ impl RuntimeState {
                  song_id TEXT PRIMARY KEY,
                  path TEXT NOT NULL,
                  bytes INTEGER NOT NULL DEFAULT 0,
-                 cached_at INTEGER NOT NULL
+                 cached_at INTEGER NOT NULL,
+                 quality TEXT NOT NULL DEFAULT 'auto'
               );
               CREATE TABLE IF NOT EXISTS podcasts (
                  id TEXT PRIMARY KEY,
@@ -263,6 +264,7 @@ impl RuntimeState {
         let _ = db.execute("ALTER TABLE playlists ADD COLUMN source TEXT NOT NULL DEFAULT 'local'", []);
         let _ = db.execute("ALTER TABLE podcasts ADD COLUMN detail_json TEXT", []);
         let _ = db.execute("ALTER TABLE history ADD COLUMN play_time_ms INTEGER NOT NULL DEFAULT 0", []);
+        let _ = db.execute("ALTER TABLE player_cache ADD COLUMN quality TEXT NOT NULL DEFAULT 'auto'", []);
         Self { visitor_data: Mutex::new(None), db: Mutex::new(db) }
     }
 }
@@ -987,16 +989,11 @@ fn parse_direct_audio(response: &Value, video_id: &str, audio_quality: &str) -> 
     }).collect::<Vec<_>>();
     // Meld's AUTO switches on metered network state. Desktop currently has no native metered signal, so AUTO intentionally falls back to HIGH rather than pretending to provide that policy.
     let prefer_low = audio_quality.eq_ignore_ascii_case("low");
-    candidates.sort_by(|(left_format, _, left_mime), (right_format, _, right_mime)| {
-        let left_bitrate = left_format.get("bitrate").and_then(Value::as_i64).unwrap_or(0);
-        let right_bitrate = right_format.get("bitrate").and_then(Value::as_i64).unwrap_or(0);
-        let left_opus = left_mime.starts_with("audio/webm");
-        let right_opus = right_mime.starts_with("audio/webm");
-        if prefer_low {
-            left_bitrate.cmp(&right_bitrate).then_with(|| right_opus.cmp(&left_opus))
-        } else {
-            right_bitrate.cmp(&left_bitrate).then_with(|| right_opus.cmp(&left_opus))
-        }
+    candidates.sort_by_key(|(format, _, mime)| {
+        let bitrate = format.get("bitrate").and_then(Value::as_i64).unwrap_or(0);
+        let direction = if prefer_low { -1_i64 } else { 1_i64 };
+        let opus_bonus = if mime.starts_with("audio/webm") { 10240_i64 } else { 0_i64 };
+        std::cmp::Reverse(bitrate.saturating_mul(direction).saturating_add(opus_bonus))
     });
     let (format, stream_url, mime_type) = candidates.into_iter().next().ok_or_else(|| "YouTube player returned no direct original audio URL; cipher/SABR resolver is required".to_owned())?;
     let duration = details.and_then(|value| value.get("lengthSeconds")).and_then(Value::as_str).and_then(|value| value.parse::<i64>().ok()).unwrap_or(0);
@@ -1104,6 +1101,14 @@ fn download_info_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DownloadI
 fn download_cache_path(song_id: &str) -> PathBuf {
     let digest = Sha1::digest(song_id.as_bytes());
     database_path().parent().map(|value| value.join("downloads")).unwrap_or_else(|| PathBuf::from("downloads")).join(format!("{digest:x}.audio"))
+}
+
+fn normalize_audio_quality(value: Option<&str>) -> &'static str {
+    match value.unwrap_or("auto") {
+        "high" => "high",
+        "low" => "low",
+        _ => "auto",
+    }
 }
 
 fn player_cache_path(song_id: &str) -> PathBuf {
@@ -1258,7 +1263,7 @@ async fn download_start(item: YtItem, audio_quality: Option<String>, app: tauri:
     }
     let state_for_lyrics = state.clone();
     let result: Result<(i64, Option<i64>, bool, Option<String>), String> = async {
-        let payload = resolve_player_payload(video_id, item.playlist_id.as_deref(), audio_quality.as_deref().unwrap_or("auto"), &state).await?;
+        let payload = resolve_player_payload(video_id, item.playlist_id.as_deref(), normalize_audio_quality(audio_quality.as_deref()), &state).await?;
         {
             let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
             db.execute("UPDATE songs SET duration = ?1 WHERE id = ?2 AND duration = 0", params![payload.duration, song_id]).map_err(|error| format!("download duration state failed: {error}"))?;
@@ -1324,15 +1329,16 @@ async fn download_start(item: YtItem, audio_quality: Option<String>, app: tauri:
 async fn ytm_player(video_id: String, playlist_id: Option<String>, audio_quality: Option<String>, state: tauri::State<'_, RuntimeState>) -> Result<PlayerPayload, String> {
     let id = video_id.trim().to_owned();
     if id.is_empty() { return Err("video id is empty".to_owned()); }
+    let requested_quality = normalize_audio_quality(audio_quality.as_deref());
     player_cache_blocked().lock().map_err(|_| "player cache state poisoned".to_owned())?.remove(&id);
     let cached = {
         let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-        db.query_row("SELECT path, bytes FROM player_cache WHERE song_id = ?1", params![id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))).optional().map_err(|error| format!("player cache state read failed: {error}"))?
+        db.query_row("SELECT path, bytes FROM player_cache WHERE song_id = ?1 AND quality = ?2", params![id, requested_quality], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))).optional().map_err(|error| format!("player cache state read failed: {error}"))?
     };
     if let Some((path, _bytes)) = cached.filter(|(path, bytes)| *bytes > 0 && Path::new(path).is_file()) {
         return Ok(PlayerPayload { video_id: id, title: None, artist: None, stream_url: path, mime_type: "audio/mpeg".to_owned(), bitrate: 0, expires_in_seconds: 0, duration: 0 });
     }
-    let payload = resolve_player_payload(&id, playlist_id.as_deref(), audio_quality.as_deref().unwrap_or("auto"), &state).await?;
+    let payload = resolve_player_payload(&id, playlist_id.as_deref(), requested_quality, &state).await?;
     let cache_url = payload.stream_url.clone();
     let cache_id = id.clone();
     let cache_path = player_cache_path(&cache_id);
@@ -1359,7 +1365,7 @@ async fn ytm_player(video_id: String, playlist_id: Option<String>, audio_quality
                 fs::rename(format!("{}.part", cache_path.to_string_lossy()), &cache_path).map_err(|error| format!("player cache finalize failed: {error}"))?;
                 if player_cache_is_blocked(&cache_id) { let _ = fs::remove_file(&cache_path); return Err("player cache was removed".to_owned()); }
                 let db = Connection::open(database_path()).map_err(|error| format!("player cache database open failed: {error}"))?;
-                db.execute("INSERT INTO player_cache (song_id, path, bytes, cached_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(song_id) DO UPDATE SET path=excluded.path, bytes=excluded.bytes, cached_at=excluded.cached_at", params![cache_id, cache_path.to_string_lossy().to_string(), bytes, now_seconds()]).map_err(|error| format!("player cache state write failed: {error}"))?;
+                db.execute("INSERT INTO player_cache (song_id, path, bytes, cached_at, quality) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(song_id) DO UPDATE SET path=excluded.path, bytes=excluded.bytes, cached_at=excluded.cached_at, quality=excluded.quality", params![cache_id, cache_path.to_string_lossy().to_string(), bytes, now_seconds(), requested_quality]).map_err(|error| format!("player cache state write failed: {error}"))?;
                 Ok(())
             }.await;
             if result.is_err() { let _ = fs::remove_file(format!("{}.part", cache_path.to_string_lossy())); }
@@ -4184,8 +4190,8 @@ mod tests {
             "streamingData": {
                 "expiresInSeconds": 60,
                 "adaptiveFormats": [
-                    { "mimeType": "audio/mp4; codecs=\\\"mp4a.40.2\\\"", "bitrate": 128000, "url": "https://example.test/low" },
-                    { "mimeType": "audio/webm; codecs=\\\"opus\\\"", "bitrate": 160000, "url": "https://example.test/high" },
+                    { "mimeType": "audio/mp4; codecs=\\\"mp4a.40.2\\\"", "bitrate": 100000, "url": "https://example.test/low" },
+                    { "mimeType": "audio/webm; codecs=\\\"opus\\\"", "bitrate": 120000, "url": "https://example.test/high" },
                     { "mimeType": "audio/mp4", "bitrate": 320000, "signatureCipher": "cipher", "url": "https://example.test/rejected" }
                 ]
             }

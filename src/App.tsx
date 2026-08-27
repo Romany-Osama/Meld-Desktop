@@ -159,7 +159,7 @@ function InlineLikeButton({ item, autoDownloadOnLike = false, audioQuality = "au
       const nextLiked = !liked;
       await invoke("library_toggle_liked", { item, liked: nextLiked });
       setLiked(nextLiked);
-      if (autoDownloadOnLike && nextLiked && item.videoId) void invoke("download_start", { item }).catch(() => undefined);
+      if (autoDownloadOnLike && nextLiked && item.videoId) void invoke("download_start", { item, audioQuality }).catch(() => undefined);
       if (item.videoId) {
         try {
           const session = await invoke<SessionStatus>("session_status");
