@@ -1307,7 +1307,7 @@ async fn download_start(item: YtItem, audio_quality: Option<String>, app: tauri:
         let artwork_path = cache_download_artwork(&song_id, item.thumbnail.as_deref()).await;
         let artist = item.artists.iter().map(|value| value.name.as_str()).collect::<Vec<_>>().join(", ");
         let artist = if artist.trim().is_empty() { item.subtitle.clone() } else { artist };
-        let lyrics_cached = fetch_lyrics_inner(item.title.clone(), artist, 0, item.album_title.clone(), Some(video_id.to_owned()), state_for_lyrics).await.is_ok();
+        let lyrics_cached = fetch_lyrics_inner(item.title.clone(), artist, 0, item.album_title.clone(), Some(video_id.to_owned()), state_for_lyrics, true).await.is_ok();
         let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
         db.execute("UPDATE downloads SET bytes = ?1, total_bytes = ?2, state = 'completed', error = NULL, lyrics_cached = ?3, artwork_path = ?4 WHERE song_id = ?5", params![bytes, total_bytes.or(Some(bytes)), if lyrics_cached { 1 } else { 0 }, artwork_path, song_id]).map_err(|error| format!("download completion state failed: {error}"))?;
         if let Some(info) = read_download_info(&db, &song_id)? { emit_download(&app, &info); }
@@ -2755,16 +2755,18 @@ async fn fetch_lyrics_provider(
     }
 }
 
-async fn fetch_lyrics_inner(title: String, artist: String, duration: i32, album: Option<String>, id: Option<String>, state: tauri::State<'_, RuntimeState>) -> Result<LyricsPayload, String> {
+async fn fetch_lyrics_inner(title: String, artist: String, duration: i32, album: Option<String>, id: Option<String>, state: tauri::State<'_, RuntimeState>, use_cache: bool) -> Result<LyricsPayload, String> {
     let cleaned_title = clean_lyrics_title(&title);
     let cleaned_artist = clean_lyrics_artist(&artist);
     let cache_id = format!("lyrics:{}:{}", cleaned_title.to_lowercase(), cleaned_artist.to_lowercase());
+    if use_cache {
     if let Some(cached) = {
         let db = state.db.lock().map_err(|_| "database state poisoned")?;
         db.query_row("SELECT provider, text, synced FROM lyrics WHERE song_id = ?1", params![cache_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))).optional().map_err(|e| format!("lyrics cache read failed: {e}"))?
     } {
         let text = filter_lyrics_credit_lines(&cached.1);
         return Ok(LyricsPayload { lines: if cached.2 != 0 { parse_lyric_lines(&text) } else { Vec::new() }, provider: cached.0, text, synced: cached.2 != 0, matched_title: cleaned_title, matched_artist: cleaned_artist });
+    }
     }
     let album_name = album.as_deref().map(str::trim).filter(|value| !value.is_empty());
     let order = {
@@ -2797,10 +2799,35 @@ async fn fetch_lyrics_inner(title: String, artist: String, duration: i32, album:
 
 #[tauri::command]
 async fn fetch_lyrics(title: String, artist: String, duration: i32, album: Option<String>, id: Option<String>, state: tauri::State<'_, RuntimeState>) -> Result<LyricsPayload, String> {
-    match timeout(Duration::from_secs(30), fetch_lyrics_inner(title, artist, duration, album, id, state)).await {
+    match timeout(Duration::from_secs(30), fetch_lyrics_inner(title, artist, duration, album, id, state, true)).await {
         Ok(result) => result,
         Err(_) => Err("Lyrics providers timed out after 30 seconds".to_owned()),
     }
+}
+
+#[tauri::command]
+async fn fetch_lyrics_fresh(title: String, artist: String, duration: i32, album: Option<String>, id: Option<String>, state: tauri::State<'_, RuntimeState>) -> Result<LyricsPayload, String> {
+    match timeout(Duration::from_secs(30), fetch_lyrics_inner(title, artist, duration, album, id, state, false)).await {
+        Ok(result) => result,
+        Err(_) => Err("Lyrics providers timed out after 30 seconds".to_owned()),
+    }
+}
+
+#[tauri::command]
+async fn fetch_lyrics_from_provider(title: String, artist: String, duration: i32, album: Option<String>, id: Option<String>, provider: String, state: tauri::State<'_, RuntimeState>) -> Result<LyricsPayload, String> {
+    const PROVIDERS: [&str; 8] = ["BetterLyrics", "Paxsenix", "LrcLib", "KuGou", "LyricsPlus", "Musixmatch", "YouTubeSubtitle", "YouTube"];
+    let provider = provider.trim();
+    if !PROVIDERS.contains(&provider) { return Err(format!("unsupported lyrics provider: {provider}")); }
+    let cleaned_title = clean_lyrics_title(&title);
+    let cleaned_artist = clean_lyrics_artist(&artist);
+    let album_name = album.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    let cache_id = format!("lyrics:{}:{}", cleaned_title.to_lowercase(), cleaned_artist.to_lowercase());
+    let payload = timeout(Duration::from_secs(30), fetch_lyrics_provider(provider, &cleaned_title, &cleaned_artist, duration, album_name, id.as_deref(), &state)).await
+        .map_err(|_| "Lyrics provider timed out after 30 seconds".to_owned())??
+        .ok_or_else(|| format!("{provider} did not return lyrics for this song"))?;
+    let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+    db.execute("INSERT INTO lyrics (song_id, provider, text, synced, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(song_id) DO UPDATE SET provider=excluded.provider, text=excluded.text, synced=excluded.synced, fetched_at=excluded.fetched_at", params![cache_id, payload.provider, payload.text, if payload.synced { 1 } else { 0 }, now_seconds()]).map_err(|error| format!("lyrics provider cache write failed: {error}"))?;
+    Ok(payload)
 }
 
 #[tauri::command]
@@ -4224,7 +4251,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(RuntimeState::new())
         .plugin(tauri_plugin_taskbar::init())
-        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, ytm_refresh_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_browse, ytm_browse_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, library_artist_state, library_toggle_artist_bookmarked, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
+        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, ytm_refresh_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_browse, ytm_browse_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, fetch_lyrics, fetch_lyrics_fresh, fetch_lyrics_from_provider, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, library_artist_state, library_toggle_artist_bookmarked, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

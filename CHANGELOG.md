@@ -23,3 +23,7 @@ The remaining source gaps are not hidden or replaced with fake controls. Last.fm
 Equalizer/DSP, crossfade, skip silence, and loudness normalization require a tested Windows audio graph that preserves direct playback, local files, seeking, queue transitions, and error recovery, so they are not exposed as inert switches. Remote Wrapped and source-identical recognition remain separate contracts; the included recap is explicitly local.
 
 Protected or transformed YouTube stream handling—including PoToken/BotGuard extraction, signatureCipher/n-transform resolution, SABR playback, DRM/Widevine, ad bypass, ripping, browser playback, and localhost playback—is intentionally outside this port. Meld Desktop does not insert advertisements or promise behavior controlled by the upstream service.
+
+## Unreleased next change — Lyrics provider picker
+
+The Lyrics window and Full Player now include a real Provider selector. Automatic keeps the configured provider order and normal cache behavior. Choosing a provider explicitly calls that provider, replaces the current cached lyrics with its result, and reports a truthful provider-specific error if it returns no match. Selecting Automatic again refreshes the configured order instead of remaining stuck on the manually selected cached result. The existing provider enable/disable and ordering settings remain unchanged.

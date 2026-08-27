@@ -599,3 +599,28 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 .recap-highlight { display: grid; gap: 4px; margin: 10px 0; padding: 14px 16px; border: 1px solid rgba(133, 171, 221, .18); border-radius: 12px; background: rgba(10, 26, 48, .65); }
 .recap-highlight span, .recap-highlight small { color: var(--muted-text, #91a5c2); }
 @media (max-width: 680px) { .recap-grid { grid-template-columns: 1fr; } .detail-header-actions { margin-left: 0; width: 100%; } }
+
+
+.lyrics-provider-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--muted-text, #91a5c2);
+  font-size: 12px;
+}
+
+.lyrics-provider-picker select {
+  min-width: 172px;
+  max-width: 240px;
+  padding: 6px 28px 6px 9px;
+  border: 1px solid rgba(153, 174, 226, .24);
+  border-radius: 8px;
+  background: rgba(13, 20, 42, .86);
+  color: inherit;
+  font: inherit;
+}
+
+.lyrics-provider-picker select:disabled {
+  opacity: .65;
+}
