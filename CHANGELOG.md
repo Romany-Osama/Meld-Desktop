@@ -1,5 +1,21 @@
 # Meld Desktop Changelog
 
+## [0.1.4] — Continuous session, Home cache, and verified Windows packaging
+
+This release adds continuous playback session persistence across restarts, including queue, playlist context, selected item, playback position, and play/pause state without persisting expired stream URLs. Connected Google / YouTube Music accounts now refresh Home after login/logout and display the returned account avatar.
+
+Home now stores the last successful response in the local SQLite database and falls back to that cached preview when the network is unavailable. Downloads, Library, local playlists, downloaded artwork, cached lyrics, and local playback remain available without an initial internet connection; online search, recommendations, radio, and fetching new lyrics still require connectivity.
+
+The Windows build was rebuilt as version 0.1.4. Portable, NSIS setup, and MSI artifacts are provided. The Meld Desktop application icon is embedded in the executable, and the six taskbar thumbnail toolbar resources are included beside the portable executable.
+
+| Validation | Result |
+|---|---|
+| TypeScript and Vite production build | Passed |
+| Windows Tauri build | Passed |
+| Windows EXE associated-icon extraction | Passed; Meld logo present |
+| Portable taskbar resources | Passed; 6 resources present |
+| NSIS setup and MSI generation | Passed |
+
 ## Unreleased — Continuous session and offline lyrics variants
 
 The next batch adds a real continuous playback session. When persistent queue is enabled, Meld Desktop stores the current queue, playlist/watch-next continuation context, selected item, playback position, and paused/playing state without storing an expired stream URL. On the next launch it resolves a fresh playable stream and resumes the same item at the saved position; a manually cleared queue remains cleared.

@@ -436,7 +436,7 @@ fn local_item_from_path(path: &Path, artwork_dir: &Path) -> Option<LocalItem> {
     Some(LocalItem { id, kind: "song".to_owned(), title, subtitle, thumbnail, artists: vec![Artist { name: artist, id: Some(artist_id) }], browse_id: None, playlist_id: None, video_id: None, set_video_id: None, play_playlist_id: None, play_video_id: None, params: None, explicit: false, music_video_type: None, history_remove_token: None, album_id: None, album_title: album, local_path: path.to_string_lossy().to_string(), duration })
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct HomeSection {
     title: String,
@@ -448,7 +448,7 @@ struct HomeSection {
     items: Vec<YtItem>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct HomePage {
     sections: Vec<HomeSection>,
@@ -2218,13 +2218,37 @@ async fn ytm_history(state: tauri::State<'_, RuntimeState>) -> Result<RemoteHist
     Ok(parse_remote_history(&response))
 }
 
+const HOME_CACHE_SETTING: &str = "cached_home_page";
+
+fn cached_home(state: &tauri::State<'_, RuntimeState>) -> Option<HomePage> {
+    let db = state.db.lock().ok()?;
+    let value = db
+        .query_row("SELECT value FROM settings WHERE key = ?1", params![HOME_CACHE_SETTING], |row| row.get::<_, String>(0))
+        .ok()?;
+    serde_json::from_str::<HomePage>(&value).ok()
+}
+
+fn save_home_cache(state: &tauri::State<'_, RuntimeState>, page: &HomePage) {
+    let Ok(value) = serde_json::to_string(page) else { return; };
+    let Ok(db) = state.db.lock() else { return; };
+    let _ = db.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![HOME_CACHE_SETTING, value],
+    );
+}
+
 #[tauri::command]
 async fn ytm_home(state: tauri::State<'_, RuntimeState>) -> Result<HomePage, String> {
     let visitor_data = visitor(&state).await?;
     let request_session = browse_session(&state, auth_session(&state)?)?;
     let data_sync_id = request_session.as_ref().map(|value| value.data_sync_id.as_str());
-    let response = post("browse", json!({ "context": context(&visitor_data, request_session.is_some(), data_sync_id), "browseId": "FEmusic_home" }), request_session.as_ref()).await?;
-    Ok(parse_home(&response))
+    let response = match post("browse", json!({ "context": context(&visitor_data, request_session.is_some(), data_sync_id), "browseId": "FEmusic_home" }), request_session.as_ref()).await {
+        Ok(response) => response,
+        Err(error) => return cached_home(&state).map_or(Err(error), |mut page| { page.continuation = None; Ok(page) }),
+    };
+    let page = parse_home(&response);
+    if !page.sections.is_empty() { save_home_cache(&state, &page); }
+    Ok(page)
 }
 
 #[tauri::command]
