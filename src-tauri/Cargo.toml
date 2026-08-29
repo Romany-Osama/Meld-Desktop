@@ -1,6 +1,6 @@
 [package]
 name = "meld-desktop"
-version = "0.1.4"
+version = "0.1.6"
 description = "Meld Desktop — a Windows-native GPLv3 port of Meld"
 authors = ["Meld contributors"]
 edition = "2021"

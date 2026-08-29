@@ -1,5 +1,36 @@
 # Meld Desktop Changelog
 
+## [0.1.6] — Player title layout and MSI installer fix
+
+This release prevents long song titles from escaping the full-player card. The title is limited to two lines with a responsive ellipsis, while the complete title remains available through the normal hover tooltip. Artist metadata remains single-line and truncated inside its available space.
+
+The Windows MSI packaging now embeds the WebView2 bootstrapper instead of depending on a hidden external bootstrapper download during installation. This keeps the standard MSI flow local and makes it less likely to appear stuck after pressing Install. The NSIS installer remains available as the alternative installer. The MSI still needs internet access if WebView2 itself must be obtained; a fully offline WebView2 installer would require bundling the much larger fixed runtime separately.
+
+Google profile refresh from v0.1.5 remains included: one authenticated profile check at startup with local fallback on network failure. Spotify behavior, cross-service likes, Offline Home fallback, Downloads, Library, cached lyrics, artwork, and playback persistence are unchanged.
+
+| Validation | Result |
+|---|---|
+| TypeScript and Vite production build | Passed |
+| Windows Cargo check | Passed |
+| Long-title layout guard | Two-line ellipsis plus full hover title |
+| MSI WebView2 packaging | Embedded bootstrapper configured |
+| Spotify behavior diff | Unchanged |
+| Desktop-only source tree | No Android/Kotlin/Java artifacts |
+
+## [0.1.5] — Google profile refresh
+
+This maintenance release adds a single authenticated Google / YouTube Music profile refresh during application startup. When a saved Google session exists, Meld Desktop performs one normal `account_menu` request, compares the returned account name, channel handle, email, and avatar with the locally saved values, and updates the local profile when they changed. If the request fails or the application is offline, the previous local profile remains available and startup continues normally.
+
+The refresh is not repeated when opening Settings, does not run in a loop, does not create a new login session, and does not modify Spotify integration or cross-service like behavior. Offline Home fallback, Downloads, Library, cached lyrics, artwork, playback session persistence, and the verified Windows packaging from v0.1.4 remain included.
+
+| Validation | Result |
+|---|---|
+| TypeScript and Vite production build | Passed |
+| Windows Cargo check with locked dependencies | Passed |
+| Google refresh fallback behavior | Local profile retained on request failure |
+| Spotify source diff | No Spotify behavior changed |
+| Desktop-only source tree | No Android/Kotlin/Java artifacts |
+
 ## [0.1.4] — Continuous session, Home cache, and verified Windows packaging
 
 This release adds continuous playback session persistence across restarts, including queue, playlist context, selected item, playback position, and play/pause state without persisting expired stream URLs. Connected Google / YouTube Music accounts now refresh Home after login/logout and display the returned account avatar.

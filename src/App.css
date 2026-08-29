@@ -250,6 +250,7 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 .full-player-art img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .full-player-meta { min-width: 0; align-self: end; padding-right: 30px; }
 .full-player-meta h2 { margin-bottom: 8px; color: #f4f5ff; font-size: clamp(25px, 3vw, 42px); letter-spacing: -.04em; }
+.full-player-title { min-width: 0; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; text-overflow: ellipsis; overflow-wrap: anywhere; }
 .full-player-meta > p:not(.eyebrow) { overflow: hidden; color: #9da3bc; text-overflow: ellipsis; white-space: nowrap; }
 .full-player-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .full-player-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
