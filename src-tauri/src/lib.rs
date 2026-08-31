@@ -3069,7 +3069,10 @@ async fn ytm_toggle_like(video_id: String, liked: bool, item: Option<YtItem>, st
     let session = auth_session(&state)?.ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
     let endpoint = if liked { "like/like" } else { "like/removelike" };
     let response = post(endpoint, json!({ "context": context(&visitor_data, true, Some(&session.data_sync_id)), "target": { "videoId": id } }), Some(&session)).await?;
-    if response.get("feedbackResponses").is_none() && response.get("actions").is_none() { return Err("YouTube Music did not return a valid like response".to_owned()); }
+    if let Some(error) = response.get("error").and_then(Value::as_object) {
+        let message = error.get("message").and_then(Value::as_str).unwrap_or("YouTube Music rejected the like change");
+        return Err(message.to_owned());
+    }
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     if let Some(item) = item {
         db.execute("INSERT INTO songs (id, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, kind, saved_at, explicit, music_video_type, liked, liked_date, in_library, is_video, youtube_liked) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, NULL, 0, ?15, ?13) ON CONFLICT(id) DO UPDATE SET title=excluded.title, subtitle=excluded.subtitle, thumbnail=excluded.thumbnail, browse_id=excluded.browse_id, playlist_id=excluded.playlist_id, video_id=excluded.video_id, set_video_id=excluded.set_video_id, kind=excluded.kind, explicit=excluded.explicit, music_video_type=excluded.music_video_type, youtube_liked=excluded.youtube_liked, is_video=excluded.is_video", params![item.id, item.title, item.subtitle, item.thumbnail, item.browse_id, item.playlist_id, item.video_id, item.set_video_id, item.kind, now_seconds(), if item.explicit { 1 } else { 0 }, item.music_video_type, if liked { 1 } else { 0 }, if item.music_video_type.as_deref().is_some_and(|v| v != "MUSIC_VIDEO_TYPE_ATV") { 1 } else { 0 }]).map_err(|e| format!("like state save failed: {e}"))?;
@@ -3092,12 +3095,29 @@ async fn ytm_toggle_library(video_id: String, add_to_library: bool, state: tauri
     send_feedback(&session, token).await
 }
 
+fn find_avatar_url(value: Option<&Value>) -> Option<String> {
+    let value = value?;
+    if let Some(url) = value.get("url").and_then(Value::as_str).filter(|url| url.starts_with("http")) {
+        return Some(url.to_owned());
+    }
+    if let Some(url) = thumbnail(Some(value)) { return Some(url); }
+    if let Some(sources) = value.get("image").and_then(|image| image.get("sources")).and_then(Value::as_array) {
+        if let Some(url) = sources.iter().rev().find_map(|source| source.get("url").and_then(Value::as_str)) { return Some(url.to_owned()); }
+    }
+    if let Some(object) = value.as_object() {
+        for child in object.values() { if let Some(url) = find_avatar_url(Some(child)) { return Some(url); } }
+    } else if let Some(array) = value.as_array() {
+        for child in array { if let Some(url) = find_avatar_url(Some(child)) { return Some(url); } }
+    }
+    None
+}
+
 fn account_info_from_response(value: &Value) -> Option<(String, Option<String>, Option<String>, Option<String>)> {
     if let Some(object) = value.as_object() {
         if let Some(header) = object.get("activeAccountHeaderRenderer") {
             let name = text(header.get("accountName"));
             if !name.is_empty() {
-                return Some((name, Some(text(header.get("email"))).filter(|v| !v.is_empty()), Some(text(header.get("channelHandle"))).filter(|v| !v.is_empty()), thumbnail(header.get("avatar"))));
+                return Some((name, Some(text(header.get("email"))).filter(|v| !v.is_empty()), Some(text(header.get("channelHandle"))).filter(|v| !v.is_empty()), find_avatar_url(header.get("avatar"))));
             }
         }
         for child in object.values() { if let Some(info) = account_info_from_response(child) { return Some(info); } }
