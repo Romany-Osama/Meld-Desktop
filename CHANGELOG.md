@@ -1,5 +1,13 @@
 # Meld Desktop Changelog
 
+## [0.1.7] — Full player layout and NSIS-only release
+
+The full player now keeps the Share, Like, and More actions in the same horizontal row as the transport controls. The existing lyrics Provider selector and Back/Forward buttons are unchanged. Long titles remain one line with an ellipsis and the complete title is available on hover.
+
+The lyrics viewport now uses the available space inside the right-hand player column instead of relying on a fixed content height. Its internal spacing is balanced so the active synchronized line is centered in the lyrics viewport as the player is resized, while the existing provider and navigation controls remain in their original arrangement.
+
+Google profile refresh from v0.1.5 remains included: one authenticated profile check at startup with local fallback on network failure. Spotify behavior is unchanged. This release publishes the portable ZIP and NSIS setup EXE only; MSI is intentionally not built or uploaded.
+
 ## [0.1.6] — Player title layout and MSI installer fix
 
 This release prevents long song titles from escaping the full-player card. The title is limited to two lines with a responsive ellipsis, while the complete title remains available through the normal hover tooltip. Artist metadata remains single-line and truncated inside its available space.
