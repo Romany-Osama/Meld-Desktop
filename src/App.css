@@ -586,6 +586,11 @@ h2 { margin-bottom: 5px; font-size: 20px; letter-spacing: -.025em; }
 }
 
 /* Targeted interaction corrections after Windows visual review. */
+/* Dialogs opened from the player must remain above the player; queue and menus remain above dialogs. */
+.detail-overlay { z-index: 90; }
+.player-overlay { z-index: 82; }
+.queue-overlay { z-index: 94; }
+.menu-overlay { z-index: 98; }
 .search-box { z-index: 120; }
 .search-history-popover { z-index: 140; max-height: min(260px, 34vh); overflow-y: auto; }
 .full-player-panel > .close-button {

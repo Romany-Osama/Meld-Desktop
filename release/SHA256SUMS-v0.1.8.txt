@@ -1,0 +1,2 @@
+76df01cfb941fa4d4d0b7978afbfb05ed3c3c0880faca7ec5e8c2388c8b432a8  release/Meld-Desktop-0.1.8-portable.zip
+65f5ea4a959eef7e99d4bf75afbec2f4719bfee12ec384d63b35e5f68ef2379c  release/Meld-Desktop-0.1.8-x64-setup.exe

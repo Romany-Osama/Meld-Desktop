@@ -1,5 +1,11 @@
 # Meld Desktop Changelog
 
+## [0.1.8] — Overlay layering and window behavior
+
+Details and other player-related windows now appear above the full player when opened. Queue and action menus retain a higher layer, while the integrated lyrics panel remains inside the player. Closing a child window returns to the player without requiring the player to be closed first.
+
+Spotify behavior is unchanged. This release includes the portable ZIP and NSIS setup EXE only; MSI is not included.
+
 ## [0.1.7] — Full player layout and NSIS-only release
 
 The full player now keeps the Share, Like, and More actions in the same horizontal row as the transport controls. The existing lyrics Provider selector and Back/Forward buttons are unchanged. Long titles remain one line with an ellipsis and the complete title is available on hover.
