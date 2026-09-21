@@ -84,6 +84,16 @@ const secondaryNavigation: { key: NavKey; label: string; icon: string }[] = [
 const lyricsProviderNames = ["BetterLyrics", "Paxsenix", "LrcLib", "KuGou", "LyricsPlus", "Musixmatch", "YouTubeSubtitle", "YouTube"] as const;
 const lyricProviderSettingKeys: Record<string, string> = { BetterLyrics: "enableBetterLyrics", Paxsenix: "enablePaxsenix", LrcLib: "enableLrclib", KuGou: "enableKugou", LyricsPlus: "enableLyricsPlus", Musixmatch: "enableMusixmatch" };
 
+// Fisher–Yates. `array.sort(() => Math.random() - 0.5)` is biased and engine-dependent.
+function shuffled<T>(values: readonly T[]): T[] {
+  const result = [...values];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+  return result;
+}
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -311,6 +321,8 @@ function App() {
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
   const activeLyricRef = useRef<HTMLButtonElement | null>(null);
   const automixLoadingRef = useRef(false);
+  const playSeqRef = useRef(0);
+  const lastLibrarySyncRef = useRef<Record<string, number>>({});
   const [sleepTimerOpen, setSleepTimerOpen] = useState(false);
   const [sleepTimerMinutes, setSleepTimerMinutes] = useState(30);
   const [sleepTimerDefault, setSleepTimerDefault] = useState(30);
@@ -377,26 +389,35 @@ function App() {
     setNotice(endOfSong ? "Sleep timer will stop after the current song." : `Sleep timer set for ${sleepTimerMinutes} minutes.`);
   };
 
+  // Values that change on every playback tick live in a ref. Having `playbackSeconds` in the dependency list re-created
+  // the 1 s interval on every `timeupdate` (~4 Hz), so the callback never ran while music was playing.
+  const sleepTimerLiveRef = useRef({ volume, durationSeconds, playbackSeconds, stopAfterCurrent: sleepTimerStopAfterCurrent, fadeOut: sleepTimerFadeOut });
+  sleepTimerLiveRef.current = { volume, durationSeconds, playbackSeconds, stopAfterCurrent: sleepTimerStopAfterCurrent, fadeOut: sleepTimerFadeOut };
+
   useEffect(() => {
     if (sleepTimerExpiresAt === null && !sleepTimerEndOfSong) return;
     const timer = window.setInterval(() => {
-      const remainingMs = sleepTimerExpiresAt === null ? Math.max(0, (durationSeconds - playbackSeconds) * 1000) : sleepTimerExpiresAt - Date.now();
+      const live = sleepTimerLiveRef.current;
+      const remainingMs = sleepTimerExpiresAt === null ? Math.max(0, (live.durationSeconds - live.playbackSeconds) * 1000) : sleepTimerExpiresAt - Date.now();
       if (sleepTimerExpiresAt !== null && remainingMs <= 0) {
-        if (sleepTimerStopAfterCurrent) {
+        if (live.stopAfterCurrent) {
           setSleepTimerExpiresAt(null);
           setSleepTimerEndOfSong(true);
           setSleepTimerStopAfterCurrent(false);
         } else {
           audioRef.current?.pause();
-          clearSleepTimer();
+          setSleepTimerExpiresAt(null);
+          setSleepTimerEndOfSong(false);
+          setSleepTimerStopAfterCurrent(false);
+          if (audioRef.current) audioRef.current.volume = live.volume;
         }
         return;
       }
-      const multiplier = sleepTimerFadeOut ? Math.min(1, Math.max(0, remainingMs / 60_000)) : 1;
-      if (audioRef.current) audioRef.current.volume = volume * multiplier;
+      const multiplier = live.fadeOut ? Math.min(1, Math.max(0, remainingMs / 60_000)) : 1;
+      if (audioRef.current) audioRef.current.volume = live.volume * multiplier;
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [sleepTimerExpiresAt, sleepTimerEndOfSong, sleepTimerStopAfterCurrent, sleepTimerFadeOut, volume, durationSeconds, playbackSeconds]);
+  }, [sleepTimerExpiresAt, sleepTimerEndOfSong]);
 
   const loadHomeMore = async () => {
     if (home.status !== "ready" || !home.data.continuation || homeMoreLoading) return;
@@ -740,7 +761,7 @@ function App() {
 
   const playSelectedItems = async (shuffle: boolean) => {
     if (selectedItems.length === 0) return;
-    const items = shuffle ? [...selectedItems].sort(() => Math.random() - 0.5) : [...selectedItems];
+    const items = shuffle ? shuffled(selectedItems) : [...selectedItems];
     closeSelection();
     await playItem(items[0], items, 0, null);
   };
@@ -854,7 +875,7 @@ function App() {
 
   const shuffleLibrary = async () => {
     if (filteredLibraryData.length === 0) return;
-    const items = [...filteredLibraryData].sort(() => Math.random() - 0.5);
+    const items = shuffled(filteredLibraryData);
     await playItem(items[0], items, 0, null);
   };
 
@@ -872,11 +893,18 @@ function App() {
       await loadLibrary(mode);
       return;
     }
+    // Opening the tab or switching a filter used to trigger a full sequential sync every time. Sync at most every 5 minutes.
+    const syncKey = mode === "songs" ? "library" : mode;
+    if (Date.now() - (lastLibrarySyncRef.current[syncKey] ?? 0) < 5 * 60_000) {
+      await loadLibrary(mode);
+      return;
+    }
     setLibrarySyncing(true);
     setLibrary((state) => ({ ...state, status: "loading", error: undefined }));
     try {
       const syncMode = mode === "songs" ? "library" : mode;
       const result = await invoke<{ likedSongs: number; librarySongs: number; uploadedSongs: number }>("sync_youtube_library", { mode: syncMode });
+      lastLibrarySyncRef.current[syncMode] = Date.now();
       await loadLibrary(mode);
       setNotice(`YouTube Music sync finished: ${mode === "liked" ? result.likedSongs : mode === "uploaded" ? result.uploadedSongs : result.librarySongs} songs.`);
     } catch (error) {
@@ -1387,6 +1415,7 @@ function App() {
 
   const playItem = async (item: YtItem, sourceQueue: YtItem[] = [item], sourceIndex = 0, sourceContinuation: string | null = null) => {
     if (item.localPath) {
+      playSeqRef.current += 1;
       setNotice("");
       setLyrics(null);
       setLyricsAutoScrollEnabled(true);
@@ -1403,6 +1432,8 @@ function App() {
     }
     setNotice("");
     const keepInlineLyrics = playerExpanded;
+    // Ignore this request if the user started another track while it was still resolving (last click wins).
+    const playSeq = ++playSeqRef.current;
     setLyrics(null);
     setLyricsAutoScrollEnabled(true);
     let nextQueue = sourceQueue;
@@ -1432,6 +1463,7 @@ function App() {
         nextContinuation = null;
       }
     }
+    if (playSeq !== playSeqRef.current) return;
     const originalQueueSize = sourceQueue.length <= 1 ? nextQueue.length : sourceQueue.length;
     const arranged = arrangeQueueForSettings(nextQueue, nextIndex, originalQueueSize, effectiveShuffle);
     nextQueue = arranged.items;
@@ -1441,6 +1473,7 @@ function App() {
     setQueueIndex(nextIndex);
     try {
       const payload = await invoke<PlayerPayload>("ytm_player", { videoId: item.videoId });
+      if (playSeq !== playSeqRef.current) return;
       setPlayer({ item, payload });
       if (keepInlineLyrics) void openLyrics(item);
       if (settings.pauseListenHistory !== true) void invoke("history_add", { item }).then(() => { if (active === "history") void loadHistory(); }).catch(() => undefined);

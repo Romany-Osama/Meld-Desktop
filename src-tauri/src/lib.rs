@@ -38,57 +38,8 @@ const VISIONOS_VERSION: &str = "0.1";
 const VISIONOS_ID: &str = "101";
 const VISIONOS_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
 
-static HTTP: OnceLock<Client> = OnceLock::new();
-static MUSIXMATCH_TOKEN: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-static DOWNLOAD_CANCELS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
-static PLAYER_CACHE_ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-static PLAYER_CACHE_BLOCKED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-
-fn http() -> &'static Client {
-    HTTP.get_or_init(|| {
-        Client::builder()
-            .user_agent(USER_AGENT)
-            .gzip(true)
-            .brotli(true)
-            .deflate(true)
-            .build()
-            .expect("HTTP client must build")
-    })
-}
-
-struct RuntimeState {
-    visitor_data: Mutex<Option<String>>,
-    db: Mutex<Connection>,
-}
-
-#[derive(Debug, Clone)]
-struct AuthSession {
-    cookie: String,
-    data_sync_id: String,
-    visitor_data: String,
-    account_name: Option<String>,
-    account_email: Option<String>,
-    account_channel_handle: Option<String>,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct SessionStatus {
-    authenticated: bool,
-    account_name: Option<String>,
-    account_email: Option<String>,
-    account_channel_handle: Option<String>,
-}
-
-impl RuntimeState {
-    fn new() -> Self {
-        let path = database_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("Meld data directory must be created");
-        }
-        let db = Connection::open(path).expect("Meld SQLite database must open");
-        db.execute_batch(
-            "PRAGMA foreign_keys = ON;
+/// Full database schema. A const (rather than an inline literal) so tests can create a real database.
+const SCHEMA_SQL: &str = "PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS songs (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -236,8 +187,58 @@ impl RuntimeState {
                 PRIMARY KEY (song_id, artist_id),
                 FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE,
                 FOREIGN KEY (artist_id) REFERENCES artists(id) ON DELETE CASCADE
-             );",
-        ).expect("Meld SQLite schema must initialize");
+             );";
+
+static HTTP: OnceLock<Client> = OnceLock::new();
+static MUSIXMATCH_TOKEN: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static DOWNLOAD_CANCELS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+static PLAYER_CACHE_ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static PLAYER_CACHE_BLOCKED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn http() -> &'static Client {
+    HTTP.get_or_init(|| {
+        Client::builder()
+            .user_agent(USER_AGENT)
+            .gzip(true)
+            .brotli(true)
+            .deflate(true)
+            .build()
+            .expect("HTTP client must build")
+    })
+}
+
+struct RuntimeState {
+    visitor_data: Mutex<Option<String>>,
+    db: Mutex<Connection>,
+}
+
+#[derive(Debug, Clone)]
+struct AuthSession {
+    cookie: String,
+    data_sync_id: String,
+    visitor_data: String,
+    account_name: Option<String>,
+    account_email: Option<String>,
+    account_channel_handle: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SessionStatus {
+    authenticated: bool,
+    account_name: Option<String>,
+    account_email: Option<String>,
+    account_channel_handle: Option<String>,
+}
+
+impl RuntimeState {
+    fn new() -> Self {
+        let path = database_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("Meld data directory must be created");
+        }
+        let db = Connection::open(path).expect("Meld SQLite database must open");
+        db.execute_batch(SCHEMA_SQL).expect("Meld SQLite schema must initialize");
         let _ = db.execute("ALTER TABLE songs ADD COLUMN set_video_id TEXT", []);
         let _ = db.execute("ALTER TABLE songs ADD COLUMN explicit INTEGER NOT NULL DEFAULT 0", []);
         let _ = db.execute("ALTER TABLE songs ADD COLUMN music_video_type TEXT", []);
@@ -259,6 +260,8 @@ impl RuntimeState {
         let _ = db.execute("ALTER TABLE downloads ADD COLUMN artwork_path TEXT", []);
         let _ = db.execute("ALTER TABLE albums ADD COLUMN liked INTEGER NOT NULL DEFAULT 0", []);
         let _ = db.execute("ALTER TABLE playlists ADD COLUMN source TEXT NOT NULL DEFAULT 'local'", []);
+        // A download cannot survive a restart; rows still marked "downloading" are leftovers of a crash or forced quit.
+        let _ = db.execute("UPDATE downloads SET state = 'failed', error = 'Interrupted by app restart' WHERE state = 'downloading'", []);
         Self { visitor_data: Mutex::new(None), db: Mutex::new(db) }
     }
 }
@@ -611,20 +614,24 @@ fn explicit_badge(renderer: &Value) -> bool {
 }
 
 fn parse_artists(subtitle: Option<&Value>) -> Vec<Artist> {
-    subtitle
-        .and_then(|v| v.get("runs"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|run| {
-            let name = run.get("text").and_then(Value::as_str)?.to_owned();
-            if name.is_empty() {
-                return None;
-            }
-            let (id, _) = browse_endpoint(run.get("navigationEndpoint"));
-            Some(Artist { name, id })
-        })
-        .collect()
+    // YouTube subtitles interleave artists with separators (" • ", " & "), a type label ("Song"), an album link and
+    // a duration. Only runs that link to an artist/channel page are artists; when none do (uploads, plain-text
+    // credits) fall back to the text runs that are not separators or durations.
+    let runs = subtitle.and_then(|v| v.get("runs")).and_then(Value::as_array).into_iter().flatten();
+    let mut linked = Vec::new();
+    let mut plain = Vec::new();
+    for run in runs {
+        let Some(name) = run.get("text").and_then(Value::as_str).map(str::trim).filter(|value| !value.is_empty()) else { continue; };
+        let endpoint = run.get("navigationEndpoint");
+        let (id, _) = browse_endpoint(endpoint);
+        let page_type = endpoint.and_then(|v| v.get("browseEndpoint")).and_then(|v| v.get("browseEndpointContextSupportedConfigs")).and_then(|v| v.get("browseEndpointContextMusicConfig")).and_then(|v| v.get("pageType")).and_then(Value::as_str).unwrap_or("");
+        let is_artist = page_type.contains("ARTIST") || page_type.contains("USER_CHANNEL") || id.as_deref().is_some_and(|value| value.starts_with("UC"));
+        if is_artist { linked.push(Artist { name: name.to_owned(), id }); continue; }
+        let is_separator = name.chars().all(|c| !c.is_alphanumeric()) || matches!(name.to_lowercase().as_str(), "and" | "x" | "feat" | "feat." | "ft" | "ft." | "with");
+        let is_duration = name.chars().all(|c| c.is_ascii_digit() || c == ':');
+        if id.is_none() && !is_separator && !is_duration { plain.push(Artist { name: name.to_owned(), id: None }); }
+    }
+    if linked.is_empty() { plain } else { linked }
 }
 
 fn parse_two_row(renderer: &Value) -> Option<YtItem> {
@@ -1132,6 +1139,15 @@ fn download_cancel_map() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     DOWNLOAD_CANCELS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Removes a song from the active-download map on every exit path (including early `?` returns), so a failed setup
+/// step can no longer leave the song stuck as "download is already active" until the app restarts.
+struct ActiveDownloadGuard(String);
+impl Drop for ActiveDownloadGuard {
+    fn drop(&mut self) {
+        if let Ok(mut map) = download_cancel_map().lock() { map.remove(&self.0); }
+    }
+}
+
 fn read_download_info(db: &Connection, song_id: &str) -> Result<Option<DownloadInfo>, String> {
     db.query_row("SELECT song_id, path, bytes, total_bytes, state, error, lyrics_cached, artwork_path FROM downloads WHERE song_id = ?1", params![song_id], download_info_from_row).optional().map_err(|error| format!("download state read failed: {error}"))
 }
@@ -1206,6 +1222,7 @@ async fn download_start(item: YtItem, app: tauri::AppHandle, state: tauri::State
         if map.contains_key(&song_id) { return Err("download is already active".to_owned()); }
         map.insert(song_id.clone(), cancel.clone());
     }
+    let _active_download = ActiveDownloadGuard(song_id.clone());
     let final_path = download_cache_path(&song_id);
     let partial_path = PathBuf::from(format!("{}.part", final_path.to_string_lossy()));
     if let Some(parent) = final_path.parent() { fs::create_dir_all(parent).map_err(|error| format!("download cache directory failed: {error}"))?; }
@@ -1246,7 +1263,7 @@ async fn download_start(item: YtItem, app: tauri::AppHandle, state: tauri::State
         let artwork_path = cache_download_artwork(&song_id, item.thumbnail.as_deref()).await;
         let artist = item.artists.iter().map(|value| value.name.as_str()).collect::<Vec<_>>().join(", ");
         let artist = if artist.trim().is_empty() { item.subtitle.clone() } else { artist };
-        let lyrics_cached = fetch_lyrics_inner(item.title.clone(), artist, 0, item.album_title.clone(), Some(video_id.to_owned()), state_for_lyrics).await.is_ok();
+        let lyrics_cached = fetch_lyrics_inner(item.title.clone(), artist, -1, item.album_title.clone(), Some(video_id.to_owned()), state_for_lyrics).await.is_ok();
         let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
         db.execute("UPDATE downloads SET bytes = ?1, total_bytes = ?2, state = 'completed', error = NULL, lyrics_cached = ?3, artwork_path = ?4 WHERE song_id = ?5", params![bytes, total_bytes.or(Some(bytes)), if lyrics_cached { 1 } else { 0 }, artwork_path, song_id]).map_err(|error| format!("download completion state failed: {error}"))?;
         if let Some(info) = read_download_info(&db, &song_id)? { emit_download(&app, &info); }
@@ -1964,26 +1981,25 @@ fn upsert_synced_song(db: &Connection, item: &YtItem, mode: &str, timestamp: i64
 #[serde(rename_all = "camelCase")]
 struct YouTubeSyncResult { liked_songs: usize, library_songs: usize, uploaded_songs: usize, playlists: usize }
 
-#[tauri::command]
-async fn sync_youtube_library(mode: String, state: tauri::State<'_, RuntimeState>) -> Result<YouTubeSyncResult, String> {
-    let mode = mode.trim().to_lowercase();
-    if !matches!(mode.as_str(), "liked" | "library" | "uploaded" | "playlists") { return Err("YouTube library sync mode must be liked, library, uploaded, or playlists".to_owned()); }
-    let session = auth_session(&state)?.ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
-    let (liked_songs, mut library_songs, mut uploaded_songs, playlists) = if mode == "liked" {
-        (fetch_all_playlist_songs(&session, "LM").await?, Vec::new(), Vec::new(), Vec::new())
-    } else if mode == "library" {
-        (Vec::new(), fetch_all_library_songs(&session, "FEmusic_liked_videos", None).await?, Vec::new(), Vec::new())
-    } else if mode == "uploaded" {
-        (Vec::new(), Vec::new(), fetch_all_library_songs(&session, "FEmusic_library_privately_owned_tracks", Some(1)).await?, Vec::new())
-    } else {
-        (Vec::new(), Vec::new(), Vec::new(), fetch_all_library_playlists(&session).await?)
-    };
-    if mode == "library" || mode == "uploaded" { if mode == "library" { library_songs.reverse(); } else { uploaded_songs.reverse(); } }
-    let timestamp = now_seconds();
-    let mut db = state.db.lock().map_err(|_| "database state poisoned")?;
+/// Applies a fetched YouTube snapshot to the local database. Split out of `sync_youtube_library` so it can be tested.
+/// Safety rules: (1) never wipe existing synced rows when YouTube returned nothing (a changed response layout makes the
+/// parsers return an empty list, which used to erase the local library); (2) only reset likes that came from YouTube,
+/// so local-only likes survive a sync.
+fn apply_youtube_sync(db: &mut Connection, mode: &str, liked_songs: &[YtItem], library_songs: &[YtItem], uploaded_songs: &[YtItem], playlists: &[YtItem], timestamp: i64) -> Result<(), String> {
+    let fetched = match mode { "liked" => liked_songs.len(), "library" => library_songs.len(), "uploaded" => uploaded_songs.len(), _ => playlists.len() };
+    if fetched == 0 {
+        let existing_sql = match mode {
+            "liked" => "SELECT COUNT(*) FROM songs WHERE youtube_liked = 1",
+            "library" => "SELECT COUNT(*) FROM songs WHERE in_library = 1",
+            "uploaded" => "SELECT COUNT(*) FROM songs WHERE uploaded = 1",
+            _ => "SELECT COUNT(*) FROM playlists WHERE source = 'youtube'",
+        };
+        let existing: i64 = db.query_row(existing_sql, [], |row| row.get(0)).map_err(|error| format!("YouTube library sync safety check failed: {error}"))?;
+        if existing > 0 { return Err(format!("YouTube Music returned no {mode} items; local data was left unchanged")); }
+    }
     let tx = db.transaction().map_err(|error| format!("YouTube library sync transaction failed: {error}"))?;
     if mode == "liked" {
-        tx.execute("UPDATE songs SET liked = 0, liked_date = NULL WHERE liked = 1", []).map_err(|error| format!("liked state reset failed: {error}"))?;
+        tx.execute("UPDATE songs SET liked = 0, liked_date = NULL WHERE liked = 1 AND youtube_liked = 1", []).map_err(|error| format!("liked state reset failed: {error}"))?;
         tx.execute("UPDATE albums SET liked = 0 WHERE liked = 1", []).map_err(|error| format!("liked album state reset failed: {error}"))?;
         for (index, item) in liked_songs.iter().enumerate() { upsert_synced_song(&tx, item, "liked", timestamp - index as i64)?; }
     } else if mode == "library" {
@@ -2002,6 +2018,27 @@ async fn sync_youtube_library(mode: String, state: tauri::State<'_, RuntimeState
         }
     }
     tx.commit().map_err(|error| format!("YouTube library sync commit failed: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn sync_youtube_library(mode: String, state: tauri::State<'_, RuntimeState>) -> Result<YouTubeSyncResult, String> {
+    let mode = mode.trim().to_lowercase();
+    if !matches!(mode.as_str(), "liked" | "library" | "uploaded" | "playlists") { return Err("YouTube library sync mode must be liked, library, uploaded, or playlists".to_owned()); }
+    let session = auth_session(&state)?.ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
+    let (liked_songs, mut library_songs, mut uploaded_songs, playlists) = if mode == "liked" {
+        (fetch_all_playlist_songs(&session, "LM").await?, Vec::new(), Vec::new(), Vec::new())
+    } else if mode == "library" {
+        (Vec::new(), fetch_all_library_songs(&session, "FEmusic_liked_videos", None).await?, Vec::new(), Vec::new())
+    } else if mode == "uploaded" {
+        (Vec::new(), Vec::new(), fetch_all_library_songs(&session, "FEmusic_library_privately_owned_tracks", Some(1)).await?, Vec::new())
+    } else {
+        (Vec::new(), Vec::new(), Vec::new(), fetch_all_library_playlists(&session).await?)
+    };
+    if mode == "library" || mode == "uploaded" { if mode == "library" { library_songs.reverse(); } else { uploaded_songs.reverse(); } }
+    let timestamp = now_seconds();
+    let mut db = state.db.lock().map_err(|_| "database state poisoned")?;
+    apply_youtube_sync(&mut db, &mode, &liked_songs, &library_songs, &uploaded_songs, &playlists, timestamp)?;
     Ok(YouTubeSyncResult { liked_songs: liked_songs.len(), library_songs: library_songs.len(), uploaded_songs: uploaded_songs.len(), playlists: playlists.len() })
 }
 
@@ -2386,7 +2423,7 @@ async fn musixmatch_token() -> Option<String> {
 
 async fn musixmatch_fetch(title: &str, artist: &str, duration: i32, album: Option<&str>) -> Option<(String, bool)> {
     let token = musixmatch_token().await?;
-    let duration_seconds = if duration > 0 { duration / 1000 } else { -1 };
+    let duration_seconds = if duration > 0 { duration } else { -1 };
     let mut request = http().get("https://apic-desktop.musixmatch.com/ws/1.1/macro.subtitles.get").query(&[("format", "json"), ("namespace", "lyrics_richsynced"), ("subtitle_format", "lrc"), ("app_id", "web-desktop-app-v1.0"), ("usertoken", token.as_str()), ("q_track", title), ("q_artist", artist)]).header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").header("Cookie", "AWSELB=0; AWSELBCORS=0");
     if let Some(album) = album.filter(|value| !value.is_empty()) { request = request.query(&[("q_album", album)]); }
     if duration_seconds > 0 { let seconds = duration_seconds.to_string(); request = request.query(&[("q_duration", seconds.as_str()), ("f_subtitle_length", seconds.as_str())]); }
@@ -2398,7 +2435,7 @@ async fn musixmatch_fetch(title: &str, artist: &str, duration: i32, album: Optio
 
 async fn lyricsplus_fetch(title: &str, artist: &str, duration: i32, album: Option<&str>) -> Option<String> {
     for base in ["https://lyricsplus.binimum.org", "https://lyricsplus.atomix.one", "https://lyricsplus-seven.vercel.app"] {
-        let seconds = if duration > 0 { duration / 1000 } else { -1 };
+        let seconds = if duration > 0 { duration } else { -1 };
         let seconds_value = seconds.to_string();
         let mut request = http().get(format!("{base}/v2/lyrics/get")).query(&[("title", title), ("artist", artist), ("duration", seconds_value.as_str()), ("source", "apple,lyricsplus,musixmatch,spotify,musixmatch-word")]);
         if let Some(album) = album.filter(|value| !value.is_empty()) { request = request.query(&[("album", album)]); }
@@ -2432,8 +2469,11 @@ fn clean_lyrics_title(value: &str) -> String {
 fn clean_lyrics_artist(value: &str) -> String {
     let separators = [" & ", " and ", ", ", " x ", " X ", " feat. ", " feat ", " ft. ", " ft ", " featuring ", " with "];
     let mut result = value.trim().to_owned();
+    // ASCII-only lowercasing keeps byte offsets identical to `result`. `to_lowercase()` can change byte lengths
+    // (e.g. "ẞ" -> "ß"), and truncating `result` at that index panicked with "not a char boundary".
+    let lowered = result.to_ascii_lowercase();
     for separator in separators {
-        if let Some(index) = result.to_lowercase().find(&separator.to_lowercase()) {
+        if let Some(index) = lowered.find(&separator.to_ascii_lowercase()) {
             result.truncate(index);
             break;
         }
@@ -2676,7 +2716,7 @@ fn library_toggle_liked(item: YtItem, liked: bool, state: tauri::State<'_, Runti
         params![item.id, item.title, item.subtitle, item.thumbnail, item.browse_id, item.playlist_id, item.video_id, item.set_video_id, item.kind, now, if item.explicit { 1 } else { 0 }, item.music_video_type, if liked { 1 } else { 0 }, if item.music_video_type.as_deref().is_some_and(|value| value != "MUSIC_VIDEO_TYPE_ATV") { 1 } else { 0 }],
     ).map_err(|e| format!("Meld liked state save failed: {e}"))?;
     if !liked {
-        db.execute("DELETE FROM songs WHERE id = ?1 AND liked = 0 AND in_library = 0 AND NOT EXISTS (SELECT 1 FROM playlist_songs WHERE playlist_songs.song_id = songs.id)", params![item.id]).map_err(|e| format!("Meld liked cleanup failed: {e}"))?;
+        db.execute("DELETE FROM songs WHERE id = ?1 AND liked = 0 AND in_library = 0 AND NOT EXISTS (SELECT 1 FROM playlist_songs WHERE playlist_songs.song_id = songs.id) AND NOT EXISTS (SELECT 1 FROM downloads WHERE downloads.song_id = songs.id)", params![item.id]).map_err(|e| format!("Meld liked cleanup failed: {e}"))?;
     }
     Ok(())
 }
@@ -2740,6 +2780,14 @@ async fn ytm_remove_from_history(token: String, state: tauri::State<'_, RuntimeS
     send_feedback(&session, token.to_owned()).await
 }
 
+/// Stores the YouTube like state of `item` locally. This statement binds 14 parameters. It used to reference `?15` for
+/// `is_video`, so SQLite expected 15 and every call failed with `InvalidParameterCount(14, 15)` right after the like had
+/// already been accepted by YouTube.
+fn save_like_state(db: &Connection, item: &YtItem, liked: bool) -> Result<(), String> {
+    db.execute("INSERT INTO songs (id, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, kind, saved_at, explicit, music_video_type, liked, liked_date, in_library, is_video, youtube_liked) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, NULL, 0, ?14, ?13) ON CONFLICT(id) DO UPDATE SET title=excluded.title, subtitle=excluded.subtitle, thumbnail=excluded.thumbnail, browse_id=excluded.browse_id, playlist_id=excluded.playlist_id, video_id=excluded.video_id, set_video_id=excluded.set_video_id, kind=excluded.kind, explicit=excluded.explicit, music_video_type=excluded.music_video_type, youtube_liked=excluded.youtube_liked, is_video=excluded.is_video", params![item.id, item.title, item.subtitle, item.thumbnail, item.browse_id, item.playlist_id, item.video_id, item.set_video_id, item.kind, now_seconds(), if item.explicit { 1 } else { 0 }, item.music_video_type, if liked { 1 } else { 0 }, if item.music_video_type.as_deref().is_some_and(|v| v != "MUSIC_VIDEO_TYPE_ATV") { 1 } else { 0 }]).map_err(|e| format!("like state save failed: {e}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn ytm_toggle_like(video_id: String, liked: bool, item: Option<YtItem>, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
     let id = video_id.trim();
@@ -2751,11 +2799,11 @@ async fn ytm_toggle_like(video_id: String, liked: bool, item: Option<YtItem>, st
     if response.get("feedbackResponses").is_none() && response.get("actions").is_none() { return Err("YouTube Music did not return a valid like response".to_owned()); }
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     if let Some(item) = item {
-        db.execute("INSERT INTO songs (id, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, kind, saved_at, explicit, music_video_type, liked, liked_date, in_library, is_video, youtube_liked) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, NULL, 0, ?15, ?13) ON CONFLICT(id) DO UPDATE SET title=excluded.title, subtitle=excluded.subtitle, thumbnail=excluded.thumbnail, browse_id=excluded.browse_id, playlist_id=excluded.playlist_id, video_id=excluded.video_id, set_video_id=excluded.set_video_id, kind=excluded.kind, explicit=excluded.explicit, music_video_type=excluded.music_video_type, youtube_liked=excluded.youtube_liked, is_video=excluded.is_video", params![item.id, item.title, item.subtitle, item.thumbnail, item.browse_id, item.playlist_id, item.video_id, item.set_video_id, item.kind, now_seconds(), if item.explicit { 1 } else { 0 }, item.music_video_type, if liked { 1 } else { 0 }, if item.music_video_type.as_deref().is_some_and(|v| v != "MUSIC_VIDEO_TYPE_ATV") { 1 } else { 0 }]).map_err(|e| format!("like state save failed: {e}"))?;
+        save_like_state(&db, &item, liked)?;
     } else {
         db.execute("UPDATE songs SET youtube_liked = ?1 WHERE video_id = ?2 OR id = ?2", params![if liked { 1 } else { 0 }, id]).map_err(|e| format!("like state update failed: {e}"))?;
     }
-    if !liked { db.execute("DELETE FROM songs WHERE (video_id = ?1 OR id = ?1) AND in_library = 0 AND NOT EXISTS (SELECT 1 FROM playlist_songs WHERE playlist_songs.song_id = songs.id)", params![id]).map_err(|e| format!("like cleanup failed: {e}"))?; }
+    if !liked { db.execute("DELETE FROM songs WHERE (video_id = ?1 OR id = ?1) AND in_library = 0 AND liked = 0 AND youtube_liked = 0 AND uploaded = 0 AND NOT EXISTS (SELECT 1 FROM playlist_songs WHERE playlist_songs.song_id = songs.id) AND NOT EXISTS (SELECT 1 FROM downloads WHERE downloads.song_id = songs.id)", params![id]).map_err(|e| format!("like cleanup failed: {e}"))?; }
     Ok(())
 }
 
@@ -2798,11 +2846,6 @@ async fn save_account_session_internal(cookie: String, data_sync_id: String, vis
     }
     *state.visitor_data.lock().map_err(|_| "visitor state poisoned")? = Some(session.visitor_data);
     Ok(SessionStatus { authenticated: true, account_name: Some(name), account_email: email, account_channel_handle: channel_handle })
-}
-
-#[tauri::command]
-async fn account_save_session(cookie: String, data_sync_id: String, visitor_data: String, state: tauri::State<'_, RuntimeState>) -> Result<SessionStatus, String> {
-    save_account_session_internal(cookie, data_sync_id, visitor_data, state.inner()).await
 }
 
 #[tauri::command]
@@ -3177,22 +3220,29 @@ async fn spotify_search_tracks(query: String, state: tauri::State<'_, RuntimeSta
 }
 
 fn spotify_normalize(value: &str) -> String {
+    static NOISE: OnceLock<Vec<Regex>> = OnceLock::new();
+    static STRIP: OnceLock<Regex> = OnceLock::new();
+    static SPACES: OnceLock<Regex> = OnceLock::new();
+    let noise = NOISE.get_or_init(|| [r"(?i)\(feat\..*?\)", r"(?i)\(ft\..*?\)", r"\[.*?\]", r"(?i)\(.*?remaster.*?\)", r"(?i)\(.*?remix.*?\)"].iter().map(|pattern| Regex::new(pattern).expect("static regex")).collect());
+    // Keep letters and digits of every script. The old `[^a-z0-9\s]` stripped Arabic/CJK/Cyrillic titles to "".
+    let strip = STRIP.get_or_init(|| Regex::new(r"[^\p{L}\p{N}\s]").expect("static regex"));
+    let spaces = SPACES.get_or_init(|| Regex::new(r"\s+").expect("static regex"));
     let mut normalized = value.to_lowercase();
-    for pattern in [r"(?i)\(feat\..*?\)", r"(?i)\(ft\..*?\)", r"\[.*?\]", r"(?i)\(.*?remaster.*?\)", r"(?i)\(.*?remix.*?\)"] {
-        if let Ok(regex) = Regex::new(pattern) { normalized = regex.replace_all(&normalized, "").into_owned(); }
-    }
-    if let Ok(regex) = Regex::new(r"[^a-z0-9\s]") { normalized = regex.replace_all(&normalized, "").into_owned(); }
-    if let Ok(regex) = Regex::new(r"\s+") { normalized = regex.replace_all(&normalized, " ").trim().to_owned(); }
-    normalized
+    for regex in noise { normalized = regex.replace_all(&normalized, "").into_owned(); }
+    normalized = strip.replace_all(&normalized, "").into_owned();
+    spaces.replace_all(&normalized, " ").trim().to_owned()
 }
 
 fn spotify_bigram_similarity(left: &str, right: &str) -> f64 {
+    // Empty strings never match (two titles that both normalize to "" used to score a perfect 1.0).
+    if left.is_empty() || right.is_empty() { return 0.0; }
     if left == right { return 1.0; }
-    if left.len() < 2 || right.len() < 2 { return 0.0; }
-    let left_bigrams: HashSet<String> = left.as_bytes().windows(2).map(|bytes| String::from_utf8_lossy(bytes).to_string()).collect();
-    let right_bigrams: HashSet<String> = right.as_bytes().windows(2).map(|bytes| String::from_utf8_lossy(bytes).to_string()).collect();
-    if left_bigrams.is_empty() || right_bigrams.is_empty() { return 0.0; }
-    let intersection = left_bigrams.iter().filter(|value| right_bigrams.contains(*value)).count();
+    let left_chars: Vec<char> = left.chars().collect();
+    let right_chars: Vec<char> = right.chars().collect();
+    if left_chars.len() < 2 || right_chars.len() < 2 { return 0.0; }
+    let left_bigrams: HashSet<(char, char)> = left_chars.windows(2).map(|pair| (pair[0], pair[1])).collect();
+    let right_bigrams: HashSet<(char, char)> = right_chars.windows(2).map(|pair| (pair[0], pair[1])).collect();
+    let intersection = left_bigrams.intersection(&right_bigrams).count();
     (2.0 * intersection as f64) / (left_bigrams.len() + right_bigrams.len()) as f64
 }
 
@@ -3243,6 +3293,8 @@ async fn spotify_resolve_youtube(youtube_id: Option<String>, title: String, arti
     for candidate in candidates {
         let title_score = spotify_bigram_similarity(&normalized_title, &spotify_normalize(&candidate.name));
         let artist_score = spotify_bigram_similarity(&normalized_artist, &spotify_normalize(&candidate.artist));
+        // A matching artist alone must not be enough: the title has to resemble the candidate too.
+        if title_score < 0.5 { continue; }
         let score = title_score * 0.45 + artist_score * 0.35 + spotify_duration_score(spotify_duration_ms, candidate.duration_ms) * 0.20;
         if best.as_ref().is_none_or(|(current, _)| score > *current) { best = Some((score, candidate)); }
     }
@@ -3438,7 +3490,7 @@ fn speed_dial_items(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>
 fn library_remove_item(id: String, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute("UPDATE songs SET in_library = 0 WHERE id = ?1", params![id]).map_err(|e| format!("library remove failed: {e}"))?;
-    db.execute("DELETE FROM songs WHERE id = ?1 AND liked = 0 AND youtube_liked = 0 AND uploaded = 0 AND NOT EXISTS (SELECT 1 FROM playlist_songs WHERE song_id = ?1)", params![id]).map_err(|e| format!("library cleanup failed: {e}"))?;
+    db.execute("DELETE FROM songs WHERE id = ?1 AND liked = 0 AND youtube_liked = 0 AND uploaded = 0 AND NOT EXISTS (SELECT 1 FROM playlist_songs WHERE song_id = ?1) AND NOT EXISTS (SELECT 1 FROM downloads WHERE downloads.song_id = songs.id)", params![id]).map_err(|e| format!("library cleanup failed: {e}"))?;
     Ok(())
 }
 
@@ -3479,7 +3531,7 @@ fn history_add(item: YtItem, state: tauri::State<'_, RuntimeState>) -> Result<()
 fn history_clear(state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute("DELETE FROM history", []).map_err(|e| format!("history clear failed: {e}"))?;
-    db.execute("DELETE FROM songs WHERE liked = 0 AND youtube_liked = 0 AND uploaded = 0 AND in_library = 0 AND NOT EXISTS (SELECT 1 FROM playlist_songs WHERE playlist_songs.song_id = songs.id)", []).map_err(|e| format!("history cleanup failed: {e}"))?;
+    db.execute("DELETE FROM songs WHERE liked = 0 AND youtube_liked = 0 AND uploaded = 0 AND in_library = 0 AND NOT EXISTS (SELECT 1 FROM playlist_songs WHERE playlist_songs.song_id = songs.id) AND NOT EXISTS (SELECT 1 FROM downloads WHERE downloads.song_id = songs.id)", []).map_err(|e| format!("history cleanup failed: {e}"))?;
     Ok(())
 }
 
@@ -3520,6 +3572,24 @@ fn allowed_setting(key: &str) -> bool {
     matches!(key, "ytmSync" | "useLoginForBrowse" | "hideExplicit" | "hideVideoSongs" | "enableBetterLyrics" | "enablePaxsenix" | "enableLrclib" | "enableKugou" | "enableLyricsPlus" | "enableMusixmatch" | "shuffleMode" | "repeatMode" | "similarContent" | "autoLoadMore" | "disableLoadMoreWhenRepeatAll" | "autoDownloadOnLike" | "autoSkipNextOnError" | "persistentShuffleAcrossQueues" | "rememberShuffleAndRepeat" | "shufflePlaylistFirst" | "preventDuplicateTracksInQueue" | "pauseListenHistory" | "pauseSearchHistory" | "sleepTimerDefault" | "lyricsProviderOrder" | "show_liked_playlist" | "show_downloaded_playlist" | "show_uploaded_playlist" | "show_top_playlist" | "show_cached_playlist")
 }
 
+/// The backup's `song.db` is a `VACUUM INTO` copy of the live database, which includes the `settings` table
+/// (Google cookies, Spotify `sp_dc`, tokens). Keep only allowlisted settings, then VACUUM again: a plain DELETE
+/// leaves the removed bytes in SQLite's free pages, so they would still be readable in the file.
+fn scrub_backup_copy(path: &Path) -> Result<(), String> {
+    let copy = Connection::open(path).map_err(|error| format!("backup copy open failed: {error}"))?;
+    copy.execute_batch("PRAGMA secure_delete = ON;").map_err(|error| format!("backup copy pragma failed: {error}"))?;
+    let keys: Vec<String> = {
+        let mut statement = copy.prepare("SELECT key FROM settings").map_err(|error| format!("backup copy settings query failed: {error}"))?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0)).map_err(|error| format!("backup copy settings rows failed: {error}"))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("backup copy settings decode failed: {error}"))?
+    };
+    for key in keys.into_iter().filter(|key| !allowed_setting(key)) {
+        copy.execute("DELETE FROM settings WHERE key = ?1", params![key]).map_err(|error| format!("backup copy scrub failed: {error}"))?;
+    }
+    copy.execute_batch("VACUUM;").map_err(|error| format!("backup copy vacuum failed: {error}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 fn backup_create(state: tauri::State<'_, RuntimeState>) -> Result<String, String> {
     let output_path = FileDialog::new().set_title("Create Meld Desktop backup").add_filter("Meld Desktop backup", &["backup"]).save_file().ok_or_else(|| "Backup cancelled".to_owned())?;
@@ -3533,7 +3603,9 @@ fn backup_create(state: tauri::State<'_, RuntimeState>) -> Result<String, String
         rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("backup settings decode failed: {error}"))?
     };
     drop(db);
+    let settings: Vec<SettingEntry> = settings.into_iter().filter(|entry| allowed_setting(&entry.key)).collect();
     let result = (|| -> Result<(), String> {
+        scrub_backup_copy(&temp_db)?;
         let file = fs::File::create(&output_path).map_err(|error| format!("backup archive create failed: {error}"))?;
         let mut archive = ZipWriter::new(file);
         let options = SimpleFileOptions::default();
@@ -3851,7 +3923,7 @@ async fn ytm_toggle_episode_saved(video_id: String, saved: bool, set_video_id: O
         }
     } else {
         db.execute("UPDATE songs SET in_library = 0 WHERE id = ?1 OR video_id = ?1", params![video_id]).map_err(|error| format!("saved episode state removal failed: {error}"))?;
-        db.execute("DELETE FROM songs WHERE (id = ?1 OR video_id = ?1) AND in_library = 0 AND liked = 0 AND youtube_liked = 0 AND NOT EXISTS (SELECT 1 FROM playlist_songs WHERE playlist_songs.song_id = songs.id)", params![video_id]).map_err(|error| format!("saved episode cleanup failed: {error}"))?;
+        db.execute("DELETE FROM songs WHERE (id = ?1 OR video_id = ?1) AND in_library = 0 AND liked = 0 AND youtube_liked = 0 AND NOT EXISTS (SELECT 1 FROM playlist_songs WHERE playlist_songs.song_id = songs.id) AND NOT EXISTS (SELECT 1 FROM downloads WHERE downloads.song_id = songs.id)", params![video_id]).map_err(|error| format!("saved episode cleanup failed: {error}"))?;
     }
     Ok(())
 }
@@ -3963,7 +4035,7 @@ fn clear_guest_session(state: tauri::State<'_, RuntimeState>) -> Result<(), Stri
 pub fn run() {
     tauri::Builder::default()
         .manage(RuntimeState::new())
-        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_save_session, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
+        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -4194,4 +4266,150 @@ mod tests {
         assert_eq!(page.sections[1].songs[0].title, "Old");
     }
 
+    // --- regression tests for the review fixes (begin) ---
+    fn test_item(id: &str) -> YtItem {
+        serde_json::from_value(json!({ "id": id, "kind": "song", "title": id, "subtitle": "", "artists": [], "explicit": false, "videoId": id })).expect("test item")
+    }
+
+    fn fresh_db() -> Connection {
+        let db = Connection::open_in_memory().expect("in-memory database");
+        db.execute_batch(SCHEMA_SQL).expect("schema");
+        db
+    }
+
+    fn seed_likes(db: &Connection) {
+        // A and C are liked on YouTube. B was liked locally only (for example while offline or signed out).
+        for (id, liked, youtube_liked) in [("A", 1, 1), ("B", 1, 0), ("C", 1, 1)] {
+            db.execute("INSERT INTO songs (id, title, kind, saved_at, liked, youtube_liked) VALUES (?1, ?1, 'song', 0, ?2, ?3)", params![id, liked, youtube_liked]).expect("seed");
+        }
+    }
+
+    fn liked_ids(db: &Connection) -> Vec<String> {
+        let mut statement = db.prepare("SELECT id FROM songs WHERE liked = 1 ORDER BY id").expect("prepare");
+        statement.query_map([], |row| row.get::<_, String>(0)).expect("query").map(|row| row.expect("row")).collect()
+    }
+
+    fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|window| window == needle)
+    }
+
+    #[test]
+    fn backup_copy_scrub_removes_credentials_from_the_file_itself() {
+        let dir = std::env::temp_dir().join(format!("meld-backup-test-{}-{}", std::process::id(), now_millis()));
+        fs::create_dir_all(&dir).expect("temp dir");
+        let live_path = dir.join("live.db");
+        let copy_path = dir.join("copy.db");
+        let live = Connection::open(&live_path).expect("live db");
+        live.execute_batch(SCHEMA_SQL).expect("schema");
+        for index in 0..300 { live.execute("INSERT INTO songs (id, title, kind, saved_at) VALUES (?1, ?2, 'song', 0)", params![format!("s{index}"), format!("Song number {index} with some padding text")]).expect("song"); }
+        for (key, value) in [("hideExplicit", "true"), ("cookie", "SAPISID=TOPSECRETCOOKIE0123456789"), ("spotifySpDc", "TOPSECRETSPDC1122334455"), ("spotifyAccessToken", "TOPSECRETTOKEN5566778899")] {
+            live.execute("INSERT INTO settings (key, value) VALUES (?1, ?2)", params![key, value]).expect("setting");
+        }
+        live.execute("VACUUM INTO ?1", params![copy_path.to_string_lossy().to_string()]).expect("vacuum into");
+        let secrets: [&[u8]; 3] = [b"TOPSECRETCOOKIE", b"TOPSECRETSPDC", b"TOPSECRETTOKEN"];
+        let before = fs::read(&copy_path).expect("read copy");
+        assert!(secrets.iter().all(|secret| contains_bytes(&before, secret)), "premise: VACUUM INTO copies the credentials");
+        scrub_backup_copy(&copy_path).expect("scrub");
+        let after = fs::read(&copy_path).expect("read scrubbed copy");
+        assert!(secrets.iter().all(|secret| !contains_bytes(&after, secret)), "credentials must not remain anywhere in the file");
+        let copy = Connection::open(&copy_path).expect("open copy");
+        let keys: Vec<String> = copy.prepare("SELECT key FROM settings").expect("prepare").query_map([], |row| row.get(0)).expect("query").map(|row| row.expect("row")).collect();
+        assert_eq!(keys, vec!["hideExplicit".to_owned()]);
+        let songs: i64 = copy.query_row("SELECT COUNT(*) FROM songs", [], |row| row.get(0)).expect("count");
+        assert_eq!(songs, 300);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn youtube_sync_keeps_local_only_likes_and_drops_likes_removed_on_youtube() {
+        let mut db = fresh_db();
+        seed_likes(&db);
+        apply_youtube_sync(&mut db, "liked", &[test_item("A")], &[], &[], &[], 100).expect("sync");
+        assert_eq!(liked_ids(&db), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn youtube_sync_refuses_to_wipe_local_data_when_the_fetch_is_empty() {
+        let mut db = fresh_db();
+        seed_likes(&db);
+        assert!(apply_youtube_sync(&mut db, "liked", &[], &[], &[], &[], 100).is_err());
+        assert_eq!(liked_ids(&db), vec!["A", "B", "C"]);
+        db.execute("INSERT INTO playlists (id, title, kind, saved_at, source) VALUES ('P', 'P', 'playlist', 0, 'youtube')", []).expect("playlist");
+        assert!(apply_youtube_sync(&mut db, "playlists", &[], &[], &[], &[], 100).is_err());
+        let mut empty = fresh_db();
+        assert!(apply_youtube_sync(&mut empty, "liked", &[], &[], &[], &[], 100).is_ok(), "an account with nothing synced yet may sync an empty list");
+    }
+
+    #[test]
+    fn spotify_matcher_handles_non_latin_titles() {
+        let title_score = |left: &str, right: &str| spotify_bigram_similarity(&spotify_normalize(left), &spotify_normalize(right));
+        assert_eq!(spotify_normalize("Blinding Lights (Remastered 2020)"), "blinding lights");
+        assert!(!spotify_normalize("\u{62a}\u{645}\u{644}\u{64a} \u{645}\u{639}\u{627}\u{643}").is_empty(), "Arabic must survive normalization");
+        assert!(title_score("\u{62a}\u{645}\u{644}\u{64a} \u{645}\u{639}\u{627}\u{643}", "\u{62d}\u{628}\u{64a}\u{628}\u{64a} \u{64a}\u{627} \u{646}\u{648}\u{631} \u{627}\u{644}\u{639}\u{64a}\u{646}") < 0.5, "different Arabic titles must not match");
+        assert!(title_score("\u{5343}\u{672c}\u{685c}", "\u{591c}\u{306b}\u{99c6}\u{3051}\u{308b}") < 0.5, "different Japanese titles must not match");
+        assert_eq!(title_score("\u{591c}\u{306b}\u{99c6}\u{3051}\u{308b}", "\u{591c}\u{306b}\u{99c6}\u{3051}\u{308b}"), 1.0);
+        assert_eq!(spotify_bigram_similarity("", ""), 0.0, "two empty titles are not a match");
+    }
+
+    #[test]
+    fn parse_artists_keeps_only_linked_artists_and_falls_back_to_plain_credits() {
+        let search_row = json!({ "runs": [
+            { "text": "Song" }, { "text": " \u{2022} " },
+            { "text": "The Weeknd", "navigationEndpoint": { "browseEndpoint": { "browseId": "UCoUxsWakJucWg46KW5RsvPw" } } },
+            { "text": " \u{2022} " },
+            { "text": "After Hours", "navigationEndpoint": { "browseEndpoint": { "browseId": "MPREb_4pL8gzRtw1p", "browseEndpointContextSupportedConfigs": { "browseEndpointContextMusicConfig": { "pageType": "MUSIC_PAGE_TYPE_ALBUM" } } } } },
+            { "text": " \u{2022} " }, { "text": "3:22" }
+        ] });
+        let names: Vec<String> = parse_artists(Some(&search_row)).into_iter().map(|artist| artist.name).collect();
+        assert_eq!(names, vec!["The Weeknd"]);
+        let uploaded = json!({ "runs": [{ "text": "Artist A" }, { "text": ", " }, { "text": "Artist B" }] });
+        let plain: Vec<String> = parse_artists(Some(&uploaded)).into_iter().map(|artist| artist.name).collect();
+        assert_eq!(plain, vec!["Artist A", "Artist B"]);
+    }
+
+    #[test]
+    fn clean_lyrics_artist_does_not_panic_when_lowercasing_changes_byte_length() {
+        assert_eq!(clean_lyrics_artist("\u{1e9e} and x"), "\u{1e9e}");
+        assert_eq!(clean_lyrics_artist("Drake feat. Rihanna"), "Drake");
+        assert_eq!(clean_lyrics_artist("Daft Punk"), "Daft Punk");
+    }
+
+    #[test]
+    fn active_download_guard_clears_the_map_on_early_return() {
+        fn start_then_fail(id: &str) -> Result<(), String> {
+            download_cancel_map().lock().expect("map").insert(id.to_owned(), Arc::new(AtomicBool::new(false)));
+            let _guard = ActiveDownloadGuard(id.to_owned());
+            Err("simulated early return".to_owned())
+        }
+        assert!(start_then_fail("guard-test-song").is_err());
+        assert!(!download_cancel_map().lock().expect("map").contains_key("guard-test-song"));
+    }
+
+    #[test]
+    fn like_state_save_binds_every_parameter_and_is_repeatable() {
+        let db = fresh_db();
+        let item = test_item("like-test");
+        save_like_state(&db, &item, true).expect("insert path");
+        let youtube_liked: i64 = db.query_row("SELECT youtube_liked FROM songs WHERE id = 'like-test'", [], |row| row.get(0)).expect("row");
+        assert_eq!(youtube_liked, 1);
+        save_like_state(&db, &item, false).expect("conflict/update path");
+        let youtube_liked: i64 = db.query_row("SELECT youtube_liked FROM songs WHERE id = 'like-test'", [], |row| row.get(0)).expect("row");
+        assert_eq!(youtube_liked, 0);
+        let local_like: i64 = db.query_row("SELECT liked FROM songs WHERE id = 'like-test'", [], |row| row.get(0)).expect("row");
+        assert_eq!(local_like, 0, "a YouTube like must not flip the local Meld like flag");
+    }
+
+    #[test]
+    fn every_song_delete_protects_downloaded_songs() {
+        // A `songs` row deleted while a `downloads` row points at it hides the download from the UI and leaks the file on disk.
+        // The needle is built from two pieces so this test does not match its own source text.
+        let needle = ["\"DELETE", " FROM songs"].concat();
+        let source = include_str!("lib.rs");
+        let statements: Vec<&str> = source.split(needle.as_str()).skip(1).map(|rest| rest.split('"').next().unwrap_or("")).collect();
+        assert!(statements.len() >= 6, "expected to find every song DELETE, found {}", statements.len());
+        for sql in statements {
+            assert!(sql.contains("FROM downloads"), "song DELETE without a downloads guard: DELETE FROM songs{sql}");
+        }
+    }
+    // --- regression tests for the review fixes (end) ---
 }

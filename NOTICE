@@ -1,0 +1,16 @@
+Meld Desktop
+Copyright (C) 2026 Romany-Osama and contributors
+
+Meld Desktop is licensed under the GNU General Public License, version 3 only
+(see LICENSE).
+
+This program is a modified adaptation, for Windows (Tauri, Rust and React), of
+Meld: https://github.com/FrancescoGrazioso/Meld
+
+Copyright in the upstream work remains with its respective authors; the list of
+upstream contributors is preserved in that repository's history. This program
+was modified from the upstream source in 2026; the individual changes are
+recorded in this repository's commit history (GPL-3.0, section 5(a)).
+
+Meld Desktop is not an official Meld release and is not affiliated with or
+endorsed by YouTube, Google, or Spotify.
