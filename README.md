@@ -32,6 +32,25 @@ Download the latest portable package from the [Releases page](https://github.com
 
 The first screen can be used without connecting an account for supported public browsing and playback. Connect Google/YouTube Music when you want account library actions, saved shows, subscriptions, or synchronized personal content. Connect Spotify only when you want Spotify library and playlist features.
 
+## Build from source
+
+- Windows 10 or 11 with the Microsoft Edge WebView2 Runtime (the Evergreen runtime ships with current Windows).
+- Microsoft C++ Build Tools ("Desktop development with C++"): several dependencies compile C code (`ring`, bundled SQLite and others).
+- Rust **1.89 or newer** (the highest `rust-version` declared in the dependency tree; `Cargo.toml` enforces it).
+- Node.js **20.19+ or 22.12+** (required by Vite 7; `.nvmrc` pins 22).
+
+Build on Windows:
+
+```powershell
+npm ci
+npm run build   # cargo needs the built ../dist folder to exist; `tauri build` repeats this step itself
+cd src-tauri
+cargo check --release --locked
+cargo test --release --locked
+cd ..
+npx tauri build --no-bundle
+```
+
 ## Privacy and advertising
 
 Meld Desktop does not add advertisements, advertising SDKs, tracking accounts, or a project-owned online server. Account sessions are stored locally for the account features you choose to use. The upstream service may still control content returned by its own service; this application does not bypass those decisions.
