@@ -5,33 +5,45 @@
   "identifier": "com.romany-osama.meld-desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
-        "devUrl": "http://127.0.0.1:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-                "title": "Meld Desktop",
+        "title": "Meld Desktop",
         "width": 1120,
         "height": 720,
         "minWidth": 860,
         "minHeight": 600
-
-
       }
     ],
     "security": {
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/**", "$APPDATA/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$MUSIC/**", "$DESKTOP/**"]
+        "scope": [
+          "$HOME/**",
+          "$APPDATA/**",
+          "$DOCUMENT/**",
+          "$DOWNLOAD/**",
+          "$MUSIC/**",
+          "$DESKTOP/**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Romany-Osama",
+    "copyright": "Copyright (C) 2026 Romany-Osama and Meld contributors. GPL-3.0-only.",
+    "category": "Music",
+    "shortDescription": "Lightweight native Windows client for YouTube Music",
+    "longDescription": "Meld Desktop is a Windows-native Tauri/Rust/React adaptation of the open-source Meld music client. It is not an official Meld release.",
+    "license": "GPL-3.0-only",
+    "licenseFile": "../LICENSE",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

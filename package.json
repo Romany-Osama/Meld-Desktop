@@ -3,19 +3,22 @@
   "private": true,
   "version": "0.1.0",
   "license": "GPL-3.0-only",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "tauri": "tauri"
   },
-    "dependencies": {
+  "dependencies": {
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "@tauri-apps/api": "^2"
   },
-
   "devDependencies": {
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",

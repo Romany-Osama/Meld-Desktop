@@ -12,13 +12,20 @@ An explicit offline download stores the audio file locally. It also attempts to 
 
 The player uses direct original audio URLs returned by supported YouTube Music client responses. Some source responses require protected or transformed stream handling that is not part of this native port. The port therefore does not implement DRM circumvention, PoToken extraction, SABR bypass, signature-cipher/n-transform bypass, ad bypass, ripping, or browser playback. If a direct source URL cannot be resolved, the UI reports a truthful playback/download failure.
 
+## Prerequisites
+
+- Windows 10 or 11 with the Microsoft Edge WebView2 Runtime (the Evergreen runtime ships with current Windows).
+- Microsoft C++ Build Tools ("Desktop development with C++"): several dependencies compile C code (`ring`, bundled SQLite and others).
+- Rust **1.89 or newer** (the highest `rust-version` declared in the dependency tree; `Cargo.toml` enforces it).
+- Node.js **20.19+ or 22.12+** (required by Vite 7; `.nvmrc` pins 22).
+
 ## Build on Windows
 
 The supported primary targets are Windows 10 and Windows 11. Production builds are intentionally run without bundling so the generated executable can be inspected directly:
 
 ```powershell
 npm ci
-npm run build
+npm run build   # cargo needs the built ../dist folder to exist; `tauri build` repeats this step itself
 cd src-tauri
 cargo check --release --locked
 cargo test --release --locked
