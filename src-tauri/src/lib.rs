@@ -2879,6 +2879,13 @@ async fn open_google_login(app: tauri::AppHandle) -> Result<(), String> {
                     let _ = window.eval_with_callback(r#"(() => { try { const cfg = window.yt && window.yt.config_; const visitorData = cfg && (cfg.VISITOR_DATA || cfg.VISITOR_DATA_); const dataSyncId = cfg && cfg.DATASYNC_ID; return visitorData && dataSyncId ? JSON.stringify({visitorData, dataSyncId: String(dataSyncId).split('||')[0]}) : ''; } catch (_) { return ''; } })()"#, move |value| { let _ = sender.send(value); });
                     let raw = tokio::task::spawn_blocking(move || receiver.recv_timeout(Duration::from_secs(2)).ok()).await.ok().flatten().unwrap_or_default();
                     let raw = serde_json::from_str::<String>(&raw).unwrap_or(raw);
+                    if raw.is_empty() {
+                        // Without this, an eval that resolves quickly (the common case) gives almost no delay
+                        // between iterations, so the 120-attempt budget can burn through in well under a second
+                        // instead of covering a reasonable real-world window for the page to finish hydrating.
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        continue;
+                    }
                     if !raw.is_empty() {
                         let Ok(data) = serde_json::from_str::<Value>(&raw) else { continue; };
                         let Some(visitor_data) = data.get("visitorData").and_then(Value::as_str).filter(|value| !value.is_empty()).map(str::to_owned) else { continue; };
@@ -3419,10 +3426,14 @@ async fn open_spotify_login(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn spotify_logout(state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+fn spotify_logout(app: tauri::AppHandle, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute("DELETE FROM settings WHERE key IN ('spotifySpDc', 'spotifySpKey', 'spotifyAccessToken', 'spotifyTokenExpiry', 'spotifyUsername', 'spotifyUserId')", []).map_err(|e| format!("Spotify logout failed: {e}"))?;
     db.execute("DELETE FROM spotify_match", []).map_err(|e| format!("Spotify match cache clear failed: {e}"))?;
+    // Without this, the Spotify login window's WebView2 cookies survive logout, so reopening the login page
+    // silently reuses the old session instead of asking to sign in again. Best-effort: the account is already
+    // disconnected locally either way, so a failure here does not fail the whole logout.
+    if let Some(window) = app.get_webview_window("main") { let _ = window.clear_all_browsing_data(); }
     Ok(())
 }
 
@@ -3438,10 +3449,15 @@ fn clear_local_library_keep_downloads(state: tauri::State<'_, RuntimeState>) -> 
 }
 
 #[tauri::command]
-fn account_logout(state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+fn account_logout(app: tauri::AppHandle, state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
     *state.visitor_data.lock().map_err(|_| "visitor state poisoned")? = None;
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute("DELETE FROM settings WHERE key IN ('cookie', 'dataSyncId', 'visitorData', 'accountName', 'accountEmail', 'accountChannelHandle')", []).map_err(|e| format!("account logout failed: {e}"))?;
+    // Without this, the Google login window's WebView2 cookies survive logout (they live in the profile shared
+    // by every webview in the app, not just the login popup, so clearing it from the main window is sufficient
+    // even though the login popup itself is usually already destroyed by the time this runs). Best-effort: the
+    // account is already disconnected locally either way, so a failure here does not fail the whole logout.
+    if let Some(window) = app.get_webview_window("main") { let _ = window.clear_all_browsing_data(); }
     Ok(())
 }
 
