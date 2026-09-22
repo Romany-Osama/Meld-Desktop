@@ -39,6 +39,8 @@ const VISIONOS_ID: &str = "101";
 const VISIONOS_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
 
 /// Full database schema. A const (rather than an inline literal) so tests can create a real database.
+mod secrets;
+
 const SCHEMA_SQL: &str = "PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS songs (
                 id TEXT PRIMARY KEY,
@@ -262,6 +264,8 @@ impl RuntimeState {
         let _ = db.execute("ALTER TABLE playlists ADD COLUMN source TEXT NOT NULL DEFAULT 'local'", []);
         // A download cannot survive a restart; rows still marked "downloading" are leftovers of a crash or forced quit.
         let _ = db.execute("UPDATE downloads SET state = 'failed', error = 'Interrupted by app restart' WHERE state = 'downloading'", []);
+        // Encrypt any session secret still stored as plaintext by an older version. Failure keeps the session working.
+        let _ = secrets::migrate(&db);
         Self { visitor_data: Mutex::new(None), db: Mutex::new(db) }
     }
 }
@@ -793,7 +797,7 @@ fn setting_value(db: &Connection, key: &str) -> Result<Option<String>, String> {
 
 fn auth_session(state: &tauri::State<'_, RuntimeState>) -> Result<Option<AuthSession>, String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    let cookie = setting_value(&db, "cookie")?;
+    let cookie = secrets::get(&db, "cookie").ok().flatten();
     let data_sync_id = setting_value(&db, "dataSyncId")?;
     let visitor_data = setting_value(&db, "visitorData")?;
     Ok(match (cookie, data_sync_id, visitor_data) {
@@ -2841,7 +2845,8 @@ async fn save_account_session_internal(cookie: String, data_sync_id: String, vis
     let response = post("account/account_menu", json!({ "context": context(&visitor_data, true, Some(&data_sync_id)) }), Some(&session)).await?;
     let (name, email, channel_handle) = account_info_from_response(&response).ok_or_else(|| "Google session validation returned no active account header".to_owned())?;
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    for (key, value) in [("cookie", cookie), ("dataSyncId", data_sync_id), ("visitorData", visitor_data), ("accountName", name.clone()), ("accountEmail", email.clone().unwrap_or_default()), ("accountChannelHandle", channel_handle.clone().unwrap_or_default())] {
+    secrets::set(&db, "cookie", &cookie)?;
+    for (key, value) in [("dataSyncId", data_sync_id), ("visitorData", visitor_data), ("accountName", name.clone()), ("accountEmail", email.clone().unwrap_or_default()), ("accountChannelHandle", channel_handle.clone().unwrap_or_default())] {
         db.execute("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key, value]).map_err(|e| format!("account session save failed: {e}"))?;
     }
     *state.visitor_data.lock().map_err(|_| "visitor state poisoned")? = Some(session.visitor_data);
@@ -2984,7 +2989,7 @@ struct SpotifyProfile {
 
 fn spotify_token(state: &tauri::State<'_, RuntimeState>) -> Result<String, String> {
     let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-    let token = setting_value(&db, "spotifyAccessToken")?.filter(|value| !value.is_empty()).ok_or_else(|| "Spotify account is not authenticated".to_owned())?;
+    let token = secrets::get(&db, "spotifyAccessToken")?.filter(|value| !value.is_empty()).ok_or_else(|| "Spotify account is not authenticated".to_owned())?;
     let expiry = setting_value(&db, "spotifyTokenExpiry")?.and_then(|value| value.parse::<i64>().ok());
     if expiry.is_none_or(|value| value <= now_millis()) { return Err("Spotify account is not authenticated or its token expired".to_owned()); }
     Ok(token)
@@ -3354,7 +3359,8 @@ async fn spotify_fetch_access_token(sp_dc: &str, sp_key: &str) -> Result<(String
 async fn save_spotify_session_internal(sp_dc: String, sp_key: String, state: &RuntimeState) -> Result<i64, String> {
     let (access_token, expiry) = spotify_fetch_access_token(&sp_dc, &sp_key).await?;
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    for (key, value) in [("spotifySpDc", sp_dc), ("spotifySpKey", sp_key), ("spotifyAccessToken", access_token), ("spotifyTokenExpiry", expiry.to_string())] {
+    secrets::set(&db, "spotifyAccessToken", &access_token)?;
+    for (key, value) in [("spotifyTokenExpiry", expiry.to_string())] {
         db.execute("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key, value]).map_err(|e| format!("Spotify session save failed: {e}"))?;
     }
     Ok(expiry)
@@ -3367,7 +3373,7 @@ struct SpotifySessionStatus { authenticated: bool, token_expiry: Option<i64> }
 #[tauri::command]
 fn spotify_session_status(state: tauri::State<'_, RuntimeState>) -> Result<SpotifySessionStatus, String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    let token = setting_value(&db, "spotifyAccessToken")?;
+    let token = secrets::get(&db, "spotifyAccessToken").ok().flatten();
     let expiry = setting_value(&db, "spotifyTokenExpiry")?.and_then(|value| value.parse::<i64>().ok());
     Ok(SpotifySessionStatus { authenticated: token.as_deref().is_some_and(|value| !value.is_empty()) && expiry.is_some_and(|value| value > now_millis()), token_expiry: expiry })
 }
