@@ -30,6 +30,8 @@ lofty = "0.22"
 rfd = "0.15"
 zip = "2"
 futures-util = "0.3"
+aes-gcm = "0.10"
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
 
 [profile.release]
 lto = "thin"
