@@ -20,16 +20,13 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https: asset: https://asset.localhost http://asset.localhost; media-src 'self' https://*.googlevideo.com asset: https://asset.localhost http://asset.localhost; connect-src 'self' asset: https://asset.localhost http://asset.localhost https://ipc.localhost http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'",
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$HOME/**",
-          "$APPDATA/**",
-          "$DOCUMENT/**",
-          "$DOWNLOAD/**",
-          "$MUSIC/**",
-          "$DESKTOP/**"
+          "$APPDATA/Meld Desktop/downloads/**",
+          "$APPDATA/Meld Desktop/player-cache/**",
+          "$APPDATA/Meld Desktop/artwork/**"
         ]
       }
     }
