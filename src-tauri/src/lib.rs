@@ -3751,7 +3751,7 @@ fn persist_local_item(db: &Connection, item: &LocalItem, modified_at: Option<i64
 }
 
 #[tauri::command]
-fn local_files_pick(state: tauri::State<'_, RuntimeState>) -> Result<Vec<LocalItem>, String> {
+fn local_files_pick(app: tauri::AppHandle, state: tauri::State<'_, RuntimeState>) -> Result<Vec<LocalItem>, String> {
     let paths = FileDialog::new()
         .set_title("Import audio files into Meld Desktop")
         .add_filter("Audio", &["mp3", "m4a", "m4b", "flac", "ogg", "opus", "wav", "aac", "alac", "aiff"])
@@ -3763,6 +3763,9 @@ fn local_files_pick(state: tauri::State<'_, RuntimeState>) -> Result<Vec<LocalIt
     let mut items = Vec::new();
     for path in paths {
         if !path.is_file() { continue; }
+        // The asset protocol scope defaults to Meld's own app-data folders only (see tauri.conf.json); an
+        // imported file can be anywhere on disk (any drive), so it needs an individual grant to be playable.
+        let _ = app.asset_protocol_scope().allow_file(&path);
         let Some(item) = local_item_from_path(&path, &artwork_dir) else { continue; };
         let modified_at = fs::metadata(&path).ok().and_then(|metadata| metadata.modified().ok()).and_then(|value| value.duration_since(UNIX_EPOCH).ok()).map(|value| value.as_secs() as i64);
         persist_local_item(&db, &item, modified_at)?;
@@ -4057,6 +4060,21 @@ fn clear_guest_session(state: tauri::State<'_, RuntimeState>) -> Result<(), Stri
 pub fn run() {
     tauri::Builder::default()
         .manage(RuntimeState::new())
+        .setup(|app| {
+            // allow_file() grants are session-only; a file imported in an earlier run needs to be re-granted
+            // here or it silently stops playing (still in the library list, since that comes from the database,
+            // but blocked by the asset protocol scope) after every app restart.
+            let db_paths: Vec<String> = {
+                let state = app.state::<RuntimeState>();
+                let db = state.db.lock().map_err(|_| "database state poisoned")?;
+                let mut statement = db.prepare("SELECT local_path FROM songs WHERE local_path IS NOT NULL AND local_path != ''")?;
+                let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+                rows.filter_map(|row| row.ok()).collect()
+            };
+            let scope = app.asset_protocol_scope();
+            for path in db_paths { let _ = scope.allow_file(&path); }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
