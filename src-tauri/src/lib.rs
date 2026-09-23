@@ -204,6 +204,13 @@ fn http() -> &'static Client {
             .gzip(true)
             .brotli(true)
             .deflate(true)
+            // Without these, a request to a server that never responds (or a truly unreachable host) hangs
+            // forever - nothing in this file previously set any timeout at all, client-wide or per-request.
+            // connect_timeout alone would not be enough: it only covers establishing the connection, not a
+            // server that connects fine but then never sends a response. The download's own GET overrides
+            // this default (see download_start) since a large file can legitimately take far longer than 20s.
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(20))
             .build()
             .expect("HTTP client must build")
     })
@@ -1241,7 +1248,10 @@ async fn download_start(item: YtItem, app: tauri::AppHandle, state: tauri::State
     let state_for_lyrics = state.clone();
     let result: Result<(i64, Option<i64>, bool, Option<String>), String> = async {
         let payload = resolve_player_payload(video_id, &state).await?;
-        let response = http().get(&payload.stream_url).send().await.map_err(|error| format!("audio cache request failed: {error}"))?.error_for_status().map_err(|error| format!("audio cache response failed: {error}"))?;
+        // The client's default 20s timeout would abort any download that legitimately takes longer (a large
+        // file on a slow connection); override it with a generous cap, and catch a truly stalled connection
+        // separately below via a per-chunk idle timeout instead.
+        let response = http().get(&payload.stream_url).timeout(Duration::from_secs(3600)).send().await.map_err(|error| format!("audio cache request failed: {error}"))?.error_for_status().map_err(|error| format!("audio cache response failed: {error}"))?;
         let total_bytes = response.content_length().map(|value| value as i64);
         {
             let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
@@ -1250,7 +1260,7 @@ async fn download_start(item: YtItem, app: tauri::AppHandle, state: tauri::State
         let mut file = tokio::fs::File::create(&partial_path).await.map_err(|error| format!("download cache file failed: {error}"))?;
         let mut stream = response.bytes_stream();
         let mut bytes = 0_i64;
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = tokio::time::timeout(Duration::from_secs(30), stream.next()).await.map_err(|_| "download stalled: no data received for 30s".to_owned())? {
             if cancel.load(Ordering::Acquire) { return Err("download cancelled".to_owned()); }
             let chunk = chunk.map_err(|error| format!("download stream failed: {error}"))?;
             file.write_all(&chunk).await.map_err(|error| format!("download cache write failed: {error}"))?;
@@ -1309,11 +1319,11 @@ async fn ytm_player(video_id: String, state: tauri::State<'_, RuntimeState>) -> 
         tokio::spawn(async move {
             let result: Result<(), String> = async {
                 if let Some(parent) = cache_path.parent() { tokio::fs::create_dir_all(parent).await.map_err(|error| format!("player cache directory failed: {error}"))?; }
-                let response = http().get(&cache_url).send().await.map_err(|error| format!("player cache request failed: {error}"))?.error_for_status().map_err(|error| format!("player cache response failed: {error}"))?;
+                let response = http().get(&cache_url).timeout(Duration::from_secs(3600)).send().await.map_err(|error| format!("player cache request failed: {error}"))?.error_for_status().map_err(|error| format!("player cache response failed: {error}"))?;
                 let mut file = tokio::fs::File::create(format!("{}.part", cache_path.to_string_lossy())).await.map_err(|error| format!("player cache file failed: {error}"))?;
                 let mut stream = response.bytes_stream();
                 let mut bytes = 0_i64;
-                while let Some(chunk) = stream.next().await {
+                while let Some(chunk) = tokio::time::timeout(Duration::from_secs(30), stream.next()).await.map_err(|_| "player cache stalled: no data received for 30s".to_owned())? {
                     let chunk = chunk.map_err(|error| format!("player cache stream failed: {error}"))?;
                     file.write_all(&chunk).await.map_err(|error| format!("player cache write failed: {error}"))?;
                     bytes += chunk.len() as i64;
@@ -2962,19 +2972,37 @@ async fn spotify_graphql_post(operation: &str, variables: Value, token: &str) ->
             "operationName": operation,
             "extensions": { "persistedQuery": { "version": 1, "sha256Hash": hash } }
         });
-        let response = http()
-            .post("https://api-partner.spotify.com/pathfinder/v2/query")
-            .bearer_auth(token)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|error| format!("Spotify GraphQL request failed: {error}"))?;
-        let status = response.status();
+        // A 429 is not a hash problem, so it is retried in place (same hash) rather than moving on to the next
+        // candidate. Retry-After is honored when Spotify sends one, capped so a single command cannot hang the
+        // UI for an unreasonable amount of time; otherwise a short default backoff is used.
+        let mut retries_left = 2u8;
+        let (status, text) = loop {
+            let response = http()
+                .post("https://api-partner.spotify.com/pathfinder/v2/query")
+                .bearer_auth(token)
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|error| format!("Spotify GraphQL request failed: {error}"))?;
+            let status = response.status();
+            if status.as_u16() == 429 && retries_left > 0 {
+                let wait_seconds = response.headers().get("retry-after").and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<u64>().ok()).map(|seconds| seconds.min(30)).unwrap_or(5);
+                retries_left -= 1;
+                tokio::time::sleep(Duration::from_secs(wait_seconds)).await;
+                continue;
+            }
+            let text = response.text().await.map_err(|error| format!("Spotify GraphQL response failed: {error}"))?;
+            break (status, text);
+        };
         last_status = Some(status.as_u16());
-        let text = response.text().await.map_err(|error| format!("Spotify GraphQL response failed: {error}"))?;
         if status.as_u16() == 412 && index + 1 < hashes.len() { continue; }
-        if !status.is_success() { return Err(format!("Spotify GraphQL {operation} returned HTTP {}", status.as_u16())); }
+        if !status.is_success() {
+            // Previously the response body was read and then discarded on every error path; Spotify's actual
+            // error message (helpful for diagnosing which hash/operation broke) never reached the caller.
+            let snippet: String = text.chars().take(200).collect();
+            return Err(format!("Spotify GraphQL {operation} returned HTTP {}: {snippet}", status.as_u16()));
+        }
         let value: Value = serde_json::from_str(&text).map_err(|error| format!("Spotify GraphQL JSON failed: {error}"))?;
         if value.get("errors").and_then(Value::as_array).is_some_and(|errors| !errors.is_empty()) {
             let message = value.pointer("/errors/0/message").and_then(Value::as_str).unwrap_or("unknown GraphQL error");
@@ -3364,7 +3392,20 @@ async fn spotify_fetch_access_token(sp_dc: &str, sp_key: &str) -> Result<(String
 }
 
 async fn save_spotify_session_internal(sp_dc: String, sp_key: String, state: &RuntimeState) -> Result<i64, String> {
-    let (access_token, expiry) = spotify_fetch_access_token(&sp_dc, &sp_key).await?;
+    // This chain (gist -> server-time -> token) is a single point of failure for the whole Spotify
+    // integration, and every step in it is safe to redo, so a transient failure anywhere in it gets a
+    // couple of short-backoff retries instead of failing the whole login/reconnect on one bad network blip.
+    let mut attempt = 0u8;
+    let (access_token, expiry) = loop {
+        match spotify_fetch_access_token(&sp_dc, &sp_key).await {
+            Ok(result) => break result,
+            Err(_error) if attempt < 2 => {
+                attempt += 1;
+                tokio::time::sleep(Duration::from_secs(attempt as u64)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    };
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     secrets::set(&db, "spotifyAccessToken", &access_token)?;
     for (key, value) in [("spotifyTokenExpiry", expiry.to_string())] {
