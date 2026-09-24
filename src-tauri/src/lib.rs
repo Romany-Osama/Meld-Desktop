@@ -241,13 +241,26 @@ struct SessionStatus {
 }
 
 impl RuntimeState {
+    /// A startup failure here previously panicked via .expect(). With windows_subsystem = "windows" (no
+    /// console window), that panic message is never seen by anyone - the app just silently vanishes from the
+    /// taskbar with no explanation. Show a real, native error dialog (works even before any Tauri window
+    /// exists) and exit cleanly instead.
+    fn fail_to_start(context: &str, error: impl std::fmt::Display) -> ! {
+        let description = format!("{context}:\n\n{error}\n\nMeld Desktop cannot continue and will now close.");
+        rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title("Meld Desktop failed to start").set_description(&description).set_buttons(rfd::MessageButtons::Ok).show();
+        std::process::exit(1);
+    }
+
     fn new() -> Self {
         let path = database_path();
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("Meld data directory must be created");
+            if let Err(error) = fs::create_dir_all(parent) { Self::fail_to_start("Could not create the app data folder", error); }
         }
-        let db = Connection::open(path).expect("Meld SQLite database must open");
-        db.execute_batch(SCHEMA_SQL).expect("Meld SQLite schema must initialize");
+        let db = match Connection::open(&path) {
+            Ok(db) => db,
+            Err(error) => Self::fail_to_start(&format!("Could not open the database at {}", path.display()), error),
+        };
+        if let Err(error) = db.execute_batch(SCHEMA_SQL) { Self::fail_to_start("Could not initialize the database schema", error); }
         let _ = db.execute("ALTER TABLE songs ADD COLUMN set_video_id TEXT", []);
         let _ = db.execute("ALTER TABLE songs ADD COLUMN explicit INTEGER NOT NULL DEFAULT 0", []);
         let _ = db.execute("ALTER TABLE songs ADD COLUMN music_video_type TEXT", []);
@@ -1120,7 +1133,14 @@ fn artwork_extension(content_type: &str) -> &'static str {
 
 async fn cache_download_artwork(song_id: &str, source_url: Option<&str>) -> Option<String> {
     let url = source_url?.trim();
-    if !(url.starts_with("https://") || url.starts_with("http://")) { return None; }
+    // Always defense-in-depth, not a response to a known exploit: this only ever receives thumbnail URLs
+    // parsed out of YouTube's own API responses (the one caller passes item.thumbnail), never user-entered
+    // text, but a future parsing bug or upstream API change should not turn into fetching an arbitrary host.
+    let parsed = url::Url::parse(url).ok()?;
+    if parsed.scheme() != "https" { return None; }
+    let host = parsed.host_str()?;
+    const ALLOWED_ARTWORK_HOST_SUFFIXES: [&str; 4] = [".ytimg.com", ".googleusercontent.com", ".ggpht.com", ".gstatic.com"];
+    if !ALLOWED_ARTWORK_HOST_SUFFIXES.iter().any(|suffix| host.ends_with(suffix)) { return None; }
     let response = http().get(url).send().await.ok()?.error_for_status().ok()?;
     let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("").to_owned();
     if !content_type.to_ascii_lowercase().starts_with("image/") { return None; }
@@ -1887,6 +1907,10 @@ async fn fetch_all_library_items(session: &AuthSession, browse_id: &str, tab_ind
     Ok(items)
 }
 
+// Not registered in generate_handler(), so unreachable from the webview - kept (not deleted) since
+// the function body is otherwise untouched and easy to re-enable by re-registering it.
+// Returns a flat list of every episode across all subscriptions; the UI instead browses episodes per-channel via ytm_podcast_channels + ytm_detail.
+#[allow(dead_code)]
 #[tauri::command]
 async fn ytm_podcast_episodes(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
     let session = auth_session(&state)?.ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
@@ -3251,6 +3275,10 @@ async fn spotify_search_track_matches(query: &str, token: &str) -> Result<Vec<Sp
     Ok(spotify_track_matches(&response))
 }
 
+// Not registered in generate_handler(), so unreachable from the webview - kept (not deleted) since
+// the function body is otherwise untouched and easy to re-enable by re-registering it.
+// A thin wrapper around spotify_search_track_matches, which is still used directly by spotify_match_for_youtube/spotify_resolve_youtube - only this standalone free-text-search entry point was unused.
+#[allow(dead_code)]
 #[tauri::command]
 async fn spotify_search_tracks(query: String, state: tauri::State<'_, RuntimeState>) -> Result<Vec<SpotifyTrackMatch>, String> {
     let query = query.trim();
@@ -3693,11 +3721,17 @@ fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, Strin
     let mut archive = ZipArchive::new(file).map_err(|error| format!("invalid Meld Desktop backup: {error}"))?;
     let mut database_bytes = Vec::new();
     let mut settings_bytes = Vec::new();
+    // Only song.db and settings.json are ever read (everything else in the archive is ignored, so there is no
+    // zip-slip risk here - entry names are never used to build a filesystem path). A malicious or corrupt
+    // archive claiming a huge uncompressed size for one of those two entries could still exhaust memory, so
+    // both the declared size and the actual bytes read are capped.
+    const MAX_BACKUP_ENTRY_BYTES: u64 = 500 * 1024 * 1024;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(|error| format!("backup entry read failed: {error}"))?;
+        if entry.size() > MAX_BACKUP_ENTRY_BYTES { continue; }
         match entry.name() {
-            "song.db" => { entry.read_to_end(&mut database_bytes).map_err(|error| format!("backup database read failed: {error}"))?; }
-            "settings.json" => { entry.read_to_end(&mut settings_bytes).map_err(|error| format!("backup settings read failed: {error}"))?; }
+            "song.db" => { (&mut entry).take(MAX_BACKUP_ENTRY_BYTES).read_to_end(&mut database_bytes).map_err(|error| format!("backup database read failed: {error}"))?; }
+            "settings.json" => { (&mut entry).take(MAX_BACKUP_ENTRY_BYTES).read_to_end(&mut settings_bytes).map_err(|error| format!("backup settings read failed: {error}"))?; }
             _ => {}
         }
     }
@@ -4089,6 +4123,10 @@ fn library_playlist_songs(playlist_id: String, state: tauri::State<'_, RuntimeSt
 }
 
 
+// Not registered in generate_handler(), so unreachable from the webview - kept (not deleted) since
+// the function body is otherwise untouched and easy to re-enable by re-registering it.
+// Deletes the same 6 settings keys account_logout already deletes - superseded by it, kept only for reference.
+#[allow(dead_code)]
 #[tauri::command]
 fn clear_guest_session(state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
     *state.visitor_data.lock().map_err(|_| "visitor state poisoned")? = None;
@@ -4116,7 +4154,7 @@ pub fn run() {
             for path in db_paths { let _ = scope.allow_file(&path); }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_search_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_podcast_episodes, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_logout, clear_local_library_keep_downloads, session_status, clear_guest_session, open_spotify_login, spotify_session_status, spotify_logout])
+        .invoke_handler(tauri::generate_handler![ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_detail, ytm_detail_continuation, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, fetch_lyrics, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, speed_dial_toggle, speed_dial_items, open_google_login, account_logout, clear_local_library_keep_downloads, session_status, open_spotify_login, spotify_session_status, spotify_logout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
