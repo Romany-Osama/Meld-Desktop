@@ -2449,6 +2449,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tokio",
+ "url",
  "zip",
 ]
 
