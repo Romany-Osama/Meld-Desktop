@@ -2450,6 +2450,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-taskbar",
  "tokio",
+ "url",
  "zip",
 ]
 
