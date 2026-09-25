@@ -4138,6 +4138,16 @@ fn clear_guest_session(state: tauri::State<'_, RuntimeState>) -> Result<(), Stri
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be the first plugin registered: it needs to intercept a second launch before anything else in
+        // the builder chain runs, so the second process can exit immediately instead of opening a second
+        // window (and, more importantly for this app, a second SQLite connection to the same database file).
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(RuntimeState::new())
         .setup(|app| {
             // allow_file() grants are session-only; a file imported in an earlier run needs to be re-granted
