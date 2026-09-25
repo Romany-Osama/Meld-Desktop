@@ -31,6 +31,7 @@ rfd = "0.15"
 zip = "2"
 futures-util = "0.3"
 url = "2"
+tauri-plugin-single-instance = "2"
 aes-gcm = "0.10"
 keyring = { version = "3", default-features = false, features = ["windows-native"] }
 
