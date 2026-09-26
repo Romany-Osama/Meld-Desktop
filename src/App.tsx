@@ -738,6 +738,19 @@ function App() {
     void invoke("download_start", { item }).catch(() => undefined);
   };
 
+  // Syncs a like/unlike to YouTube Music when a Google session is active. Returns whether the sync succeeded -
+  // being signed out counts as success (there is nothing to sync), only an attempted sync that actually failed
+  // is worth surfacing to the user.
+  const syncLikeToYoutube = async (item: YtItem, liked: boolean): Promise<boolean> => {
+    if (!item.videoId || !sessionStatus.authenticated) return true;
+    try {
+      await invoke("ytm_toggle_like", { videoId: item.videoId, liked, item });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const shuffleQueueAfterCurrent = (items: YtItem[], currentId: string | null) => {
     if (!shuffleEnabled || !currentId) return items;
     const currentPosition = items.findIndex((item) => item.id === currentId);
@@ -788,14 +801,17 @@ function App() {
     try {
       const states = await Promise.all(selectedItems.map((item) => invoke<LibraryItemState>("library_item_state", { id: item.id })));
       const allLiked = states.every((state) => state.liked);
+      let syncFailures = 0;
       for (let index = 0; index < selectedItems.length; index += 1) {
         const item = selectedItems[index];
         const liked = !allLiked;
         await invoke("library_toggle_liked", { item, liked });
         maybeAutoDownloadOnLike(item, liked);
-        if (item.videoId && sessionStatus.authenticated) await invoke("ytm_toggle_like", { videoId: item.videoId, liked, item }).catch(() => undefined);
+        if (!(await syncLikeToYoutube(item, liked))) syncFailures += 1;
       }
-      setNotice(allLiked ? "Removed selected items from Meld Liked Songs." : "Added selected items to Meld Liked Songs.");
+      const verb = allLiked ? "Removed" : "Added";
+      const preposition = allLiked ? "from" : "to";
+      setNotice(syncFailures > 0 ? `${verb} selected items ${preposition} Meld Liked Songs; Google sync failed for ${syncFailures} item${syncFailures === 1 ? "" : "s"}.` : `${verb} selected items ${preposition} Meld Liked Songs.`);
       if (active === "library" && libraryMode === "liked") void loadLibrary("liked");
       closeSelection();
     } catch (error) { setNotice(`Selected like update failed: ${errorMessage(error)}`); }
@@ -1137,13 +1153,9 @@ function App() {
       setPlayerItemState({ ...current, liked: nextLiked });
       setMenuState((state) => ({ ...state, liked: nextLiked }));
       maybeAutoDownloadOnLike(player.item, nextLiked);
-      let googleSyncFailed = false;
-      if (player.item.videoId && sessionStatus.authenticated) {
-        try { await invoke("ytm_toggle_like", { videoId: player.item.videoId, liked: nextLiked, item: player.item }); }
-        catch { googleSyncFailed = true; }
-      }
+      const synced = await syncLikeToYoutube(player.item, nextLiked);
       if (active === "library" && libraryMode === "liked") void loadLibrary("liked");
-      setNotice(googleSyncFailed ? "Meld Liked Songs was updated locally; Google sync could not be completed." : !current.liked ? `Added “${player.item.title}” to Meld Liked Songs.` : `Removed “${player.item.title}” from Meld Liked Songs.`);
+      setNotice(!synced ? "Meld Liked Songs was updated locally; Google sync could not be completed." : !current.liked ? `Added “${player.item.title}” to Meld Liked Songs.` : `Removed “${player.item.title}” from Meld Liked Songs.`);
     } catch (error) { setNotice(`Meld Liked Songs update failed: ${errorMessage(error)}`); }
   };
 
@@ -1287,13 +1299,9 @@ function App() {
         await invoke("library_toggle_liked", { item, liked: nextLiked });
         setMenuState((current) => ({ ...current, liked: nextLiked }));
         maybeAutoDownloadOnLike(item, nextLiked);
-        let googleSyncFailed = false;
-        if (item.videoId && sessionStatus.authenticated) {
-          try { await invoke("ytm_toggle_like", { videoId: item.videoId, liked: nextLiked, item }); }
-          catch { googleSyncFailed = true; }
-        }
+        const synced = await syncLikeToYoutube(item, nextLiked);
         if (active === "library" && libraryMode === "liked") void loadLibrary("liked");
-        setNotice(googleSyncFailed ? "Meld Liked Songs was updated locally; Google sync could not be completed." : menuState.liked ? `Removed “${item.title}” from Meld Liked Songs.` : `Added “${item.title}” to Meld Liked Songs.`);
+        setNotice(!synced ? "Meld Liked Songs was updated locally; Google sync could not be completed." : menuState.liked ? `Removed “${item.title}” from Meld Liked Songs.` : `Added “${item.title}” to Meld Liked Songs.`);
       } catch (error) { setNotice(`Meld Liked Songs update failed: ${errorMessage(error)}`); }
       return;
     }
