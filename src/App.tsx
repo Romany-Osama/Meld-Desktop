@@ -274,7 +274,7 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<"main" | "appearance" | "content" | "player" | "privacy" | "storage" | "integrations" | "about">("main");
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
-  const [settings, setSettings] = useState<Record<string, boolean>>({ hideExplicit: false, hideVideoSongs: false, useLoginForBrowse: true, enableBetterLyrics: true, enablePaxsenix: true, enableLrclib: true, enableKugou: true, enableLyricsPlus: false, enableMusixmatch: false, ytmSync: true, similarContent: true, autoLoadMore: true, disableLoadMoreWhenRepeatAll: false, autoDownloadOnLike: false, autoSkipNextOnError: false, persistentShuffleAcrossQueues: false, rememberShuffleAndRepeat: true, shufflePlaylistFirst: false, preventDuplicateTracksInQueue: false, show_liked_playlist: true, show_downloaded_playlist: true, show_uploaded_playlist: true, show_top_playlist: true, show_cached_playlist: true });
+  const [settings, setSettings] = useState<Record<string, boolean>>({ hideExplicit: false, hideVideoSongs: false, useLoginForBrowse: true, enableBetterLyrics: true, enablePaxsenix: true, enableLrclib: true, enableKugou: true, enableLyricsPlus: false, enableMusixmatch: false, ytmSync: true, similarContent: true, autoLoadMore: true, disableLoadMoreWhenRepeatAll: false, autoDownloadOnLike: false, autoSkipNextOnError: false, persistentShuffleAcrossQueues: false, rememberShuffleAndRepeat: true, shufflePlaylistFirst: false, preventDuplicateTracksInQueue: false, show_liked_playlist: true, show_downloaded_playlist: true, show_uploaded_playlist: true, show_top_playlist: true, show_cached_playlist: true, sidebarCollapsed: false });
   const [lyricsProviderOrder, setLyricsProviderOrder] = useState<string[]>([...lyricsProviderNames]);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>({ authenticated: false });
@@ -1716,16 +1716,20 @@ function App() {
   }, [library.data, libraryMixSongs, libraryMode, libraryMixSort, libraryMixSortDescending, libraryQuery, librarySort, librarySortDescending, settings.hideExplicit, settings.hideVideoSongs]);
 
   return (
-    <div className="app-shell">
+    <div className={settings.sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
       <aside className="sidebar">
-        <div className="brand"><div className="brand-mark">M</div><div><strong>Meld</strong><span>Desktop</span></div></div>
+        <div className="brand">
+          <div className="brand-mark">M</div>
+          {!settings.sidebarCollapsed && <div><strong>Meld</strong><span>Desktop</span></div>}
+          <button className="sidebar-toggle" onClick={() => void setSetting("sidebarCollapsed", !settings.sidebarCollapsed)} title={settings.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-label={settings.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-pressed={settings.sidebarCollapsed}>{settings.sidebarCollapsed ? "»" : "«"}</button>
+        </div>
         <nav className="primary-nav" aria-label="Main navigation">
-          {navigation.map((item) => <button key={item.key} className={active === item.key ? "nav-item active" : "nav-item"} onClick={() => navigateTo(item.key)}><span className="nav-icon">{item.icon}</span><span>{item.label}</span></button>)}
+          {navigation.map((item) => <button key={item.key} className={active === item.key ? "nav-item active" : "nav-item"} onClick={() => navigateTo(item.key)} title={settings.sidebarCollapsed ? item.label : undefined}><span className="nav-icon">{item.icon}</span>{!settings.sidebarCollapsed && <span>{item.label}</span>}</button>)}
                     </nav>
             <nav className="secondary-nav" aria-label="Secondary navigation">
-              {secondaryNavigation.map((item) => <button key={item.key} className={active === item.key ? "nav-item active" : "nav-item"} onClick={() => navigateTo(item.key)}><span className="nav-icon">{item.icon}</span><span>{item.label}</span></button>)}
+              {secondaryNavigation.map((item) => <button key={item.key} className={active === item.key ? "nav-item active" : "nav-item"} onClick={() => navigateTo(item.key)} title={settings.sidebarCollapsed ? item.label : undefined}><span className="nav-icon">{item.icon}</span>{!settings.sidebarCollapsed && <span>{item.label}</span>}</button>)}
             </nav>
-            <div className="sidebar-footer"><span className="guest-label">{sessionStatus.authenticated ? "YouTube Music account connected" : "Guest mode · account optional"}</span></div>
+            {!settings.sidebarCollapsed && <div className="sidebar-footer"><span className="guest-label">{sessionStatus.authenticated ? "YouTube Music account connected" : "Guest mode · account optional"}</span></div>}
 
       </aside>
 
