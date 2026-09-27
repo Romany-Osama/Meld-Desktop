@@ -13,6 +13,9 @@ body { margin: 0; min-width: 0; min-height: 100vh; overflow: hidden; overscroll-
 button, input { font: inherit; }
 button { border: 0; cursor: pointer; }
 button:focus-visible, input:focus-visible { outline: 2px solid #aab3f2; outline-offset: 2px; }
+/* .search-form/.history-search inputs intentionally keep outline: 0 (a ring on the input itself would look
+   disconnected from the pill's rounded border) - the pill gets the ring instead via :focus-within. */
+.search-form:focus-within, .history-search:focus-within { outline: 2px solid #aab3f2; outline-offset: 2px; }
 
 .app-shell { width: 100vw; height: 100vh; min-height: 0; display: flex; overflow: hidden; background: radial-gradient(circle at 70% -20%, #252a43 0, #12141e 34%, #0c0d12 72%); }
 .sidebar { width: var(--sidebar-w); transition: width .18s ease; min-height: 100vh; padding: 26px 16px 20px; display: flex; flex-direction: column; background: rgba(9, 10, 15, .88); border-right: 1px solid rgba(255,255,255,.065); }
