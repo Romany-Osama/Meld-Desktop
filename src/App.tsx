@@ -1521,7 +1521,21 @@ function App() {
       const target = event.target as HTMLElement | null;
       const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT" || target?.isContentEditable;
       if (typing && !(event.key === "Escape")) return;
-      if (event.key === "Escape") { if (lyrics || detail || playlist || menuItem || queueOpen || playerExpanded) { closeTransientLayers(); event.preventDefault(); } return; }
+      if (event.key === "Escape") {
+        if (settingsOpen) { setSettingsOpen(false); event.preventDefault(); return; }
+        if (editItem) { setEditItem(null); event.preventDefault(); return; }
+        if (spotifyAddItem) { setSpotifyAddItem(null); event.preventDefault(); return; }
+        if (spotifyLikedOpen) { setSpotifyLikedOpen(false); event.preventDefault(); return; }
+        if (spotifyOpenPlaylist) { setSpotifyOpenPlaylist(null); event.preventDefault(); return; }
+        if (youtubeMatchItem) { setYoutubeMatchItem(null); event.preventDefault(); return; }
+        if (sleepTimerOpen) { setSleepTimerOpen(false); event.preventDefault(); return; }
+        if (artistPickerItem) { setArtistPickerItem(null); event.preventDefault(); return; }
+        if (playlistPickerItems) { setPlaylistPickerItems(null); event.preventDefault(); return; }
+        if (createPlaylistOpen) { setCreatePlaylistOpen(false); event.preventDefault(); return; }
+        if (logoutDialogOpen) { setLogoutDialogOpen(false); event.preventDefault(); return; }
+        if (lyrics || detail || playlist || menuItem || queueOpen || playerExpanded || infoItem) { closeTransientLayers(); event.preventDefault(); }
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") { event.preventDefault(); document.querySelector<HTMLInputElement>(".search-form input")?.focus(); return; }
       if (event.altKey && event.key === "ArrowLeft") { event.preventDefault(); goBack(); return; }
       if (event.altKey && event.key === "ArrowRight") { event.preventDefault(); navigateForward(); return; }
@@ -1532,7 +1546,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [active, backStack, detail, durationSeconds, forwardStack, lyrics, menuItem, navigateBack, navigateForward, navigateTo, playbackSeconds, player, playerExpanded, queueOpen]);
+  }, [active, artistPickerItem, backStack, createPlaylistOpen, detail, durationSeconds, editItem, forwardStack, infoItem, logoutDialogOpen, lyrics, menuItem, navigateBack, navigateForward, navigateTo, playbackSeconds, player, playerExpanded, playlist, playlistPickerItems, queueOpen, settingsOpen, sleepTimerOpen, spotifyAddItem, spotifyLikedOpen, spotifyOpenPlaylist, youtubeMatchItem]);
 
   const formatTime = (seconds: number) => {
     const safe = Math.max(0, Math.floor(seconds));
