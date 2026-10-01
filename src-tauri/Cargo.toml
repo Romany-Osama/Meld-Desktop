@@ -1,6 +1,6 @@
 [package]
 name = "meld-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Meld Desktop — a Windows-native GPLv3 port of Meld"
 authors = ["Meld contributors"]
 edition = "2021"
@@ -30,6 +30,7 @@ lofty = "0.22"
 rfd = "0.15"
 zip = "2"
 futures-util = "0.3"
+tauri-plugin-taskbar = "0.1.0"
 url = "2"
 tauri-plugin-single-instance = "2"
 aes-gcm = "0.10"
