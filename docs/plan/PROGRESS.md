@@ -6,44 +6,44 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 ## Phase 0 · M0.1 Branch reconciliation
 
 - [ ] QUEUE-001 (P0) Use one canonical branch
-- [ ] TR-C1 (P0) Default branch and released product have diverged
-- [ ] TR-C2 (P0) v0.1.8 stores Google/Spotify credentials in plaintext SQLite
-- [ ] TR-C3 (P0) v0.1.8 disables CSP and grants asset access to broad user folders
-- [ ] TR-C4 (P0) v0.1.8 contains known post-release correctness/data-integrity bugs
-- [ ] TR-H1 (P0) Main regresses major v0.1.8 features
+- [x] TR-C1 (P0) Default branch and released product have diverged — merge-base check; upgrade test
+- [x] TR-C2 (P0) v0.1.8 stores Google/Spotify credentials in plaintext SQLite — secrets::tests::migration_*, upgrade_from_a_v0_1_8_database_*
+- [x] TR-C3 (P0) v0.1.8 disables CSP and grants asset access to broad user folders — checks.test.mjs security
+- [x] TR-C4 (P0) v0.1.8 contains known post-release correctness/data-integrity bugs — youtube_sync_*, like_state_save_*, active_download_guard_*, every_song_delete_*, spotify_matcher_*
+- [x] TR-H1 (P0) Main regresses major v0.1.8 features — checks.test.mjs ui (restored commands registered)
 - [ ] TR-H4 (P0) v0.1.8 restore can consume unbounded memory
 - [ ] TR-H5 (P0) v0.1.8 networking can hang indefinitely
 - [ ] TR-H6 (P0) Logout did not clear login WebView state (v0.1.8)
-- [ ] TR-M3 (P0) Duplicate Audio quality control in v0.1.8 settings
+- [x] TR-M3 (P0) Duplicate Audio quality control in v0.1.8 settings — checks.test.mjs ui (duplicate Audio quality)
 - [ ] TR-M4 (P0) Main stats less accurate (playtime removed)
 
 ## Phase 0 · M0.2 Restore v0.1.8 playback features on the reconciled branch
 
-- [ ] PLAY-001 (P0) Reconcile the two playback branches
+- [x] PLAY-001 (P0) Reconcile the two playback branches — v0.1.8 is an ancestor of main (D-001)
 - [ ] PLAY-021 (P1) Main removed quality support entirely
 - [ ] PLAY-031 (P1) v0.1.8 has no expiry recovery
 - [ ] PLAY-035 (P1) Main's effect is keyed only by song ID
 - [ ] PLAY-055 (P1) Main removed resume entirely
-- [ ] PLAY-056 (P1) v0.1.8 can leak an “active download” lock on early return
-- [ ] PLAY-091 (P1) No branch/version contract test
+- [x] PLAY-056 (P1) v0.1.8 can leak an “active download” lock on early return — active_download_guard_clears_the_map_on_early_return
+- [x] PLAY-091 (P1) No branch/version contract test — checks.test.mjs versions
 
 ## Phase 0 · M0.3 Version truth, minimal CI, repository hygiene
 
-- [ ] S5-013 (P0) Keep CSP enabled (regression guard)
-- [ ] S5-037 (P0) Keep asset scope narrow (regression guard)
-- [ ] S5-070 (P0) Restore missing bundle settings
-- [ ] S5-071 (P0) Single source of version truth
-- [ ] S5-095 (P0) Secret scanning and push protection
-- [ ] S5-097 (P0) Branch protection
-- [ ] R6-073 (P0) Add GitHub Actions CI
-- [ ] R6-074 (P0) Windows runner as the primary target
+- [x] S5-013 (P0) Keep CSP enabled (regression guard) — check:security
+- [x] S5-037 (P0) Keep asset scope narrow (regression guard) — check:security
+- [x] S5-070 (P0) Restore missing bundle settings — checks.test.mjs bundle
+- [x] S5-071 (P0) Single source of version truth — check:versions
+- [x] S5-095 (P0) Secret scanning and push protection — secret scanning + push protection enabled
+- [x] S5-097 (P0) Branch protection — branch protection on main requires CI
+- [x] R6-073 (P0) Add GitHub Actions CI — .github/workflows/ci.yml
+- [x] R6-074 (P0) Windows runner as the primary target — windows-latest job
 - [ ] R6-075 (P0) Required checks
 - [ ] TR-H9 (P0) No automated release gate or CI
-- [ ] TR-M11 (P0) Public issue tracking disabled
-- [ ] TR-M12 (P0) Release binaries committed into Git history
-- [ ] TR-M13 (P0) Release naming/version history inconsistent
-- [ ] TR-L2 (P0) CONTRIBUTING, SECURITY, issue/PR templates, code of conduct, support policy
-- [ ] TR-L3 (P0) Changelog missing on main
+- [x] TR-M11 (P0) Public issue tracking disabled — Issues enabled, templates, SECURITY.md
+- [x] TR-M12 (P0) Release binaries committed into Git history — checks.test.mjs tracked files
+- [x] TR-M13 (P0) Release naming/version history inconsistent — CHANGELOG corrected; D-008 open for tags
+- [x] TR-L2 (P0) CONTRIBUTING, SECURITY, issue/PR templates, code of conduct, support policy — SECURITY/CONTRIBUTING/CoC/templates
+- [x] TR-L3 (P0) Changelog missing on main — CHANGELOG.md
 - [ ] TR-L9 (P0) Normalize formatting/line endings; enforce Prettier/rustfmt in CI
 
 ## Phase 1 · M1.1 Frontend architecture split
