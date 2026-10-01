@@ -42,3 +42,7 @@ Architecture and scope decisions, newest last. Each entry: context, decision, ev
 - **Context:** This repository also contains upstream Meld (Android) tags `v0.1.1` and `v0.2.0`…`v0.8.8` (e.g. `v0.2.0` → 1d2f1122, by the upstream author). Plan §7.1 wants Desktop tags `vX.Y.Z`, so the Desktop `v0.2.0` … `v0.8.x` tags would collide, and the updater/`latest.json` and Releases list would be ambiguous.
 - **Options:** (a) delete the inherited upstream tags from this fork (destructive, owner only; upstream history stays in the upstream repo); (b) use a Desktop prefix such as `desktop-v0.2.0` everywhere (scripts, CI, updater).
 - **Status:** not decided; no 0.2.0 tag will be created until the owner chooses. CHANGELOG notes that these tags are not Desktop releases.
+
+## D-009 — Repair `Cargo.lock` entries corrupted by the 0.1.8 version bump
+- **Context:** First Windows CI run failed `--locked`: `xz2 0.1.8` does not exist. The v0.1.8 bump had replaced `0.1.7` with `0.1.8` across `Cargo.lock`, so `crypto-common`, `windows-version`, `xz2` and `zerofrom-derive` claimed 0.1.8 while keeping the 0.1.7 checksums (verified against the crates.io index; the other 575 registry entries match).
+- **Decision:** Restore those four entries to 0.1.7. `scripts/bump-version.mjs` only edits the `meld-desktop` package entry, so this cannot recur through the script; CI `--locked` catches any other drift.
