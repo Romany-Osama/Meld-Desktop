@@ -34,7 +34,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] S5-070 (P0) Restore missing bundle settings — checks.test.mjs bundle
 - [x] S5-071 (P0) Single source of version truth — check:versions
 - [x] S5-095 (P0) Secret scanning and push protection — secret scanning + push protection enabled
-- [x] S5-097 (P0) Branch protection — branch protection on main requires CI
+- [ ] S5-097 (P0) Branch protection — partial: main requires CI; review requirement and signed tags pending (solo maintainer)
 - [x] R6-073 (P0) Add GitHub Actions CI — .github/workflows/ci.yml
 - [x] R6-074 (P0) Windows runner as the primary target — windows-latest job
 - [ ] R6-075 (P0) Required checks

@@ -7,7 +7,7 @@
 - Version 0.2.0 from `package.json`; `check-versions`, `check-security-config` (CSP, asset scope, IPC, NSIS-only bundle, no committed binaries), `check-ui-invariants` with node tests.
 - Upgrade test from a real v0.1.8-schema database (secrets sealed, no plaintext left, library kept, interrupted download resumable).
 - rustfmt/clippy `-D warnings` clean; `Cargo.lock` repaired (D-009).
-- Windows CI (`windows-latest`, SHA-pinned actions) green; branch protection on `main` requires it.
+- Windows CI (`windows-latest`, SHA-pinned actions) green; branch protection on `main` requires it (no required review yet — a solo maintainer cannot approve their own PRs; S5-097 left open).
 - Issues, secret scanning, push protection, private vulnerability reporting and Dependabot alerts enabled.
 - Corrected CHANGELOG; SECURITY, CONTRIBUTING, code of conduct, issue/PR templates; plan docs in `docs/plan/`.
 
