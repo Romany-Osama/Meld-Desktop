@@ -1,0 +1,22 @@
+name: Feature request
+description: Suggest an improvement or a missing Meld feature
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Requests to bypass DRM, advertising or paywalls will be closed.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do?
+    validations:
+      required: true
+  - type: textarea
+    id: reference
+    attributes:
+      label: Does Meld (Android) have it?
+      description: Link to the upstream feature or release, if any.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else

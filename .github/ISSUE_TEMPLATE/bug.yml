@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in Meld Desktop does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste passwords, cookies, tokens or `sp_dc`/`sp_key` values.** Security problems go through `SECURITY.md`, not public issues.
+  - type: input
+    id: version
+    attributes:
+      label: Meld Desktop version
+      description: Settings → About, e.g. 0.2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options: [NSIS setup, Portable ZIP, Built from source]
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: e.g. Windows 11 23H2
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Open …\n2. Click …"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots (with secrets removed)
