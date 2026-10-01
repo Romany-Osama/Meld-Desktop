@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { checkVersions, cargoPackageVersion, cargoLockVersion, readRepo } from "../lib/versions.mjs";
-import { checkSecurityConfig, ALLOWED_ASSET_SCOPE } from "../lib/security-config.mjs";
+import { checkSecurityConfig, checkBundleConfig, checkTrackedFiles, ALLOWED_ASSET_SCOPE } from "../lib/security-config.mjs";
 import { checkUiInvariants, registeredCommands, RESTORED_UI_COMMANDS } from "../lib/ui-invariants.mjs";
 
 const goodRepo = () => ({
@@ -75,4 +75,16 @@ test("ui: every registered command is invoked by the UI or documented as backend
   const registered = registeredCommands(readFileSync("src-tauri/src/lib.rs", "utf8"));
   const unused = registered.filter((command) => !app.includes(`"${command}"`) && !app.includes(`'${command}'`));
   assert.deepEqual(unused, [], `registered but never invoked: ${unused.join(", ")}`);
+});
+
+test("bundle: main's targets \"all\" without bootstrapper is rejected; NSIS + embedded bootstrapper passes (S5-070)", () => {
+  assert.equal(checkBundleConfig({ bundle: { targets: "all" } }).length, 2);
+  assert.equal(checkBundleConfig({ bundle: { targets: ["nsis", "msi"], windows: { webviewInstallMode: { type: "embedBootstrapper" } } } }).length, 1);
+  assert.deepEqual(checkBundleConfig({ bundle: { targets: ["nsis"], windows: { webviewInstallMode: { type: "embedBootstrapper", silent: true } } } }), []);
+  assert.deepEqual(checkBundleConfig(JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"))), []);
+});
+
+test("tracked files: committed release binaries are rejected (TR-M12)", () => {
+  assert.equal(checkTrackedFiles(["release/meld-desktop-0.1.8-portable.zip", "release/notes.md", "src/App.tsx", "dist/x.EXE"]).length, 3);
+  assert.deepEqual(checkTrackedFiles(["src-tauri/icons/icon.ico", "src-tauri/icons/taskbar/play.ico", "README.md"]), []);
 });

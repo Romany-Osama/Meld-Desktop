@@ -47,3 +47,21 @@ export function checkSecurityConfig(tauriConf, capabilities = []) {
   }
   return problems;
 }
+
+/** Packaging policy (S5-070, D-006): NSIS + portable only, no MSI, WebView2 bootstrapper embedded. */
+export function checkBundleConfig(tauriConf) {
+  const problems = [];
+  const bundle = tauriConf?.bundle ?? {};
+  const targets = Array.isArray(bundle.targets) ? bundle.targets : [bundle.targets];
+  if (targets.length !== 1 || targets[0] !== "nsis") problems.push(`bundle.targets must be ["nsis"] (portable ZIP is built separately; no MSI), got ${JSON.stringify(bundle.targets)}`);
+  const mode = bundle.windows?.webviewInstallMode?.type;
+  if (mode !== "embedBootstrapper") problems.push(`bundle.windows.webviewInstallMode.type must be "embedBootstrapper", got ${JSON.stringify(mode)}`);
+  return problems;
+}
+
+/** Release binaries are published as GitHub Release assets only, never committed (TR-M12). */
+export function checkTrackedFiles(paths) {
+  return paths
+    .filter((path) => /^release\//.test(path) || /\.(exe|msi|msix|zip|7z|nupkg)$/i.test(path))
+    .map((path) => `release binary must not be committed: ${path}`);
+}
