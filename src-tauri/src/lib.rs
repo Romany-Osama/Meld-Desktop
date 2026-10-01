@@ -259,6 +259,85 @@ struct SessionStatus {
     account_avatar: Option<String>,
 }
 
+/// Creates or upgrades the schema of an existing database (any released version from v0.1.0 to v0.1.8), recovers
+/// interrupted downloads, and seals plaintext session secrets. Separate from `RuntimeState::new` so upgrade tests can
+/// run it against a real older database file with an in-memory key store.
+fn initialize_database(db: &Connection, store: &dyn secrets::KeyStore) -> rusqlite::Result<()> {
+    db.execute_batch(SCHEMA_SQL)?;
+    let _ = db.execute("ALTER TABLE songs ADD COLUMN set_video_id TEXT", []);
+    let _ = db.execute(
+        "ALTER TABLE songs ADD COLUMN explicit INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute("ALTER TABLE songs ADD COLUMN music_video_type TEXT", []);
+    let _ = db.execute(
+        "ALTER TABLE songs ADD COLUMN liked INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute("ALTER TABLE songs ADD COLUMN liked_date INTEGER", []);
+    let _ = db.execute(
+        "ALTER TABLE songs ADD COLUMN in_library INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute(
+        "ALTER TABLE songs ADD COLUMN is_video INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute(
+        "ALTER TABLE songs ADD COLUMN uploaded INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute(
+        "ALTER TABLE songs ADD COLUMN youtube_liked INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute("ALTER TABLE songs ADD COLUMN album_id TEXT", []);
+    let _ = db.execute(
+        "ALTER TABLE songs ADD COLUMN duration INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute(
+        "ALTER TABLE songs ADD COLUMN is_local INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute("ALTER TABLE songs ADD COLUMN local_path TEXT", []);
+    let _ = db.execute("ALTER TABLE songs ADD COLUMN date_modified INTEGER", []);
+    let _ = db.execute("ALTER TABLE downloads ADD COLUMN total_bytes INTEGER", []);
+    let _ = db.execute(
+        "ALTER TABLE downloads ADD COLUMN state TEXT NOT NULL DEFAULT 'completed'",
+        [],
+    );
+    let _ = db.execute("ALTER TABLE downloads ADD COLUMN error TEXT", []);
+    let _ = db.execute(
+        "ALTER TABLE downloads ADD COLUMN lyrics_cached INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute("ALTER TABLE downloads ADD COLUMN artwork_path TEXT", []);
+    let _ = db.execute(
+        "ALTER TABLE albums ADD COLUMN liked INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute(
+        "ALTER TABLE playlists ADD COLUMN source TEXT NOT NULL DEFAULT 'local'",
+        [],
+    );
+    let _ = db.execute("ALTER TABLE podcasts ADD COLUMN detail_json TEXT", []);
+    let _ = db.execute(
+        "ALTER TABLE history ADD COLUMN play_time_ms INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute(
+        "ALTER TABLE player_cache ADD COLUMN quality TEXT NOT NULL DEFAULT 'auto'",
+        [],
+    );
+    // A download cannot survive a restart; rows still marked "downloading" are leftovers of a crash or forced quit.
+    // Mark them cancelled (not failed) so the retained `.part` file stays resumable (v0.1.8 resume, see DECISIONS D-002).
+    let _ = db.execute("UPDATE downloads SET state = 'cancelled', error = 'download interrupted; retry to resume' WHERE state = 'downloading'", []);
+    // Encrypt any session secret still stored as plaintext by an older version. Failure keeps the session working.
+    let _ = secrets::migrate_with(db, store);
+    Ok(())
+}
+
 impl RuntimeState {
     /// A startup failure here previously panicked via .expect(). With windows_subsystem = "windows" (no
     /// console window), that panic message is never seen by anyone - the app just silently vanishes from the
@@ -290,80 +369,9 @@ impl RuntimeState {
                 error,
             ),
         };
-        if let Err(error) = db.execute_batch(SCHEMA_SQL) {
+        if let Err(error) = initialize_database(&db, &secrets::KeyringStore) {
             Self::fail_to_start("Could not initialize the database schema", error);
         }
-        let _ = db.execute("ALTER TABLE songs ADD COLUMN set_video_id TEXT", []);
-        let _ = db.execute(
-            "ALTER TABLE songs ADD COLUMN explicit INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = db.execute("ALTER TABLE songs ADD COLUMN music_video_type TEXT", []);
-        let _ = db.execute(
-            "ALTER TABLE songs ADD COLUMN liked INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = db.execute("ALTER TABLE songs ADD COLUMN liked_date INTEGER", []);
-        let _ = db.execute(
-            "ALTER TABLE songs ADD COLUMN in_library INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = db.execute(
-            "ALTER TABLE songs ADD COLUMN is_video INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = db.execute(
-            "ALTER TABLE songs ADD COLUMN uploaded INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = db.execute(
-            "ALTER TABLE songs ADD COLUMN youtube_liked INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = db.execute("ALTER TABLE songs ADD COLUMN album_id TEXT", []);
-        let _ = db.execute(
-            "ALTER TABLE songs ADD COLUMN duration INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = db.execute(
-            "ALTER TABLE songs ADD COLUMN is_local INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = db.execute("ALTER TABLE songs ADD COLUMN local_path TEXT", []);
-        let _ = db.execute("ALTER TABLE songs ADD COLUMN date_modified INTEGER", []);
-        let _ = db.execute("ALTER TABLE downloads ADD COLUMN total_bytes INTEGER", []);
-        let _ = db.execute(
-            "ALTER TABLE downloads ADD COLUMN state TEXT NOT NULL DEFAULT 'completed'",
-            [],
-        );
-        let _ = db.execute("ALTER TABLE downloads ADD COLUMN error TEXT", []);
-        let _ = db.execute(
-            "ALTER TABLE downloads ADD COLUMN lyrics_cached INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = db.execute("ALTER TABLE downloads ADD COLUMN artwork_path TEXT", []);
-        let _ = db.execute(
-            "ALTER TABLE albums ADD COLUMN liked INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = db.execute(
-            "ALTER TABLE playlists ADD COLUMN source TEXT NOT NULL DEFAULT 'local'",
-            [],
-        );
-        let _ = db.execute("ALTER TABLE podcasts ADD COLUMN detail_json TEXT", []);
-        let _ = db.execute(
-            "ALTER TABLE history ADD COLUMN play_time_ms INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = db.execute(
-            "ALTER TABLE player_cache ADD COLUMN quality TEXT NOT NULL DEFAULT 'auto'",
-            [],
-        );
-        // A download cannot survive a restart; rows still marked "downloading" are leftovers of a crash or forced quit.
-        // Mark them cancelled (not failed) so the retained `.part` file stays resumable (v0.1.8 resume, see DECISIONS D-002).
-        let _ = db.execute("UPDATE downloads SET state = 'cancelled', error = 'download interrupted; retry to resume' WHERE state = 'downloading'", []);
-        // Encrypt any session secret still stored as plaintext by an older version. Failure keeps the session working.
-        let _ = secrets::migrate(&db);
         Self {
             visitor_data: Mutex::new(None),
             db: Mutex::new(db),
@@ -9698,6 +9706,131 @@ mod tests {
                 "song DELETE without a downloads guard: DELETE FROM songs{sql}"
             );
         }
+    }
+
+    // --- Phase 0 upgrade test (TR-C2, TR-C1, PLAY-055) ---
+    struct MemKeyStore(Mutex<Option<Vec<u8>>>);
+    impl secrets::KeyStore for MemKeyStore {
+        fn load(&self) -> Result<Option<Vec<u8>>, String> {
+            Ok(self.0.lock().expect("key store").clone())
+        }
+        fn store(&self, key: &[u8]) -> Result<(), String> {
+            *self.0.lock().expect("key store") = Some(key.to_vec());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn upgrade_from_a_v0_1_8_database_seals_secrets_and_keeps_the_library() {
+        let dir = std::env::temp_dir().join(format!(
+            "meld-upgrade-test-{}-{}",
+            std::process::id(),
+            now_millis()
+        ));
+        fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("meld.sqlite3");
+        {
+            let old = Connection::open(&path).expect("v0.1.8 db");
+            old.execute_batch(include_str!("../tests/fixtures/v0.1.8-song-db.sql"))
+                .expect("fixture");
+        }
+        let markers: [&[u8]; 4] = [
+            b"V018PLAINCOOKIE",
+            b"V018PLAINSPDC",
+            b"V018PLAINSPKEY",
+            b"V018PLAINTOKEN",
+        ];
+        let before = fs::read(&path).expect("read fixture db");
+        assert!(
+            markers.iter().all(|marker| contains_bytes(&before, marker)),
+            "premise: v0.1.8 stores secrets in plaintext"
+        );
+
+        let store = MemKeyStore(Mutex::new(None));
+        let db = Connection::open(&path).expect("open for upgrade");
+        initialize_database(&db, &store).expect("upgrade");
+        drop(db);
+
+        let after = fs::read(&path).expect("read upgraded db");
+        for marker in markers {
+            assert!(
+                !contains_bytes(&after, marker),
+                "{} must not remain anywhere in the file",
+                String::from_utf8_lossy(marker)
+            );
+        }
+
+        let db = Connection::open(&path).expect("reopen");
+        for (key, expected) in [
+            (
+                "cookie",
+                "SAPISID=V018PLAINCOOKIE0123456789; __Secure-3PSID=V018PLAINPSID",
+            ),
+            ("spotifySpDc", "V018PLAINSPDC0123456789"),
+            ("spotifySpKey", "V018PLAINSPKEY0123"),
+            ("spotifyAccessToken", "V018PLAINTOKEN0123456789"),
+        ] {
+            let raw = setting_value(&db, key)
+                .expect("raw")
+                .expect("still present");
+            assert!(secrets::is_sealed(&raw), "{key} is sealed at rest");
+            assert_eq!(
+                secrets::get_with(&db, &store, key)
+                    .expect("open")
+                    .as_deref(),
+                Some(expected),
+                "{key} still usable"
+            );
+        }
+        let count = |sql: &str| {
+            db.query_row(sql, [], |row| row.get::<_, i64>(0))
+                .expect(sql)
+        };
+        assert_eq!(count("SELECT COUNT(*) FROM songs"), 3, "library intact");
+        assert_eq!(count("SELECT COUNT(*) FROM songs WHERE liked = 1"), 1);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM playlist_songs WHERE playlist_id = 'p1'"),
+            2
+        );
+        assert_eq!(
+            count("SELECT play_time_ms FROM history WHERE song_id = 's1'"),
+            183000,
+            "measured playtime kept (TR-M4)"
+        );
+        for (key, value) in [
+            ("audioQuality", "high"),
+            ("playerVolume", "0.6"),
+            ("persistentQueue", "true"),
+            ("varispeed", "false"),
+        ] {
+            assert_eq!(
+                setting_value(&db, key).expect("setting").as_deref(),
+                Some(value),
+                "v0.1.8 setting {key} kept"
+            );
+        }
+        let (state, error): (String, Option<String>) = db
+            .query_row(
+                "SELECT state, error FROM downloads WHERE song_id = 's2'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("download row");
+        assert_eq!(
+            state, "cancelled",
+            "an interrupted download stays resumable (D-002), not failed"
+        );
+        assert!(error.unwrap_or_default().contains("resume"));
+
+        initialize_database(&db, &store).expect("second start is a no-op");
+        assert_eq!(
+            secrets::get_with(&db, &store, "cookie")
+                .expect("open")
+                .as_deref(),
+            Some("SAPISID=V018PLAINCOOKIE0123456789; __Secure-3PSID=V018PLAINPSID")
+        );
+        drop(db);
+        let _ = fs::remove_dir_all(&dir);
     }
     // --- regression tests for the review fixes (end) ---
 }

@@ -216,9 +216,6 @@ pub fn get(db: &Connection, key: &str) -> Result<Option<String>, String> {
 pub fn set(db: &Connection, key: &str, value: &str) -> Result<(), String> {
     set_with(db, &KeyringStore, key, value)
 }
-pub fn migrate(db: &Connection) -> Result<bool, String> {
-    migrate_with(db, &KeyringStore)
-}
 
 #[cfg(test)]
 mod tests {
