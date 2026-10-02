@@ -91,3 +91,7 @@ Architecture and scope decisions, newest last. Each entry: context, decision, ev
 - **Downloads:** always `Range: bytes={offset}-`. On a refused URL, mark it and re-resolve (max 3 requests); on 416 with a partial file, restart from 0. Error strings never contain the URL (`without_url`).
 - **Verified:** the ignored live test now downloads every client's full stream; ANDROID_VR 1.65.10 is rejected by the probe and the other four clients deliver 3,433,755 / 3,433,755 bytes.
 
+## D-019 — Bounded player-cache fills (PLAY-042, PLAY-043)
+- **Decision:** `player_cache::CacheJobs` allows at most 2 fills. Starting a fill for a new song cancels every other fill (a skip means the old song is abandoned). Cancelled fills still count until they have closed their socket and file, so rapid skipping applies backpressure: when 2 are still draining, the new song streams without caching. Re-requests for the same song never start a second fill. Fills poll their cancel flag every 250 ms while waiting for data, delete their `.part` on any error, and `RunEvent::Exit` cancels all fills and removes their `.part` files. Removing a cached song cancels its fill.
+- **Not done:** a persisted, resumable download queue for explicit downloads (R6-027) and prefetch of the next track (R6-020).
+

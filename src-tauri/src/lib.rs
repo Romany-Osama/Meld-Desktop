@@ -39,6 +39,7 @@ const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 const VISITOR_PREFIX: &str = "Cg";
 
+mod player_cache;
 mod resolver;
 mod secrets;
 mod updates;
@@ -210,7 +211,7 @@ const SCHEMA_SQL: &str = "PRAGMA foreign_keys = ON;
 static HTTP: OnceLock<Client> = OnceLock::new();
 static MUSIXMATCH_TOKEN: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static DOWNLOAD_CANCELS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
-static PLAYER_CACHE_ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static PLAYER_CACHE_JOBS: OnceLock<Mutex<player_cache::CacheJobs>> = OnceLock::new();
 static PLAYER_CACHE_BLOCKED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn build_http_client(connect: Duration, request: Duration) -> Client {
@@ -2209,12 +2210,6 @@ fn download_retry(status: reqwest::StatusCode, offset: i64) -> DownloadRetry {
     }
 }
 
-/// A transfer is complete only when it delivered every byte the server announced (PLAY-044, partial:
-/// lengths the server does not announce are not validated yet).
-fn transfer_complete(bytes: i64, expected: Option<i64>) -> bool {
-    bytes > 0 && expected.is_none_or(|expected| bytes == expected)
-}
-
 fn can_resume_partial_download(existing_bytes: i64, status: reqwest::StatusCode) -> bool {
     existing_bytes > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT
 }
@@ -2268,8 +2263,8 @@ async fn cache_download_artwork(song_id: &str, source_url: Option<&str>) -> Opti
     Some(path.to_string_lossy().to_string())
 }
 
-fn player_cache_active() -> &'static Mutex<HashSet<String>> {
-    PLAYER_CACHE_ACTIVE.get_or_init(|| Mutex::new(HashSet::new()))
+fn player_cache_jobs() -> &'static Mutex<player_cache::CacheJobs> {
+    PLAYER_CACHE_JOBS.get_or_init(|| Mutex::new(player_cache::CacheJobs::default()))
 }
 
 fn player_cache_blocked() -> &'static Mutex<HashSet<String>> {
@@ -2416,6 +2411,9 @@ fn player_cache_remove(
     let id = song_id.trim();
     if id.is_empty() {
         return Err("player cache song id is empty".to_owned());
+    }
+    if let Ok(jobs) = player_cache_jobs().lock() {
+        jobs.cancel(id);
     }
     player_cache_blocked()
         .lock()
@@ -2604,7 +2602,7 @@ async fn download_start(
         }
         file.flush().await.map_err(|error| format!("download cache flush failed: {error}"))?;
         drop(file);
-        if !transfer_complete(bytes, total_bytes) {
+        if !player_cache::transfer_complete(bytes, total_bytes) {
             // The partial file is kept so the next attempt resumes from it.
             return Err(format!("download incomplete: received {bytes} of {} bytes", total_bytes.unwrap_or(0)));
         }
@@ -2705,41 +2703,27 @@ async fn ytm_player(
     let cache_url = payload.stream_url.clone();
     let cache_id = id.clone();
     let cache_path = player_cache_path(&cache_id);
-    let should_start = {
-        let mut active = player_cache_active()
-            .lock()
-            .map_err(|_| "player cache state poisoned".to_owned())?;
-        active.insert(cache_id.clone())
-    };
-    if should_start {
+    let started = player_cache_jobs()
+        .lock()
+        .map_err(|_| "player cache state poisoned".to_owned())?
+        .start(&cache_id);
+    if let player_cache::Start::Started(cancel) = started {
         tokio::spawn(async move {
+            let part_path = PathBuf::from(format!("{}.part", cache_path.to_string_lossy()));
             let result: Result<(), String> = async {
-                if let Some(parent) = cache_path.parent() { tokio::fs::create_dir_all(parent).await.map_err(|error| format!("player cache directory failed: {error}"))?; }
-                let response = http().get(&cache_url).timeout(TRANSFER_TIMEOUT).header(RANGE, "bytes=0-").send().await.map_err(|error| format!("player cache request failed: {}", error.without_url()))?.error_for_status().map_err(|error| format!("player cache response failed: {}", error.without_url()))?;
-                let mut file = tokio::fs::File::create(format!("{}.part", cache_path.to_string_lossy())).await.map_err(|error| format!("player cache file failed: {error}"))?;
-                let expected = response.content_length().map(|value| value as i64);
-                let mut stream = response.bytes_stream();
-                let mut bytes = 0_i64;
-                while let Some(chunk) = next_chunk_within(&mut stream, STALL_TIMEOUT, "player cache").await? {
-                    let chunk = chunk.map_err(|error| format!("player cache stream failed: {error}"))?;
-                    file.write_all(&chunk).await.map_err(|error| format!("player cache write failed: {error}"))?;
-                    bytes += chunk.len() as i64;
-                }
-                file.flush().await.map_err(|error| format!("player cache flush failed: {error}"))?;
-                drop(file);
-                if !transfer_complete(bytes, expected) { return Err(format!("player cache incomplete: {bytes} bytes")); }
+                let bytes = player_cache::fill(http(), &cache_url, &part_path, &cancel, STALL_TIMEOUT, TRANSFER_TIMEOUT).await?;
                 if player_cache_is_blocked(&cache_id) { return Err("player cache was removed".to_owned()); }
-                fs::rename(format!("{}.part", cache_path.to_string_lossy()), &cache_path).map_err(|error| format!("player cache finalize failed: {error}"))?;
+                fs::rename(&part_path, &cache_path).map_err(|error| format!("player cache finalize failed: {error}"))?;
                 if player_cache_is_blocked(&cache_id) { let _ = fs::remove_file(&cache_path); return Err("player cache was removed".to_owned()); }
                 let db = Connection::open(database_path()).map_err(|error| format!("player cache database open failed: {error}"))?;
                 db.execute("INSERT INTO player_cache (song_id, path, bytes, cached_at, quality) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(song_id) DO UPDATE SET path=excluded.path, bytes=excluded.bytes, cached_at=excluded.cached_at, quality=excluded.quality", params![cache_id, cache_path.to_string_lossy().to_string(), bytes, now_seconds(), requested_quality]).map_err(|error| format!("player cache state write failed: {error}"))?;
                 Ok(())
             }.await;
             if result.is_err() {
-                let _ = fs::remove_file(format!("{}.part", cache_path.to_string_lossy()));
+                let _ = fs::remove_file(&part_path);
             }
-            if let Ok(mut active) = player_cache_active().lock() {
-                active.remove(&cache_id);
+            if let Ok(mut jobs) = player_cache_jobs().lock() {
+                jobs.finish(&cache_id);
             }
         });
     }
@@ -9796,8 +9780,22 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![updates::app_update_check, updates::app_update_install, updates::app_open_releases_page, ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, ytm_refresh_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_browse, ytm_browse_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, ytm_report_stream_failure, ytm_playback_report, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, fetch_lyrics, fetch_lyrics_fresh, fetch_lyrics_from_provider, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, library_artist_state, library_toggle_artist_bookmarked, speed_dial_toggle, speed_dial_items, open_google_login, account_refresh_profile, account_logout, clear_local_library_keep_downloads, session_status, open_spotify_login, spotify_session_status, spotify_logout])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Closing the app abandons every background cache fill (PLAY-043): stop them and remove
+                // their half-written files instead of leaving `.part` files behind.
+                if let Ok(jobs) = player_cache_jobs().lock() {
+                    for song_id in jobs.cancel_all() {
+                        let _ = fs::remove_file(format!(
+                            "{}.part",
+                            player_cache_path(&song_id).to_string_lossy()
+                        ));
+                    }
+                }
+            }
+        });
 }
 
 #[cfg(test)]
@@ -10004,15 +10002,6 @@ mod tests {
             reqwest::StatusCode::PARTIAL_CONTENT
         ));
         assert!(!can_resume_partial_download(1024, reqwest::StatusCode::OK));
-    }
-
-    #[test]
-    fn truncated_transfers_never_count_as_complete() {
-        assert!(transfer_complete(4_001_721, Some(4_001_721)));
-        assert!(!transfer_complete(1_048_576, Some(4_001_721)));
-        assert!(!transfer_complete(0, None));
-        assert!(!transfer_complete(0, Some(0)));
-        assert!(transfer_complete(512, None));
     }
 
     #[test]

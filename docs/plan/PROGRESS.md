@@ -464,9 +464,9 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 ## Phase 4 · M4.3 One-stream cache/download engine
 
 - [ ] PLAY-041 (P0) No cache quota or eviction
-- [ ] PLAY-042 (P0) Unlimited concurrent player-cache jobs
+- [x] PLAY-042 (P0) Unlimited concurrent player-cache jobs — player_cache::tests::rapid_skipping_never_runs_more_than_two_fills, cancelled_fill_releases_socket_and_file_promptly
 - [ ] PLAY-028 (P1) Playback and cache download the same song twice
-- [ ] PLAY-043 (P1) Player-cache jobs survive skip/close
+- [x] PLAY-043 (P1) Player-cache jobs survive skip/close — player_cache::tests::cancelled_fill_releases_socket_and_file_promptly, stalled_fill_gives_up_after_the_idle_limit; exit handler cancels fills and removes `.part` files
 - [ ] PLAY-044 (P1) No final byte-count validation — partial: downloads and player cache reject transfers shorter than the announced length (`transfer_complete`); unknown-length container probe pending
 - [ ] PLAY-045 (P1) No content-type/container validation
 - [ ] PLAY-046 (P1) Redirect targets are not revalidated

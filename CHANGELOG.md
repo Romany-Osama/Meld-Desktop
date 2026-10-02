@@ -9,6 +9,7 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 - Downloads send range requests the way the player does. If a link is refused during a download, Meld picks another source and continues from the bytes it already has (up to two retries). A partial file that no longer matches is restarted cleanly.
 - A download or cache file that was cut short is no longer saved as complete. The partial file is kept, and the next try resumes from it.
 - Download and cache errors no longer include the signed stream URL.
+- Skipping quickly through songs no longer starts a full background download for every song. At most two background cache jobs exist at once. Skipping stops the previous song's job within a quarter of a second, and closing the app stops them all and removes their half-written files.
 
 ## [0.3.0] — Playback and search fixes, stronger YouTube fallbacks
 
