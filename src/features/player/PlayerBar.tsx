@@ -1,6 +1,7 @@
 import { RefObject, Dispatch, SetStateAction } from "react";
+import { ErrorBoundary } from "../../components/ErrorBoundary";
+import { PlayerAudio } from "./PlayerAudio";
 import { mediaSrc } from "../../lib/media";
-import { FINAL_STREAM_ERROR } from "../../lib/streamRecovery";
 import { YtItem, LoadState, LyricsPayload, PlayerPayload, LibraryItemState, PlaytimeSession } from "../../types";
 import type { SetNotice } from "../../app/notifications";
 
@@ -59,47 +60,32 @@ export type PlayerBarProps = {
   volume: number;
 };
 
-export function PlayerBar({
+function PlayerControls({
   adjustVolumeByWheel,
   audioRef,
-  autoMixEnabledRef,
-  clearSleepTimer,
   cycleRepeat,
   durationSeconds,
-  flushPlaytime,
   formatTime,
   isPlaying,
-  loadAutomixItems,
   lyrics,
   openLyrics,
   openPlayerMenu,
   playbackSeconds,
   player,
   playerItemState,
-  playItem,
   playQueueIndex,
-  playtimeRef,
   queueContinuation,
   queueIndex,
   queueItems,
-  recordPlaytime,
-  recoverStream,
   repeatMode,
   seekPlayback,
-  setDurationSeconds,
   setIsPlaying,
   setLyricsAutoScrollEnabled,
-  setNotice,
-  setPlaybackSeconds,
   setPlayer,
   setPlayerExpanded,
-  setQueueContinuation,
-  setQueueItems,
   setQueueOpen,
-  settings,
   shareItem,
   shuffleEnabled,
-  sleepTimerEndOfSong,
   togglePlayback,
   togglePlayerFavorite,
   toggleShuffle,
@@ -193,76 +179,7 @@ export function PlayerBar({
                 aria-label="Volume"
               />
             </label>
-          </div>{" "}
-          <audio
-            className="native-audio"
-            ref={audioRef}
-            preload="auto"
-            onLoadedMetadata={(event) =>
-              setDurationSeconds(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)
-            }
-            onTimeUpdate={(event) => {
-              setPlaybackSeconds(event.currentTarget.currentTime);
-              recordPlaytime(event.currentTarget.currentTime);
-            }}
-            onPlay={() => {
-              setIsPlaying(true);
-              if (playtimeRef.current) playtimeRef.current.playing = true;
-            }}
-            onPause={() => {
-              setIsPlaying(false);
-              if (playtimeRef.current) playtimeRef.current.playing = false;
-              void flushPlaytime();
-            }}
-            onEnded={async () => {
-              recordPlaytime(audioRef.current?.currentTime ?? playbackSeconds);
-              if (playtimeRef.current) playtimeRef.current.playing = false;
-              await flushPlaytime();
-              if (sleepTimerEndOfSong) {
-                clearSleepTimer();
-                setIsPlaying(false);
-                return;
-              }
-              if (repeatMode === "one") {
-                if (audioRef.current) {
-                  audioRef.current.currentTime = 0;
-                  void audioRef.current.play();
-                }
-                return;
-              }
-              setIsPlaying(false);
-              if (
-                queueIndex + 1 < queueItems.length ||
-                (queueContinuation &&
-                  settings.autoLoadMore !== false &&
-                  !(settings.disableLoadMoreWhenRepeatAll === true && repeatMode === "all"))
-              ) {
-                void playQueueIndex(queueIndex + 1);
-                return;
-              }
-              if (repeatMode === "all" && queueItems.length > 0) {
-                void playQueueIndex(0);
-                return;
-              }
-              if (!autoMixEnabledRef.current) return;
-              const current = player?.item;
-              if (!current?.videoId) return;
-              const existing = queueItems;
-              const additions = await loadAutomixItems(current, existing);
-              if (additions.length > 0) {
-                const nextItems = [...existing, ...additions];
-                setQueueItems(nextItems);
-                setQueueContinuation(null);
-                void playItem(additions[0], nextItems, existing.length, null, true);
-              }
-            }}
-            onError={async () => {
-              if (await recoverStream()) return;
-              setNotice(FINAL_STREAM_ERROR);
-              if (settings.autoSkipNextOnError && (queueIndex + 1 < queueItems.length || queueContinuation))
-                void playQueueIndex(queueIndex + 1);
-            }}
-          />
+          </div>
           <div className="dock-transport-actions">
             <button
               className="transport-button"
@@ -325,6 +242,18 @@ export function PlayerBar({
           </button>
         </div>
       )}
+    </>
+  );
+}
+
+/** The player bar: the audio element, then the controls behind their own error boundary (U4-014). */
+export function PlayerBar(props: PlayerBarProps) {
+  return (
+    <>
+      <PlayerAudio {...props} />
+      <ErrorBoundary name="Player controls" variant="bar" resetKey={props.player?.session}>
+        <PlayerControls {...props} />
+      </ErrorBoundary>
     </>
   );
 }

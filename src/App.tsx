@@ -72,6 +72,7 @@ import { LAST_ROUTE_KEY, parseLastRoute, serializeLastRoute } from "./app/lastRo
 import { parseLink } from "./app/links";
 import { canPerform, itemMenuEntries, MenuAction, MenuContext } from "./app/capabilities";
 import { ItemMenu } from "./features/menu/ItemMenu";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NoticeStack } from "./components/NoticeStack";
 import { Destructive, DestructiveSpec, runDestructive } from "./app/destructive";
 import { useConfirm } from "./features/confirm/useConfirm";
@@ -2629,144 +2630,146 @@ function App() {
         <NoticeStack notices={notices} onDismiss={dismissNotice} />
 
         <div className="page-scroll" ref={pageScrollRef}>
-          {active === "home" && (
-            <HomeScreen
-              hideItem={hideItem}
-              home={home}
-              homeMoreLoading={homeMoreLoading}
-              loadHome={loadHome}
-              loadHomeMore={loadHomeMore}
-              openItem={openItem}
-              openMenu={openMenu}
-              speedDial={speedDial}
-            />
-          )}
+          <ErrorBoundary name="This page" resetKey={routePath(currentRoute)}>
+            {active === "home" && (
+              <HomeScreen
+                hideItem={hideItem}
+                home={home}
+                homeMoreLoading={homeMoreLoading}
+                loadHome={loadHome}
+                loadHomeMore={loadHomeMore}
+                openItem={openItem}
+                openMenu={openMenu}
+                speedDial={speedDial}
+              />
+            )}
 
-          {active === "search_input" && (
-            <SearchScreen
-              audioQuality={audioQuality}
-              closeSelection={closeSelection}
-              hideItem={hideItem}
-              loadSearchMore={loadSearchMore}
-              openItem={openItem}
-              openLyrics={openLyrics}
-              openMenu={openMenu}
-              search={search}
-              searchMoreLoading={searchMoreLoading}
-              selectedItems={selectedItems}
-              selectionMode={selectionMode}
-              setSelectionMode={setSelectionMode}
-              settings={settings}
-              submittedQuery={submittedQuery}
-              toggleSelectedItem={toggleSelectedItem}
-            />
-          )}
+            {active === "search_input" && (
+              <SearchScreen
+                audioQuality={audioQuality}
+                closeSelection={closeSelection}
+                hideItem={hideItem}
+                loadSearchMore={loadSearchMore}
+                openItem={openItem}
+                openLyrics={openLyrics}
+                openMenu={openMenu}
+                search={search}
+                searchMoreLoading={searchMoreLoading}
+                selectedItems={selectedItems}
+                selectionMode={selectionMode}
+                setSelectionMode={setSelectionMode}
+                settings={settings}
+                submittedQuery={submittedQuery}
+                toggleSelectedItem={toggleSelectedItem}
+              />
+            )}
 
-          {active === "history" && (
-            <HistoryScreen
-              destructive={destructive}
-              audioQuality={audioQuality}
-              closeSelection={closeSelection}
-              hideItem={hideItem}
-              history={history}
-              historyQuery={historyQuery}
-              historySource={historySource}
-              loadHistory={loadHistory}
-              loadRemoteHistory={loadRemoteHistory}
-              openItem={openItem}
-              openLyrics={openLyrics}
-              openMenu={openMenu}
-              remoteHistory={remoteHistory}
-              selectedItems={selectedItems}
-              selectionMode={selectionMode}
-              sessionStatus={sessionStatus}
-              setHistoryQuery={setHistoryQuery}
-              setHistorySource={setHistorySource}
-              setSelectionMode={setSelectionMode}
-              settings={settings}
-              toggleSelectedItem={toggleSelectedItem}
-              visibleLocalHistory={visibleLocalHistory}
-            />
-          )}
+            {active === "history" && (
+              <HistoryScreen
+                destructive={destructive}
+                audioQuality={audioQuality}
+                closeSelection={closeSelection}
+                hideItem={hideItem}
+                history={history}
+                historyQuery={historyQuery}
+                historySource={historySource}
+                loadHistory={loadHistory}
+                loadRemoteHistory={loadRemoteHistory}
+                openItem={openItem}
+                openLyrics={openLyrics}
+                openMenu={openMenu}
+                remoteHistory={remoteHistory}
+                selectedItems={selectedItems}
+                selectionMode={selectionMode}
+                sessionStatus={sessionStatus}
+                setHistoryQuery={setHistoryQuery}
+                setHistorySource={setHistorySource}
+                setSelectionMode={setSelectionMode}
+                settings={settings}
+                toggleSelectedItem={toggleSelectedItem}
+                visibleLocalHistory={visibleLocalHistory}
+              />
+            )}
 
-          {active === "stats" && (
-            <StatsScreen
-              loadStats={loadStats}
-              openItem={openItem}
-              openMenu={openMenu}
-              setRecapOpen={setRecapOpen}
-              setStatsPeriod={setStatsPeriod}
-              stats={stats}
-              statsPeriod={statsPeriod}
-              statsQueueItems={statsQueueItems}
-            />
-          )}
+            {active === "stats" && (
+              <StatsScreen
+                loadStats={loadStats}
+                openItem={openItem}
+                openMenu={openMenu}
+                setRecapOpen={setRecapOpen}
+                setStatsPeriod={setStatsPeriod}
+                stats={stats}
+                statsPeriod={statsPeriod}
+                statsQueueItems={statsQueueItems}
+              />
+            )}
 
-          {active === "library" && (
-            <LibraryScreen
-              audioQuality={audioQuality}
-              chooseLibrarySongFilter={chooseLibrarySongFilter}
-              closeSelection={closeSelection}
-              filteredLibraryData={filteredLibraryData}
-              hasVisiblePlaylistAutoEntries={hasVisiblePlaylistAutoEntries}
-              importLocalFiles={importLocalFiles}
-              library={library}
-              libraryMixSort={libraryMixSort}
-              libraryMixSortDescending={libraryMixSortDescending}
-              libraryMode={libraryMode}
-              librarySearch={librarySearch}
-              librarySongFilter={librarySongFilter}
-              librarySort={librarySort}
-              librarySortDescending={librarySortDescending}
-              librarySyncing={librarySyncing}
-              libraryView={libraryView}
-              loadSpotifyLibrary={loadSpotifyLibrary}
-              matchesLibraryQuery={matchesLibraryQuery}
-              openCreatePlaylistDialog={openCreatePlaylistDialog}
-              openItem={openItem}
-              openLocalPlaylist={openLocalPlaylist}
-              openLyrics={openLyrics}
-              openMenu={openMenu}
-              openSpotifyFolder={openSpotifyFolder}
-              openSpotifyLiked={openSpotifyLiked}
-              openSpotifyPlaylist={openSpotifyPlaylist}
-              playlistQuery={playlistQuery}
-              playlistSearch={playlistSearch}
-              playlistSort={playlistSort}
-              playlistSortDescending={playlistSortDescending}
-              playlistView={playlistView}
-              podcastFilter={podcastFilter}
-              podcastRefreshing={podcastRefreshing}
-              refreshSavedPodcasts={refreshSavedPodcasts}
-              reloadCurrentLibrary={reloadCurrentLibrary}
-              selectedItems={selectedItems}
-              selectionMode={selectionMode}
-              setLibraryMixSort={setLibraryMixSort}
-              setLibraryMixSortDescending={setLibraryMixSortDescending}
-              setLibraryMode={setLibraryMode}
-              setLibrarySearch={setLibrarySearch}
-              setLibrarySort={setLibrarySort}
-              setLibrarySortDescending={setLibrarySortDescending}
-              setLibraryView={setLibraryView}
-              setPlaylistSearch={setPlaylistSearch}
-              setPlaylistSort={setPlaylistSort}
-              setPlaylistSortDescending={setPlaylistSortDescending}
-              setPlaylistView={setPlaylistView}
-              setPodcastFilter={setPodcastFilter}
-              setSelectionMode={setSelectionMode}
-              setSpotifyFolderStack={setSpotifyFolderStack}
-              settings={settings}
-              setTopPeriod={setTopPeriod}
-              shuffleLibrary={shuffleLibrary}
-              spotifyFolderStack={spotifyFolderStack}
-              spotifyLibrary={spotifyLibrary}
-              spotifyLikedTracks={spotifyLikedTracks}
-              spotifyStatus={spotifyStatus}
-              toggleSelectedItem={toggleSelectedItem}
-              topPeriod={topPeriod}
-              visiblePlaylists={visiblePlaylists}
-            />
-          )}
+            {active === "library" && (
+              <LibraryScreen
+                audioQuality={audioQuality}
+                chooseLibrarySongFilter={chooseLibrarySongFilter}
+                closeSelection={closeSelection}
+                filteredLibraryData={filteredLibraryData}
+                hasVisiblePlaylistAutoEntries={hasVisiblePlaylistAutoEntries}
+                importLocalFiles={importLocalFiles}
+                library={library}
+                libraryMixSort={libraryMixSort}
+                libraryMixSortDescending={libraryMixSortDescending}
+                libraryMode={libraryMode}
+                librarySearch={librarySearch}
+                librarySongFilter={librarySongFilter}
+                librarySort={librarySort}
+                librarySortDescending={librarySortDescending}
+                librarySyncing={librarySyncing}
+                libraryView={libraryView}
+                loadSpotifyLibrary={loadSpotifyLibrary}
+                matchesLibraryQuery={matchesLibraryQuery}
+                openCreatePlaylistDialog={openCreatePlaylistDialog}
+                openItem={openItem}
+                openLocalPlaylist={openLocalPlaylist}
+                openLyrics={openLyrics}
+                openMenu={openMenu}
+                openSpotifyFolder={openSpotifyFolder}
+                openSpotifyLiked={openSpotifyLiked}
+                openSpotifyPlaylist={openSpotifyPlaylist}
+                playlistQuery={playlistQuery}
+                playlistSearch={playlistSearch}
+                playlistSort={playlistSort}
+                playlistSortDescending={playlistSortDescending}
+                playlistView={playlistView}
+                podcastFilter={podcastFilter}
+                podcastRefreshing={podcastRefreshing}
+                refreshSavedPodcasts={refreshSavedPodcasts}
+                reloadCurrentLibrary={reloadCurrentLibrary}
+                selectedItems={selectedItems}
+                selectionMode={selectionMode}
+                setLibraryMixSort={setLibraryMixSort}
+                setLibraryMixSortDescending={setLibraryMixSortDescending}
+                setLibraryMode={setLibraryMode}
+                setLibrarySearch={setLibrarySearch}
+                setLibrarySort={setLibrarySort}
+                setLibrarySortDescending={setLibrarySortDescending}
+                setLibraryView={setLibraryView}
+                setPlaylistSearch={setPlaylistSearch}
+                setPlaylistSort={setPlaylistSort}
+                setPlaylistSortDescending={setPlaylistSortDescending}
+                setPlaylistView={setPlaylistView}
+                setPodcastFilter={setPodcastFilter}
+                setSelectionMode={setSelectionMode}
+                setSpotifyFolderStack={setSpotifyFolderStack}
+                settings={settings}
+                setTopPeriod={setTopPeriod}
+                shuffleLibrary={shuffleLibrary}
+                spotifyFolderStack={spotifyFolderStack}
+                spotifyLibrary={spotifyLibrary}
+                spotifyLikedTracks={spotifyLikedTracks}
+                spotifyStatus={spotifyStatus}
+                toggleSelectedItem={toggleSelectedItem}
+                topPeriod={topPeriod}
+                visiblePlaylists={visiblePlaylists}
+              />
+            )}
+          </ErrorBoundary>
         </div>
       </main>
 
@@ -2920,38 +2923,52 @@ function App() {
           </div>
         </div>
       )}
-      <SpotifyLikedScreen
-        loadSpotifyLikedTracks={loadSpotifyLikedTracks}
-        playSpotifyTrack={playSpotifyTrack}
-        setSpotifyLikedOpen={setSpotifyLikedOpen}
-        spotifyLikedOpen={spotifyLikedOpen}
-        spotifyLikedTracks={spotifyLikedTracks}
-      />
-      <SpotifyPlaylistScreen
-        downloadSpotifyPlaylist={downloadSpotifyPlaylist}
-        loadMoreSpotifyPlaylistTracks={loadMoreSpotifyPlaylistTracks}
-        moveSpotifyTrack={moveSpotifyTrack}
-        openSpotifyPlaylist={openSpotifyPlaylist}
-        playSpotifyTrack={playSpotifyTrack}
-        removeSpotifyTrack={removeSpotifyTrack}
-        renameSpotifyPlaylist={renameSpotifyPlaylist}
-        setSpotifyDetailQuery={setSpotifyDetailQuery}
-        setSpotifyDetailSort={setSpotifyDetailSort}
-        setSpotifyDetailSortDescending={setSpotifyDetailSortDescending}
-        setSpotifyOpenPlaylist={setSpotifyOpenPlaylist}
-        setSpotifyRenameName={setSpotifyRenameName}
-        setSpotifyReorderUnlocked={setSpotifyReorderUnlocked}
-        spotifyDetailQuery={spotifyDetailQuery}
-        spotifyDetailSort={spotifyDetailSort}
-        spotifyDetailSortDescending={spotifyDetailSortDescending}
-        spotifyOpenPlaylist={spotifyOpenPlaylist}
-        spotifyPlaylistLoadingMore={spotifyPlaylistLoadingMore}
-        spotifyPlaylistTracks={spotifyPlaylistTracks}
-        spotifyProfile={spotifyProfile}
-        spotifyRenameName={spotifyRenameName}
-        spotifyReorderUnlocked={spotifyReorderUnlocked}
-        visibleSpotifyPlaylistTracks={visibleSpotifyPlaylistTracks}
-      />
+      <ErrorBoundary
+        name="Spotify liked songs"
+        variant="panel"
+        resetKey={spotifyLikedOpen}
+        onClose={() => setSpotifyLikedOpen(false)}
+      >
+        <SpotifyLikedScreen
+          loadSpotifyLikedTracks={loadSpotifyLikedTracks}
+          playSpotifyTrack={playSpotifyTrack}
+          setSpotifyLikedOpen={setSpotifyLikedOpen}
+          spotifyLikedOpen={spotifyLikedOpen}
+          spotifyLikedTracks={spotifyLikedTracks}
+        />
+      </ErrorBoundary>
+      <ErrorBoundary
+        name="This Spotify playlist"
+        variant="panel"
+        resetKey={spotifyOpenPlaylist}
+        onClose={() => setSpotifyOpenPlaylist(null)}
+      >
+        <SpotifyPlaylistScreen
+          downloadSpotifyPlaylist={downloadSpotifyPlaylist}
+          loadMoreSpotifyPlaylistTracks={loadMoreSpotifyPlaylistTracks}
+          moveSpotifyTrack={moveSpotifyTrack}
+          openSpotifyPlaylist={openSpotifyPlaylist}
+          playSpotifyTrack={playSpotifyTrack}
+          removeSpotifyTrack={removeSpotifyTrack}
+          renameSpotifyPlaylist={renameSpotifyPlaylist}
+          setSpotifyDetailQuery={setSpotifyDetailQuery}
+          setSpotifyDetailSort={setSpotifyDetailSort}
+          setSpotifyDetailSortDescending={setSpotifyDetailSortDescending}
+          setSpotifyOpenPlaylist={setSpotifyOpenPlaylist}
+          setSpotifyRenameName={setSpotifyRenameName}
+          setSpotifyReorderUnlocked={setSpotifyReorderUnlocked}
+          spotifyDetailQuery={spotifyDetailQuery}
+          spotifyDetailSort={spotifyDetailSort}
+          spotifyDetailSortDescending={spotifyDetailSortDescending}
+          spotifyOpenPlaylist={spotifyOpenPlaylist}
+          spotifyPlaylistLoadingMore={spotifyPlaylistLoadingMore}
+          spotifyPlaylistTracks={spotifyPlaylistTracks}
+          spotifyProfile={spotifyProfile}
+          spotifyRenameName={spotifyRenameName}
+          spotifyReorderUnlocked={spotifyReorderUnlocked}
+          visibleSpotifyPlaylistTracks={visibleSpotifyPlaylistTracks}
+        />
+      </ErrorBoundary>
       {youtubeMatchItem && (
         <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setYoutubeMatchItem(null)}>
           <div className="detail-panel picker-panel" onClick={(event) => event.stopPropagation()}>
@@ -3344,29 +3361,31 @@ function App() {
           </div>
         </div>
       )}
-      <SettingsScreen
-        destructive={destructive}
-        audioQuality={audioQuality}
-        connectGoogle={connectGoogle}
-        connectSpotify={connectSpotify}
-        loadSearchHistory={loadSearchHistory}
-        logoutGoogle={logoutGoogle}
-        logoutSpotify={logoutSpotify}
-        lyricsProviderOrder={lyricsProviderOrder}
-        moveLyricsProvider={moveLyricsProvider}
-        sessionStatus={sessionStatus}
-        setAudioQualitySetting={setAudioQualitySetting}
-        setNotice={setNotice}
-        setSetting={setSetting}
-        setSettingsOpen={setSettingsOpen}
-        setSettingsPage={setSettingsPage}
-        settings={settings}
-        settingsLoading={settingsLoading}
-        settingsOpen={settingsOpen}
-        settingsPage={settingsPage}
-        spotifyProfile={spotifyProfile}
-        spotifyStatus={spotifyStatus}
-      />
+      <ErrorBoundary name="Settings" variant="panel" resetKey={settingsOpen} onClose={() => setSettingsOpen(false)}>
+        <SettingsScreen
+          destructive={destructive}
+          audioQuality={audioQuality}
+          connectGoogle={connectGoogle}
+          connectSpotify={connectSpotify}
+          loadSearchHistory={loadSearchHistory}
+          logoutGoogle={logoutGoogle}
+          logoutSpotify={logoutSpotify}
+          lyricsProviderOrder={lyricsProviderOrder}
+          moveLyricsProvider={moveLyricsProvider}
+          sessionStatus={sessionStatus}
+          setAudioQualitySetting={setAudioQualitySetting}
+          setNotice={setNotice}
+          setSetting={setSetting}
+          setSettingsOpen={setSettingsOpen}
+          setSettingsPage={setSettingsPage}
+          settings={settings}
+          settingsLoading={settingsLoading}
+          settingsOpen={settingsOpen}
+          settingsPage={settingsPage}
+          spotifyProfile={spotifyProfile}
+          spotifyStatus={spotifyStatus}
+        />
+      </ErrorBoundary>
       {infoItem && (
         <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setInfoItem(null)}>
           <div className="detail-panel info-panel" onClick={(event) => event.stopPropagation()}>
@@ -3395,32 +3414,36 @@ function App() {
           </div>
         </div>
       )}
-      <DetailScreen
-        audioQuality={audioQuality}
-        detail={detail}
-        detailArtistSubscribed={detailArtistSubscribed}
-        detailMoreLoading={detailMoreLoading}
-        detailRefreshing={detailRefreshing}
-        loadDetailMore={loadDetailMore}
-        openDetailItem={openDetailItem}
-        openMenu={openMenu}
-        refreshPodcastDetail={refreshPodcastDetail}
-        closeDetail={() => setDetailRef(null)}
-        settings={settings}
-        toggleDetailArtistSubscription={toggleDetailArtistSubscription}
-      />
-      <PlaylistScreen
-        audioQuality={audioQuality}
-        loadPlaylistMore={loadPlaylistMore}
-        openMenu={openMenu}
-        playItem={playItem}
-        playlist={playlist}
-        selectedItems={selectedItems}
-        selectionMode={selectionMode}
-        closePlaylist={() => setOpenPlaylist(null)}
-        settings={settings}
-        toggleSelectedItem={toggleSelectedItem}
-      />
+      <ErrorBoundary name="This page" variant="panel" resetKey={detailRef} onClose={() => setDetailRef(null)}>
+        <DetailScreen
+          audioQuality={audioQuality}
+          detail={detail}
+          detailArtistSubscribed={detailArtistSubscribed}
+          detailMoreLoading={detailMoreLoading}
+          detailRefreshing={detailRefreshing}
+          loadDetailMore={loadDetailMore}
+          openDetailItem={openDetailItem}
+          openMenu={openMenu}
+          refreshPodcastDetail={refreshPodcastDetail}
+          closeDetail={() => setDetailRef(null)}
+          settings={settings}
+          toggleDetailArtistSubscription={toggleDetailArtistSubscription}
+        />
+      </ErrorBoundary>
+      <ErrorBoundary name="This playlist" variant="panel" resetKey={openPlaylist} onClose={() => setOpenPlaylist(null)}>
+        <PlaylistScreen
+          audioQuality={audioQuality}
+          loadPlaylistMore={loadPlaylistMore}
+          openMenu={openMenu}
+          playItem={playItem}
+          playlist={playlist}
+          selectedItems={selectedItems}
+          selectionMode={selectionMode}
+          closePlaylist={() => setOpenPlaylist(null)}
+          settings={settings}
+          toggleSelectedItem={toggleSelectedItem}
+        />
+      </ErrorBoundary>
       <PlayerBar
         adjustVolumeByWheel={adjustVolumeByWheel}
         audioRef={audioRef}
@@ -3468,81 +3491,92 @@ function App() {
         updateVolume={updateVolume}
         volume={volume}
       />
-      <QueuePanel
-        clearQueue={clearQueue}
-        moveQueueItem={moveQueueItem}
-        player={player}
-        playQueueIndex={playQueueIndex}
-        queueIndex={queueIndex}
-        queueItems={queueItems}
-        queueOpen={queueOpen}
-        removeQueueItem={removeQueueItem}
-        setQueueOpen={setQueueOpen}
-      />
-      <ExpandedPlayer
-        activeLyricIndex={activeLyricIndex}
-        activeLyricRef={activeLyricRef}
-        adjustVolumeByWheel={adjustVolumeByWheel}
-        audioRef={audioRef}
-        backStack={navHistory.back}
-        changeLyricsProvider={changeLyricsProvider}
-        cycleRepeat={cycleRepeat}
-        durationSeconds={durationSeconds}
-        formatTime={formatTime}
-        forwardStack={navHistory.forward}
-        goBack={goBack}
-        hasTransientLayer={hasTransientLayer}
-        isPlaying={isPlaying}
-        lyrics={lyrics}
-        lyricsContainerRef={lyricsContainerRef}
-        lyricsProviderLoading={lyricsProviderLoading}
-        lyricsProviderOrder={lyricsProviderOrder}
-        lyricsProviderSelection={lyricsProviderSelection}
-        navigateForward={navigateForward}
-        openLyrics={openLyrics}
-        openPlayerMenu={openPlayerMenu}
-        playbackSeconds={playbackSeconds}
-        player={player}
-        playerExpanded={playerExpanded}
-        playerItemState={playerItemState}
-        playQueueIndex={playQueueIndex}
-        queueContinuation={queueContinuation}
-        queueIndex={queueIndex}
-        queueItems={queueItems}
-        repeatMode={repeatMode}
-        seekByPlayerGesture={seekByPlayerGesture}
-        seekPlayback={seekPlayback}
-        setLyrics={setLyrics}
-        setLyricsAutoScrollEnabled={setLyricsAutoScrollEnabled}
-        setPlayerExpanded={setPlayerExpanded}
-        setQueueOpen={setQueueOpen}
-        shareItem={shareItem}
-        shuffleEnabled={shuffleEnabled}
-        togglePlayback={togglePlayback}
-        togglePlayerFavorite={togglePlayerFavorite}
-        toggleShuffle={toggleShuffle}
-        updateVolume={updateVolume}
-        volume={volume}
-      />
-      <LyricsPanel
-        activeLyricIndex={activeLyricIndex}
-        activeLyricRef={activeLyricRef}
-        audioRef={audioRef}
-        backStack={navHistory.back}
-        changeLyricsProvider={changeLyricsProvider}
-        forwardStack={navHistory.forward}
-        goBack={goBack}
-        hasTransientLayer={hasTransientLayer}
-        lyrics={lyrics}
-        lyricsContainerRef={lyricsContainerRef}
-        lyricsProviderLoading={lyricsProviderLoading}
-        lyricsProviderOrder={lyricsProviderOrder}
-        lyricsProviderSelection={lyricsProviderSelection}
-        navigateForward={navigateForward}
-        playerExpanded={playerExpanded}
-        setLyrics={setLyrics}
-        setLyricsAutoScrollEnabled={setLyricsAutoScrollEnabled}
-      />
+      <ErrorBoundary name="The queue" variant="panel" resetKey={queueOpen} onClose={() => setQueueOpen(false)}>
+        <QueuePanel
+          clearQueue={clearQueue}
+          moveQueueItem={moveQueueItem}
+          player={player}
+          playQueueIndex={playQueueIndex}
+          queueIndex={queueIndex}
+          queueItems={queueItems}
+          queueOpen={queueOpen}
+          removeQueueItem={removeQueueItem}
+          setQueueOpen={setQueueOpen}
+        />
+      </ErrorBoundary>
+      <ErrorBoundary
+        name="The full player"
+        variant="panel"
+        resetKey={playerExpanded}
+        onClose={() => setPlayerExpanded(false)}
+      >
+        <ExpandedPlayer
+          activeLyricIndex={activeLyricIndex}
+          activeLyricRef={activeLyricRef}
+          adjustVolumeByWheel={adjustVolumeByWheel}
+          audioRef={audioRef}
+          backStack={navHistory.back}
+          changeLyricsProvider={changeLyricsProvider}
+          cycleRepeat={cycleRepeat}
+          durationSeconds={durationSeconds}
+          formatTime={formatTime}
+          forwardStack={navHistory.forward}
+          goBack={goBack}
+          hasTransientLayer={hasTransientLayer}
+          isPlaying={isPlaying}
+          lyrics={lyrics}
+          lyricsContainerRef={lyricsContainerRef}
+          lyricsProviderLoading={lyricsProviderLoading}
+          lyricsProviderOrder={lyricsProviderOrder}
+          lyricsProviderSelection={lyricsProviderSelection}
+          navigateForward={navigateForward}
+          openLyrics={openLyrics}
+          openPlayerMenu={openPlayerMenu}
+          playbackSeconds={playbackSeconds}
+          player={player}
+          playerExpanded={playerExpanded}
+          playerItemState={playerItemState}
+          playQueueIndex={playQueueIndex}
+          queueContinuation={queueContinuation}
+          queueIndex={queueIndex}
+          queueItems={queueItems}
+          repeatMode={repeatMode}
+          seekByPlayerGesture={seekByPlayerGesture}
+          seekPlayback={seekPlayback}
+          setLyrics={setLyrics}
+          setLyricsAutoScrollEnabled={setLyricsAutoScrollEnabled}
+          setPlayerExpanded={setPlayerExpanded}
+          setQueueOpen={setQueueOpen}
+          shareItem={shareItem}
+          shuffleEnabled={shuffleEnabled}
+          togglePlayback={togglePlayback}
+          togglePlayerFavorite={togglePlayerFavorite}
+          toggleShuffle={toggleShuffle}
+          updateVolume={updateVolume}
+          volume={volume}
+        />
+      </ErrorBoundary>
+      <ErrorBoundary name="Lyrics" variant="panel" resetKey={lyrics === null} onClose={() => setLyrics(null)}>
+        <LyricsPanel
+          activeLyricIndex={activeLyricIndex}
+          activeLyricRef={activeLyricRef}
+          audioRef={audioRef}
+          backStack={navHistory.back}
+          changeLyricsProvider={changeLyricsProvider}
+          forwardStack={navHistory.forward}
+          goBack={goBack}
+          hasTransientLayer={hasTransientLayer}
+          lyrics={lyrics}
+          lyricsContainerRef={lyricsContainerRef}
+          lyricsProviderLoading={lyricsProviderLoading}
+          lyricsProviderOrder={lyricsProviderOrder}
+          lyricsProviderSelection={lyricsProviderSelection}
+          navigateForward={navigateForward}
+          playerExpanded={playerExpanded}
+          setLyrics={setLyrics}
+          setLyricsAutoScrollEnabled={setLyricsAutoScrollEnabled}
+        />
+      </ErrorBoundary>
       <ConfirmDialog request={confirmRequest} onAnswer={answerConfirm} />
     </div>
   );

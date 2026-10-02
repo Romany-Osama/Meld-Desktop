@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import {
   checkCapabilities,
   checkDestructivePolicy,
+  checkErrorBoundaries,
   checkFeatureModules,
   checkScreenSplit,
   checkServerState,
@@ -16,6 +17,7 @@ const problems = [
   ...checkServerState((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
   ...checkCapabilities((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
   ...checkDestructivePolicy((path) => (existsSync(path) ? readFileSync(path, "utf8") : null), readUiSource()),
+  ...checkErrorBoundaries((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
   ...checkUiInvariants(readUiSource()),
   ...checkLogoutClearsWebview(readFileSync("src-tauri/src/lib.rs", "utf8")),
 ];

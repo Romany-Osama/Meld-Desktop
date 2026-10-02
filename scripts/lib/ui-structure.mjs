@@ -220,3 +220,39 @@ export function checkDestructivePolicy(readFile, uiSource) {
     problems.push("useDownloads removes downloads without destructive()");
   return problems;
 }
+
+/** Regions App.tsx keeps behind their own error boundary (U4-014). */
+export const BOUNDED_REGIONS = [
+  "SpotifyLikedScreen",
+  "SpotifyPlaylistScreen",
+  "SettingsScreen",
+  "DetailScreen",
+  "PlaylistScreen",
+  "QueuePanel",
+  "ExpandedPlayer",
+  "LyricsPanel",
+];
+
+/**
+ * U4-014: the routed page and every overlay sit inside an <ErrorBoundary>, and the <audio> element is rendered
+ * outside the player controls' boundary so a render error cannot stop playback.
+ */
+export function checkErrorBoundaries(readFile) {
+  const problems = [];
+  const app = readFile("src/App.tsx") ?? "";
+  const bar = readFile("src/features/player/PlayerBar.tsx") ?? "";
+  const audio = readFile("src/features/player/PlayerAudio.tsx");
+  if (readFile("src/components/ErrorBoundary.tsx") === null) return ["src/components/ErrorBoundary.tsx is missing"];
+  if (!/<div className="page-scroll"[^>]*>\s*<ErrorBoundary/.test(app))
+    problems.push("the routed page is not inside an <ErrorBoundary>");
+  for (const region of BOUNDED_REGIONS) {
+    const at = app.indexOf(`<${region}\n`);
+    const before = at < 0 ? "" : app.slice(Math.max(0, at - 300), at);
+    if (at < 0 || !/<ErrorBoundary[^<]*$/.test(before)) problems.push(`${region} is not inside an <ErrorBoundary>`);
+  }
+  if (/<audio\b/.test(bar)) problems.push("PlayerBar.tsx renders <audio>; keep it in PlayerAudio outside the boundary");
+  if (audio === null || !/<audio\b/.test(audio)) problems.push("PlayerAudio.tsx no longer renders the <audio> element");
+  if (!/<PlayerAudio[\s\S]*<ErrorBoundary[\s\S]*<PlayerControls/.test(bar))
+    problems.push("PlayerBar must render <PlayerAudio> before the controls' <ErrorBoundary>");
+  return problems;
+}

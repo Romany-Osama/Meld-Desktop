@@ -61,7 +61,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] U4-011 (P0) Centralize capability checks — src/app/capabilities.ts + ItemMenu (D-033); capabilities.test.ts, App.test.tsx (item menu), checks.test.mjs (capabilities)
 - [x] U4-012 (P0) Centralize destructive-action policy — src/app/destructive.ts + ConfirmDialog (D-035); destructive.test.ts, App.test.tsx (confirm before clearing history), checks.test.mjs (destructive policy)
 - [x] U4-013 (P0) Centralize notifications — src/app/notifications.ts + NoticeStack (D-034); notifications.test.ts, featureModules.test.tsx, App.test.tsx (error with Retry)
-- [ ] U4-014 (P0) Add an error boundary per major route and player
+- [x] U4-014 (P0) Add an error boundary per major route and player — src/components/ErrorBoundary.tsx + PlayerAudio (D-036); ErrorBoundary.test.tsx, App.test.tsx (broken album page), checks.test.mjs (error boundaries)
 - [ ] U4-015 (P0) Use stable domain IDs plus occurrence IDs
 - [ ] TR-M1 (P1) Monolithic frontend and backend
 
