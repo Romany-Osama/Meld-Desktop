@@ -39,3 +39,75 @@ export function checkScreenSplit(readFile) {
   }
   return problems;
 }
+
+// U4-002: each feature owns its state in a hook; App.tsx composes them and must not re-declare that state.
+export const FEATURE_MODULES = {
+  notifications: { path: "src/features/notifications/useNotice.ts", hook: "useNotice", owns: ["notice"] },
+  selection: {
+    path: "src/features/selection/useSelection.ts",
+    hook: "useSelection",
+    owns: ["selectedItems", "selectionMode"],
+  },
+  settings: {
+    path: "src/features/settings/useSettingsState.ts",
+    hook: "useSettingsState",
+    owns: ["settings", "settingsOpen", "audioQuality"],
+  },
+  accounts: {
+    path: "src/features/accounts/useAccounts.ts",
+    hook: "useAccounts",
+    owns: ["sessionStatus", "spotifyStatus", "spotifyProfile"],
+  },
+  downloads: { path: "src/features/downloads/useDownloads.ts", hook: "useDownloads", owns: ["menuDownload"] },
+  menu: {
+    path: "src/features/menu/useItemMenu.ts",
+    hook: "useItemMenu",
+    owns: ["menuItem", "menuState", "playerMenuOpen"],
+  },
+  playlists: {
+    path: "src/features/playlist/usePlaylists.ts",
+    hook: "usePlaylists",
+    owns: ["localPlaylists", "playlistPickerItems"],
+  },
+  spotify: {
+    path: "src/features/spotify/useSpotifyLibrary.ts",
+    hook: "useSpotifyLibrary",
+    owns: ["spotifyLibrary", "spotifyOpenPlaylist"],
+  },
+  lyrics: {
+    path: "src/features/lyrics/useLyrics.ts",
+    hook: "useLyrics",
+    owns: ["lyrics", "lyricsItem", "lyricsProviderOrder"],
+  },
+  queue: {
+    path: "src/features/queue/useQueue.ts",
+    hook: "useQueue",
+    owns: ["queueItems", "queueIndex", "shuffleEnabled", "repeatMode"],
+  },
+  player: {
+    path: "src/features/player/usePlayer.ts",
+    hook: "usePlayer",
+    owns: ["player", "isPlaying", "volume", "playbackSeconds"],
+  },
+  sleepTimer: { path: "src/features/player/useSleepTimer.ts", hook: "useSleepTimer", owns: ["sleepTimerExpiresAt"] },
+};
+
+/** Problems with the feature-module boundaries, given a reader for repository files (null when missing). */
+export function checkFeatureModules(readFile) {
+  const problems = [];
+  const app = readFile("src/App.tsx") ?? "";
+  for (const [feature, { path, hook, owns }] of Object.entries(FEATURE_MODULES)) {
+    const source = readFile(path);
+    if (source === null) {
+      problems.push(`${feature}: ${path} is missing`);
+      continue;
+    }
+    if (!new RegExp(`export function ${hook}\\(`).test(source)) problems.push(`${path} must export ${hook}`);
+    if (!new RegExp(`\\b${hook}\\(`).test(app)) problems.push(`App.tsx no longer uses ${hook}`);
+    for (const name of owns) {
+      if (new RegExp(`const \\[${name}, set\\w+\\] = useState`).test(app))
+        problems.push(`App.tsx declares ${name}, which ${hook} owns`);
+    }
+  }
+  return problems;
+}

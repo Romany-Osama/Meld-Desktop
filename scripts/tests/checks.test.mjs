@@ -16,7 +16,7 @@ import {
   RESTORED_UI_COMMANDS,
 } from "../lib/ui-invariants.mjs";
 import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
-import { checkScreenSplit, ROUTE_SCREENS } from "../lib/ui-structure.mjs";
+import { checkFeatureModules, checkScreenSplit, FEATURE_MODULES, ROUTE_SCREENS } from "../lib/ui-structure.mjs";
 
 const goodRepo = () => ({
   packageJson: { version: "0.2.0" },
@@ -230,4 +230,16 @@ test("ui: every route-level screen is its own module rendered by App.tsx (U4-001
   assert.deepEqual(checkScreenSplit(missing), [`Queue: ${ROUTE_SCREENS.Queue} is missing`]);
   const inlined = (path) => (path === "src/App.tsx" ? read(path).replace("<SettingsScreen", "<div") : read(path));
   assert.deepEqual(checkScreenSplit(inlined), ["App.tsx no longer renders <SettingsScreen>"]);
+});
+
+test("ui: feature state lives in feature hooks that App.tsx composes (U4-002)", () => {
+  const read = (path) => (existsSync(path) ? readFileSync(path, "utf8") : null);
+  assert.deepEqual(checkFeatureModules(read), []);
+  const missing = (path) => (path === FEATURE_MODULES.downloads.path ? null : read(path));
+  assert.deepEqual(checkFeatureModules(missing), [`downloads: ${FEATURE_MODULES.downloads.path} is missing`]);
+  const redeclared = (path) =>
+    path === "src/App.tsx"
+      ? read(path).replace("function App() {", "function App() {\n  const [queueItems, setQueueItems] = useState([]);")
+      : read(path);
+  assert.deepEqual(checkFeatureModules(redeclared), ["App.tsx declares queueItems, which useQueue owns"]);
 });

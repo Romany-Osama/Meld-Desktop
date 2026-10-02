@@ -1,51 +1,32 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
-import { useStartupUpdateCheck } from "./UpdatePanel";
-import { isLocalStream, recoveryNotice, recoveryReason } from "./lib/streamRecovery";
-import { type AudioQuality, parseAudioQuality, streamRequest } from "./lib/audioQuality";
-import { appendNewPlayable, arrangeQueue, moveItem, removeAt, shuffleAfterCurrent } from "./lib/queue";
-import {
-  playbackEffectKey,
-  resumeStartPosition,
-  shouldAutoplay,
-  startOccurrence,
-  withRefreshedPayload,
-} from "./lib/playbackSession";
+import { parseAudioQuality, streamRequest } from "./lib/audioQuality";
+import { appendNewPlayable, removeAt } from "./lib/queue";
+import { playbackEffectKey, resumeStartPosition, shouldAutoplay, startOccurrence } from "./lib/playbackSession";
 import { restoreQueue, restoreSession } from "./lib/persistentPlayback";
 import { errorMessage, noticeSummary, shuffled } from "./lib/util";
 import { mediaSrc } from "./lib/media";
 import {
   DetailPage,
-  DownloadInfo,
   HomePage,
   LibraryItemState,
   LibrarySongFilter,
   LibrarySort,
   LoadState,
-  LyricsPayload,
   NavKey,
   PersistentPlayback,
   PlayerPayload,
   PlaylistContinuationPage,
   PlaylistPage,
   PlaylistSort,
-  PlaytimeSession,
   QueuePage,
   RemoteHistoryPage,
   SearchPage,
-  SessionStatus,
   SettingEntry,
-  SpotifyFolderItem,
-  SpotifyLibraryNode,
-  SpotifyLikedTracksPayload,
-  SpotifyPlaylistItem,
-  SpotifyProfile,
-  SpotifySessionStatus,
   SpotifyTrackItem,
   SpotifyTrackMatch,
-  SpotifyTrackPage,
   StatsPayload,
   YtItem,
 } from "./types";
@@ -53,7 +34,6 @@ import { parseYouTubeUrl } from "./lib/urls";
 import { navigation } from "./app/navigation";
 import { secondaryNavigation } from "./app/navigation";
 import { lyricsProviderNames } from "./features/lyrics/providers";
-import { lyricProviderSettingKeys } from "./features/lyrics/providers";
 import { HomeScreen } from "./features/home/HomeScreen";
 import { LibraryScreen } from "./features/library/LibraryScreen";
 import { StatsScreen } from "./features/stats/StatsScreen";
@@ -68,8 +48,64 @@ import { DetailScreen } from "./features/detail/DetailScreen";
 import { SettingsScreen } from "./features/settings/SettingsScreen";
 import { SpotifyPlaylistScreen } from "./features/spotify/SpotifyPlaylistScreen";
 import { SpotifyLikedScreen } from "./features/spotify/SpotifyLikedScreen";
+import { useSelection } from "./features/selection/useSelection";
+import { useNotice } from "./features/notifications/useNotice";
+import { useSleepTimer } from "./features/player/useSleepTimer";
+import { useLyrics } from "./features/lyrics/useLyrics";
+import { useLyricsFollow } from "./features/lyrics/useLyrics";
+import { useItemMenu } from "./features/menu/useItemMenu";
+import { useAccounts } from "./features/accounts/useAccounts";
+import { useSpotifyLibrary } from "./features/spotify/useSpotifyLibrary";
+import { useSettingsState } from "./features/settings/useSettingsState";
+import { usePlaylists } from "./features/playlist/usePlaylists";
+import { useQueue } from "./features/queue/useQueue";
+import { usePlayer } from "./features/player/usePlayer";
+import { useDownloads } from "./features/downloads/useDownloads";
 
 function App() {
+  const { notice, setNotice } = useNotice();
+  const {
+    settingsOpen,
+    setSettingsOpen,
+    settingsPage,
+    setSettingsPage,
+    audioQuality,
+    setAudioQuality,
+    settings,
+    setSettings,
+    settingsLoading,
+    setSettingsLoading,
+    setSetting,
+    setAudioQualitySetting,
+    hideItem,
+  } = useSettingsState({ setNotice });
+  const {
+    menuDownload,
+    showMenuDownload,
+    startDownload,
+    cancelDownload,
+    removeDownload,
+    downloadItems,
+    removeDownloads,
+    maybeAutoDownloadOnLike,
+  } = useDownloads({ audioQuality, setNotice, settings });
+  const {
+    logoutDialogOpen,
+    setLogoutDialogOpen,
+    sessionStatus,
+    setSessionStatus,
+    spotifyStatus,
+    spotifyProfile,
+    setSpotifyProfile,
+    loadSessionStatus,
+    loadSpotifyStatus,
+    connectGoogle,
+    connectSpotify,
+    logoutSpotify,
+    logoutGoogle,
+  } = useAccounts({ setNotice });
+  const { selectedItems, setSelectedItems, selectionMode, setSelectionMode, toggleSelectedItem, closeSelection } =
+    useSelection();
   const [active, setActive] = useState<NavKey>("home");
   const [backStack, setBackStack] = useState<NavKey[]>([]);
   const [forwardStack, setForwardStack] = useState<NavKey[]>([]);
@@ -122,157 +158,190 @@ function App() {
   const [libraryMixSort, setLibraryMixSort] = useState<"created" | "name">("created");
   const [libraryMixSortDescending, setLibraryMixSortDescending] = useState(true);
   const [libraryView, setLibraryView] = useState<"grid" | "list">("grid");
-  const [playlistSearch, setPlaylistSearch] = useState("");
-  const [playlistView, setPlaylistView] = useState<"grid" | "list">("grid");
-  const [playlistSort, setPlaylistSort] = useState<PlaylistSort>("created");
-  const [playlistSortDescending, setPlaylistSortDescending] = useState(true);
+  const {
+    playlistSearch,
+    setPlaylistSearch,
+    playlistView,
+    setPlaylistView,
+    playlistSort,
+    setPlaylistSort,
+    playlistSortDescending,
+    setPlaylistSortDescending,
+    playlistPickerItems,
+    setPlaylistPickerItems,
+    playlistPickerSearch,
+    setPlaylistPickerSearch,
+    playlistPickerSort,
+    setPlaylistPickerSort,
+    playlistPickerSortDescending,
+    setPlaylistPickerSortDescending,
+    createPlaylistOpen,
+    setCreatePlaylistOpen,
+    newPlaylistTitle,
+    setNewPlaylistTitle,
+    createSyncedPlaylist,
+    setCreateSyncedPlaylist,
+    loadLocalPlaylists,
+    syncSavedPlaylists,
+    openCreatePlaylistDialog,
+    createLocalPlaylist,
+    addToSelectedPlaylist,
+    playlistQuery,
+    hasVisiblePlaylistAutoEntries,
+    visiblePlaylists,
+    visiblePlaylistPicker,
+  } = usePlaylists({ sessionStatus, setNotice, setSelectedItems, setSelectionMode, settings });
   const [topPeriod, setTopPeriod] = useState<"all" | "day" | "week" | "month" | "year">("all");
   const topSize = 50;
   const [podcastFilter, setPodcastFilter] = useState<"episodes" | "channels" | "downloaded">("episodes");
   const [podcastRefreshing, setPodcastRefreshing] = useState(false);
-  const [localPlaylists, setLocalPlaylists] = useState<(YtItem & { songCount?: number; savedAt?: number })[]>([]);
-  const [playlistPickerItems, setPlaylistPickerItems] = useState<YtItem[] | null>(null);
-  const [playlistPickerSearch, setPlaylistPickerSearch] = useState("");
-  const [playlistPickerSort, setPlaylistPickerSort] = useState<PlaylistSort>("name");
-  const [playlistPickerSortDescending, setPlaylistPickerSortDescending] = useState(false);
-  const [selectedItems, setSelectedItems] = useState<YtItem[]>([]);
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [artistPickerItem, setArtistPickerItem] = useState<YtItem | null>(null);
-  const [editItem, setEditItem] = useState<YtItem | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editArtist, setEditArtist] = useState("");
-  const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
-  const [newPlaylistTitle, setNewPlaylistTitle] = useState("");
-  const [createSyncedPlaylist, setCreateSyncedPlaylist] = useState(false);
+  const {
+    artistPickerItem,
+    setArtistPickerItem,
+    editItem,
+    setEditItem,
+    editTitle,
+    setEditTitle,
+    editArtist,
+    setEditArtist,
+    infoItem,
+    setInfoItem,
+    menuItem,
+    setMenuItem,
+    playerMenuOpen,
+    setPlayerMenuOpen,
+    speedDialogOpen,
+    setSpeedDialogOpen,
+    menuSpotifyMatch,
+    setMenuSpotifyMatch,
+    youtubeMatchItem,
+    setYoutubeMatchItem,
+    youtubeMatchUrl,
+    setYoutubeMatchUrl,
+    youtubeMatchPreview,
+    setYoutubeMatchPreview,
+    menuState,
+    setMenuState,
+    playerItemState,
+    setPlayerItemState,
+    confirmYoutubeVersion,
+  } = useItemMenu({ setNotice });
   const [playlist, setPlaylist] = useState<LoadState<PlaylistPage> | null>(null);
   const [detail, setDetail] = useState<LoadState<DetailPage> | null>(null);
   const [detailMoreLoading, setDetailMoreLoading] = useState(false);
   const [detailRefreshing, setDetailRefreshing] = useState(false);
   const [detailArtistSubscribed, setDetailArtistSubscribed] = useState(false);
   const [recapOpen, setRecapOpen] = useState(false);
-  const [infoItem, setInfoItem] = useState<YtItem | null>(null);
-  const [notice, setNotice] = useState("");
-  useStartupUpdateCheck((update) =>
-    setNotice(
-      update.portable
-        ? `Meld Desktop ${update.version} is available. Settings → About has the download page.`
-        : `Meld Desktop ${update.version} is available. Install it from Settings → About.`,
-    ),
-  );
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<
-    "main" | "appearance" | "content" | "player" | "privacy" | "storage" | "integrations" | "about"
-  >("main");
-  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
-  const [audioQuality, setAudioQuality] = useState<AudioQuality>("auto");
-  const [settings, setSettings] = useState<Record<string, boolean>>({
-    hideExplicit: false,
-    hideVideoSongs: false,
-    useLoginForBrowse: true,
-    enableBetterLyrics: true,
-    enablePaxsenix: true,
-    enableLrclib: true,
-    enableKugou: true,
-    enableLyricsPlus: false,
-    enableMusixmatch: false,
-    ytmSync: true,
-    similarContent: true,
-    autoLoadMore: true,
-    disableLoadMoreWhenRepeatAll: false,
-    autoDownloadOnLike: false,
-    autoSkipNextOnError: false,
-    persistentShuffleAcrossQueues: false,
-    rememberShuffleAndRepeat: true,
-    shufflePlaylistFirst: false,
-    preventDuplicateTracksInQueue: false,
-    show_liked_playlist: true,
-    show_downloaded_playlist: true,
-    show_uploaded_playlist: true,
-    show_top_playlist: true,
-    show_cached_playlist: true,
-    varispeed: false,
-    seekExtraSeconds: false,
-    pauseOnMute: false,
-    pauseListenHistory: false,
-    pauseSearchHistory: false,
-    persistentQueue: true,
-    sidebarCollapsed: false,
-  });
-  const [lyricsProviderOrder, setLyricsProviderOrder] = useState<string[]>([...lyricsProviderNames]);
-  const [lyricsItem, setLyricsItem] = useState<YtItem | null>(null);
-  const [lyricsProviderSelection, setLyricsProviderSelection] = useState("auto");
-  const [lyricsProviderLoading, setLyricsProviderLoading] = useState(false);
-  const [settingsLoading, setSettingsLoading] = useState(false);
-  const [sessionStatus, setSessionStatus] = useState<SessionStatus>({ authenticated: false });
-  const [spotifyStatus, setSpotifyStatus] = useState<SpotifySessionStatus>({ authenticated: false });
-  const [spotifyProfile, setSpotifyProfile] = useState<SpotifyProfile | null>(null);
-  const [spotifyLibrary, setSpotifyLibrary] = useState<LoadState<SpotifyLibraryNode>>({
-    status: "idle",
-    data: { folders: [], playlists: [], totalCount: 0 },
-  });
-  const [spotifyFolderStack, setSpotifyFolderStack] = useState<{ uri: string; name: string }[]>([]);
-  const [spotifyPlaylistTracks, setSpotifyPlaylistTracks] = useState<LoadState<SpotifyTrackPage>>({
-    status: "idle",
-    data: { tracks: [], totalCount: 0, offset: 0, limit: 100 },
-  });
-  const [spotifyLikedTracks, setSpotifyLikedTracks] = useState<LoadState<SpotifyLikedTracksPayload>>({
-    status: "idle",
-    data: { tracks: [], totalCount: 0 },
-  });
-  const [spotifyOpenPlaylist, setSpotifyOpenPlaylist] = useState<SpotifyPlaylistItem | null>(null);
-  const [spotifyRenameName, setSpotifyRenameName] = useState("");
-  const [spotifyPlaylistLoadingMore, setSpotifyPlaylistLoadingMore] = useState(false);
-  const [spotifyDetailQuery, setSpotifyDetailQuery] = useState("");
-  const [spotifyDetailSort, setSpotifyDetailSort] = useState<"original" | "name" | "artist" | "duration">("original");
-  const [spotifyDetailSortDescending, setSpotifyDetailSortDescending] = useState(true);
-  const [spotifyReorderUnlocked, setSpotifyReorderUnlocked] = useState(false);
-  const [spotifyLikedOpen, setSpotifyLikedOpen] = useState(false);
-  const [spotifyAddItem, setSpotifyAddItem] = useState<YtItem | null>(null);
-  const [spotifyAddState, setSpotifyAddState] = useState<LoadState<{
-    match: SpotifyTrackMatch | null;
-    playlists: SpotifyPlaylistItem[];
-  }> | null>(null);
-  const [menuItem, setMenuItem] = useState<YtItem | null>(null);
-  const [playerMenuOpen, setPlayerMenuOpen] = useState(false);
-  const [speedDialogOpen, setSpeedDialogOpen] = useState(false);
-  const [menuSpotifyMatch, setMenuSpotifyMatch] = useState<SpotifyTrackMatch | null>(null);
-  const [youtubeMatchItem, setYoutubeMatchItem] = useState<{ item: YtItem; match: SpotifyTrackMatch } | null>(null);
-  const [youtubeMatchUrl, setYoutubeMatchUrl] = useState("");
-  const [youtubeMatchPreview, setYoutubeMatchPreview] = useState<LoadState<YtItem | null> | null>(null);
-  const [menuState, setMenuState] = useState<LibraryItemState>({
-    liked: false,
-    youtubeLiked: false,
-    inLibrary: false,
-    uploaded: false,
-    pinned: false,
-  });
-  const [menuDownload, setMenuDownload] = useState<DownloadInfo | null>(null);
-  const [playerItemState, setPlayerItemState] = useState<LibraryItemState | null>(null);
-  const [lyrics, setLyrics] = useState<LoadState<LyricsPayload> | null>(null);
-  const [playerExpanded, setPlayerExpanded] = useState(false);
-  const [queueOpen, setQueueOpen] = useState(false);
-  const [player, setPlayer] = useState<{ item: YtItem; payload: PlayerPayload; session: number } | null>(null);
-  const [queueItems, setQueueItems] = useState<YtItem[]>([]);
-  const [queueContinuation, setQueueContinuation] = useState<string | null>(null);
-  const [queueContinuationKind, setQueueContinuationKind] = useState<"next" | "playlist" | null>(null);
-  const [shuffleEnabled, setShuffleEnabled] = useState(false);
-  const [repeatMode, setRepeatMode] = useState<"off" | "all" | "one">("off");
-  const [queueIndex, setQueueIndex] = useState(-1);
-  const [playbackSeconds, setPlaybackSeconds] = useState(0);
-  const [durationSeconds, setDurationSeconds] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [lyricsAutoScrollEnabled, setLyricsAutoScrollEnabled] = useState(true);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
-  const activeLyricRef = useRef<HTMLButtonElement | null>(null);
-  const automixLoadingRef = useRef(false);
-  const autoMixEnabledRef = useRef(false);
-  const playRequestIdRef = useRef(0);
-  const activePlayerIdRef = useRef<string | null>(null);
-  const seekGestureRef = useRef({ timestamp: 0, multiplier: 1 });
-  const wasPlayingBeforeMuteRef = useRef(false);
+  const {
+    lyricsProviderOrder,
+    setLyricsProviderOrder,
+    lyricsProviderSelection,
+    lyricsProviderLoading,
+    lyrics,
+    setLyrics,
+    lyricsAutoScrollEnabled,
+    setLyricsAutoScrollEnabled,
+    lyricsContainerRef,
+    activeLyricRef,
+    moveLyricsProvider,
+    openLyrics,
+    changeLyricsProvider,
+  } = useLyrics({ setNotice, settings });
+  const {
+    spotifyLibrary,
+    spotifyFolderStack,
+    setSpotifyFolderStack,
+    spotifyPlaylistTracks,
+    spotifyLikedTracks,
+    spotifyOpenPlaylist,
+    setSpotifyOpenPlaylist,
+    spotifyRenameName,
+    setSpotifyRenameName,
+    spotifyPlaylistLoadingMore,
+    spotifyDetailQuery,
+    setSpotifyDetailQuery,
+    spotifyDetailSort,
+    setSpotifyDetailSort,
+    spotifyDetailSortDescending,
+    setSpotifyDetailSortDescending,
+    spotifyReorderUnlocked,
+    setSpotifyReorderUnlocked,
+    spotifyLikedOpen,
+    setSpotifyLikedOpen,
+    spotifyAddItem,
+    setSpotifyAddItem,
+    spotifyAddState,
+    setSpotifyAddState,
+    loadSpotifyProfile,
+    loadSpotifyLibrary,
+    loadSpotifyLikedTracks,
+    openSpotifyFolder,
+    openSpotifyPlaylist,
+    visibleSpotifyPlaylistTracks,
+    moveSpotifyTrack,
+    loadMoreSpotifyPlaylistTracks,
+    renameSpotifyPlaylist,
+    removeSpotifyTrack,
+    findYouTubeMatchForSpotifyTrack,
+    downloadSpotifyPlaylist,
+    openSpotifyLiked,
+    beginSpotifyAdd,
+    addToSpotifyPlaylist,
+  } = useSpotifyLibrary({ audioQuality, setMenuItem, setNotice, setSpotifyProfile, spotifyStatus });
+  const {
+    playerExpanded,
+    setPlayerExpanded,
+    player,
+    setPlayer,
+    playbackSeconds,
+    setPlaybackSeconds,
+    durationSeconds,
+    setDurationSeconds,
+    volume,
+    setVolume,
+    playbackSpeed,
+    setPlaybackSpeed,
+    isPlaying,
+    setIsPlaying,
+    audioRef,
+    playRequestIdRef,
+    activePlayerIdRef,
+    playtimeRef,
+    streamResolvedAtRef,
+    playbackSessionRef,
+    flushPlaytime,
+    recordPlaytime,
+    recoverStream,
+    togglePlayback,
+    seekPlayback,
+    seekByPlayerGesture,
+    adjustVolumeByWheel,
+    updateVolume,
+    formatTime,
+  } = usePlayer({ audioQuality, setNotice, settings });
+  const {
+    queueOpen,
+    setQueueOpen,
+    queueItems,
+    setQueueItems,
+    queueContinuation,
+    setQueueContinuation,
+    queueContinuationKind,
+    setQueueContinuationKind,
+    shuffleEnabled,
+    setShuffleEnabled,
+    repeatMode,
+    setRepeatMode,
+    queueIndex,
+    setQueueIndex,
+    autoMixEnabledRef,
+    toggleShuffle,
+    cycleRepeat,
+    arrangeQueueForSettings,
+    shuffleQueueAfterCurrent,
+    moveQueueItem,
+    loadAutomixItems,
+  } = useQueue({ setNotice, settings });
   const taskbarPreviousRef = useRef<() => void>(() => undefined);
   const taskbarToggleRef = useRef<() => void>(() => undefined);
   const taskbarNextRef = useRef<() => void>(() => undefined);
@@ -284,19 +353,22 @@ function App() {
   const resumePlayingRef = useRef(false);
   const resumePendingRef = useRef(false);
   const accountAuthStateRef = useRef<boolean | null>(null);
-  const playtimeRef = useRef<PlaytimeSession | null>(null);
-  const streamResolvedAtRef = useRef(0);
-  // Unique per playItem() call (PLAY-035). The audio-source effect is keyed on it, so replaying the same song restarts
-  // predictably while a refreshed stream URL or metadata update for the same session keeps the current position.
-  const playbackSessionRef = useRef(0);
   const lastLibrarySyncRef = useRef<Record<string, number>>({});
-  const [sleepTimerOpen, setSleepTimerOpen] = useState(false);
-  const [sleepTimerMinutes, setSleepTimerMinutes] = useState(30);
-  const [sleepTimerDefault, setSleepTimerDefault] = useState(30);
-  const [sleepTimerStopAfterCurrent, setSleepTimerStopAfterCurrent] = useState(false);
-  const [sleepTimerFadeOut, setSleepTimerFadeOut] = useState(false);
-  const [sleepTimerExpiresAt, setSleepTimerExpiresAt] = useState<number | null>(null);
-  const [sleepTimerEndOfSong, setSleepTimerEndOfSong] = useState(false);
+  const {
+    sleepTimerOpen,
+    setSleepTimerOpen,
+    sleepTimerMinutes,
+    setSleepTimerMinutes,
+    sleepTimerDefault,
+    setSleepTimerDefault,
+    sleepTimerStopAfterCurrent,
+    setSleepTimerStopAfterCurrent,
+    sleepTimerFadeOut,
+    setSleepTimerFadeOut,
+    sleepTimerEndOfSong,
+    clearSleepTimer,
+    startSleepTimer,
+  } = useSleepTimer({ audioRef, durationSeconds, playbackSeconds, setMenuItem, setNotice, volume });
 
   const closeTransientLayers = () => {
     setMenuItem(null);
@@ -380,69 +452,6 @@ function App() {
   const hasTransientLayer = Boolean(
     settingsOpen || lyrics || playerExpanded || queueOpen || menuItem || detail || playlist || infoItem,
   );
-
-  const clearSleepTimer = () => {
-    setSleepTimerExpiresAt(null);
-    setSleepTimerEndOfSong(false);
-    setSleepTimerStopAfterCurrent(false);
-    if (audioRef.current) audioRef.current.volume = volume;
-  };
-
-  const startSleepTimer = (endOfSong = false) => {
-    setSleepTimerEndOfSong(endOfSong);
-    setSleepTimerExpiresAt(endOfSong ? null : Date.now() + sleepTimerMinutes * 60_000);
-    if (audioRef.current) audioRef.current.volume = volume;
-    setSleepTimerOpen(false);
-    setMenuItem(null);
-    setNotice(
-      endOfSong ? "Sleep timer will stop after the current song." : `Sleep timer set for ${sleepTimerMinutes} minutes.`,
-    );
-  };
-
-  // Values that change on every playback tick live in a ref. Having `playbackSeconds` in the dependency list re-created
-  // the 1 s interval on every `timeupdate` (~4 Hz), so the callback never ran while music was playing.
-  const sleepTimerLiveRef = useRef({
-    volume,
-    durationSeconds,
-    playbackSeconds,
-    stopAfterCurrent: sleepTimerStopAfterCurrent,
-    fadeOut: sleepTimerFadeOut,
-  });
-  sleepTimerLiveRef.current = {
-    volume,
-    durationSeconds,
-    playbackSeconds,
-    stopAfterCurrent: sleepTimerStopAfterCurrent,
-    fadeOut: sleepTimerFadeOut,
-  };
-
-  useEffect(() => {
-    if (sleepTimerExpiresAt === null && !sleepTimerEndOfSong) return;
-    const timer = window.setInterval(() => {
-      const live = sleepTimerLiveRef.current;
-      const remainingMs =
-        sleepTimerExpiresAt === null
-          ? Math.max(0, (live.durationSeconds - live.playbackSeconds) * 1000)
-          : sleepTimerExpiresAt - Date.now();
-      if (sleepTimerExpiresAt !== null && remainingMs <= 0) {
-        if (live.stopAfterCurrent) {
-          setSleepTimerExpiresAt(null);
-          setSleepTimerEndOfSong(true);
-          setSleepTimerStopAfterCurrent(false);
-        } else {
-          audioRef.current?.pause();
-          setSleepTimerExpiresAt(null);
-          setSleepTimerEndOfSong(false);
-          setSleepTimerStopAfterCurrent(false);
-          if (audioRef.current) audioRef.current.volume = live.volume;
-        }
-        return;
-      }
-      const multiplier = live.fadeOut ? Math.min(1, Math.max(0, remainingMs / 60_000)) : 1;
-      if (audioRef.current) audioRef.current.volume = live.volume * multiplier;
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [sleepTimerExpiresAt, sleepTimerEndOfSong]);
 
   const loadHomeMore = async () => {
     if (home.status !== "ready" || !home.data.continuation || homeMoreLoading) return;
@@ -538,216 +547,16 @@ function App() {
     }
   };
 
-  useEffect(() => {
+  const loadStartupContent = useEffectEvent(() => {
     void loadHome();
     void loadSpeedDial();
     void loadSearchHistory();
-  }, []);
-  useEffect(() => {
+  });
+  useEffect(() => loadStartupContent(), []);
+  const loadVisibleStats = useEffectEvent(() => {
     if (active === "stats") void loadStats(statsPeriod);
-  }, [active, statsPeriod]);
-
-  const loadSessionStatus = async (refreshGoogleProfile = false) => {
-    try {
-      const current = await invoke<SessionStatus>("session_status");
-      setSessionStatus(current);
-      if (refreshGoogleProfile && current.authenticated) {
-        try {
-          const refreshed = await invoke<SessionStatus>("account_refresh_profile");
-          setSessionStatus(refreshed);
-        } catch {
-          // Keep the last locally saved profile when offline or when the upstream request fails.
-        }
-      }
-    } catch (error) {
-      setNotice(`Account status could not be read: ${errorMessage(error)}`);
-    }
-  };
-
-  const loadSpotifyStatus = async () => {
-    try {
-      setSpotifyStatus(await invoke<SpotifySessionStatus>("spotify_session_status"));
-    } catch (error) {
-      setNotice(`Spotify status could not be read: ${errorMessage(error)}`);
-    }
-  };
-
-  const loadSpotifyProfile = async () => {
-    if (!spotifyStatus.authenticated) {
-      setSpotifyProfile(null);
-      setSpotifyLibrary({ status: "idle", data: { folders: [], playlists: [], totalCount: 0 } });
-      setSpotifyLikedTracks({ status: "idle", data: { tracks: [], totalCount: 0 } });
-      setSpotifyFolderStack([]);
-      return;
-    }
-    try {
-      setSpotifyProfile(await invoke<SpotifyProfile>("spotify_profile"));
-    } catch (error) {
-      setSpotifyProfile(null);
-      setNotice(`Spotify profile could not be loaded: ${errorMessage(error)}`);
-    }
-  };
-
-  const loadSpotifyLibrary = async (folderUri: string | null = null) => {
-    if (!spotifyStatus.authenticated) return;
-    setSpotifyLibrary((current) => ({ ...current, status: "loading", error: undefined }));
-    try {
-      setSpotifyLibrary({
-        status: "ready",
-        data: await invoke<SpotifyLibraryNode>("spotify_library_node", { folderUri }),
-      });
-    } catch (error) {
-      setSpotifyLibrary({
-        status: "error",
-        data: { folders: [], playlists: [], totalCount: 0 },
-        error: errorMessage(error),
-      });
-    }
-  };
-
-  const loadSpotifyLikedTracks = async () => {
-    if (!spotifyStatus.authenticated) return;
-    setSpotifyLikedTracks((current) => ({ ...current, status: "loading", error: undefined }));
-    try {
-      setSpotifyLikedTracks({ status: "ready", data: await invoke<SpotifyLikedTracksPayload>("spotify_liked_tracks") });
-    } catch (error) {
-      setSpotifyLikedTracks({ status: "error", data: { tracks: [], totalCount: 0 }, error: errorMessage(error) });
-    }
-  };
-
-  const openSpotifyFolder = async (folder: SpotifyFolderItem) => {
-    setSpotifyFolderStack((current) => [...current, { uri: folder.uri, name: folder.name }]);
-    await loadSpotifyLibrary(folder.uri);
-  };
-
-  const openSpotifyPlaylist = async (playlistItem: SpotifyPlaylistItem) => {
-    setSpotifyOpenPlaylist(playlistItem);
-    setSpotifyRenameName(playlistItem.name);
-    setSpotifyPlaylistTracks({ status: "loading", data: { tracks: [], totalCount: 0, offset: 0, limit: 100 } });
-    try {
-      setSpotifyPlaylistTracks({
-        status: "ready",
-        data: await invoke<SpotifyTrackPage>("spotify_playlist_tracks", { playlistId: playlistItem.id, offset: 0 }),
-      });
-    } catch (error) {
-      setSpotifyPlaylistTracks({
-        status: "error",
-        data: { tracks: [], totalCount: 0, offset: 0, limit: 100 },
-        error: errorMessage(error),
-      });
-    }
-  };
-
-  const visibleSpotifyPlaylistTracks =
-    spotifyPlaylistTracks.status === "ready"
-      ? [...spotifyPlaylistTracks.data.tracks]
-          .filter(
-            (track) =>
-              !spotifyDetailQuery.trim() ||
-              `${track.name} ${track.artist} ${track.album}`
-                .toLowerCase()
-                .includes(spotifyDetailQuery.trim().toLowerCase()),
-          )
-          .sort((left, right) => {
-            if (spotifyDetailSort === "original") {
-              const leftIndex = spotifyPlaylistTracks.data.tracks.indexOf(left);
-              const rightIndex = spotifyPlaylistTracks.data.tracks.indexOf(right);
-              return spotifyDetailSortDescending ? rightIndex - leftIndex : leftIndex - rightIndex;
-            }
-            const leftValue =
-              spotifyDetailSort === "duration"
-                ? left.durationMs
-                : spotifyDetailSort === "artist"
-                  ? left.artist.toLowerCase()
-                  : left.name.toLowerCase();
-            const rightValue =
-              spotifyDetailSort === "duration"
-                ? right.durationMs
-                : spotifyDetailSort === "artist"
-                  ? right.artist.toLowerCase()
-                  : right.name.toLowerCase();
-            const comparison = leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
-            return spotifyDetailSortDescending ? -comparison : comparison;
-          })
-      : [];
-
-  const moveSpotifyTrack = async (track: SpotifyTrackItem, direction: "up" | "down") => {
-    if (!spotifyOpenPlaylist || !track.uid || spotifyPlaylistTracks.status !== "ready") return;
-    const tracks = spotifyPlaylistTracks.data.tracks;
-    const index = tracks.findIndex((value) => value.uid === track.uid);
-    if (index < 0) return;
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= tracks.length) return;
-    const beforeUid = direction === "up" ? tracks[targetIndex].uid : (tracks[targetIndex + 1]?.uid ?? null);
-    try {
-      await invoke("spotify_move_in_playlist", { playlistId: spotifyOpenPlaylist.id, uids: [track.uid], beforeUid });
-      await openSpotifyPlaylist(spotifyOpenPlaylist);
-      setNotice(`Moved “${track.name}” ${direction}.`);
-    } catch (error) {
-      setNotice(`Spotify track could not be moved: ${errorMessage(error)}`);
-    }
-  };
-
-  const loadMoreSpotifyPlaylistTracks = async () => {
-    if (
-      !spotifyOpenPlaylist ||
-      spotifyPlaylistTracks.status !== "ready" ||
-      spotifyPlaylistLoadingMore ||
-      spotifyPlaylistTracks.data.tracks.length >= spotifyPlaylistTracks.data.totalCount
-    )
-      return;
-    setSpotifyPlaylistLoadingMore(true);
-    try {
-      const next = await invoke<SpotifyTrackPage>("spotify_playlist_tracks", {
-        playlistId: spotifyOpenPlaylist.id,
-        offset: spotifyPlaylistTracks.data.tracks.length,
-      });
-      setSpotifyPlaylistTracks({
-        status: "ready",
-        data: { ...next, tracks: [...spotifyPlaylistTracks.data.tracks, ...next.tracks] },
-      });
-    } catch (error) {
-      setNotice(`More Spotify tracks could not be loaded: ${errorMessage(error)}`);
-    } finally {
-      setSpotifyPlaylistLoadingMore(false);
-    }
-  };
-
-  const renameSpotifyPlaylist = async () => {
-    if (!spotifyOpenPlaylist || !spotifyRenameName.trim()) return;
-    try {
-      await invoke("spotify_rename_playlist", {
-        playlistId: spotifyOpenPlaylist.id,
-        newName: spotifyRenameName.trim(),
-      });
-      const updated = { ...spotifyOpenPlaylist, name: spotifyRenameName.trim() };
-      setSpotifyOpenPlaylist(updated);
-      setNotice(`Renamed Spotify playlist to “${updated.name}”.`);
-      await loadSpotifyLibrary(spotifyFolderStack[spotifyFolderStack.length - 1]?.uri ?? null);
-    } catch (error) {
-      setNotice(`Spotify playlist could not be renamed: ${errorMessage(error)}`);
-    }
-  };
-
-  const removeSpotifyTrack = async (track: SpotifyTrackItem) => {
-    if (!spotifyOpenPlaylist || !track.uid) {
-      setNotice("Spotify could not remove this track because the playlist item uid was not returned.");
-      return;
-    }
-    if (!window.confirm(`Remove “${track.name}” from “${spotifyOpenPlaylist.name}”?`)) return;
-    try {
-      await invoke("spotify_remove_from_playlist", { playlistId: spotifyOpenPlaylist.id, uid: track.uid });
-      setNotice(`Removed “${track.name}” from Spotify playlist.`);
-      await openSpotifyPlaylist(spotifyOpenPlaylist);
-    } catch (error) {
-      setNotice(`Spotify track could not be removed: ${errorMessage(error)}`);
-    }
-  };
-
-  const findYouTubeMatchForSpotifyTrack = async (track: SpotifyTrackItem) => {
-    const result = await invoke<SearchPage>("ytm_search", { query: `${track.artist} ${track.name}`.trim() });
-    return result.items.find((candidate) => candidate.kind === "song") ?? null;
-  };
+  });
+  useEffect(() => loadVisibleStats(), [active, statsPeriod]);
 
   const playSpotifyTrack = async (track: SpotifyTrackItem) => {
     try {
@@ -761,54 +570,6 @@ function App() {
     } catch (error) {
       setNotice(`Spotify track could not be opened in YouTube Music: ${errorMessage(error)}`);
     }
-  };
-
-  const downloadSpotifyPlaylist = async () => {
-    if (!spotifyOpenPlaylist || spotifyPlaylistTracks.status !== "ready") return;
-    let queued = 0;
-    let skipped = 0;
-    const tracks = [...spotifyPlaylistTracks.data.tracks];
-    let offset = tracks.length;
-    try {
-      while (offset < spotifyPlaylistTracks.data.totalCount) {
-        setNotice(
-          `Loading Spotify playlist tracks for offline download… ${offset}/${spotifyPlaylistTracks.data.totalCount}`,
-        );
-        const next = await invoke<SpotifyTrackPage>("spotify_playlist_tracks", {
-          playlistId: spotifyOpenPlaylist.id,
-          offset,
-        });
-        if (next.tracks.length === 0) break;
-        tracks.push(...next.tracks);
-        offset = tracks.length;
-      }
-      setSpotifyPlaylistTracks({ status: "ready", data: { ...spotifyPlaylistTracks.data, tracks } });
-    } catch (error) {
-      setNotice(`Spotify playlist pages could not be loaded: ${errorMessage(error)}`);
-      return;
-    }
-    setNotice(`Matching Spotify playlist “${spotifyOpenPlaylist.name}” for offline download…`);
-    for (const track of tracks) {
-      try {
-        const item = await findYouTubeMatchForSpotifyTrack(track);
-        if (!item?.videoId) {
-          skipped++;
-          continue;
-        }
-        await invoke("download_start", { item, audioQuality });
-        queued++;
-      } catch {
-        skipped++;
-      }
-    }
-    setNotice(
-      `Spotify playlist download queued: ${queued} track${queued === 1 ? "" : "s"}${skipped ? `; ${skipped} unmatched` : ""}.`,
-    );
-  };
-
-  const openSpotifyLiked = () => {
-    setSpotifyLikedOpen(true);
-    if (spotifyLikedTracks.status === "idle") void loadSpotifyLikedTracks();
   };
 
   const loadSettings = async () => {
@@ -849,41 +610,6 @@ function App() {
     }
   };
 
-  const connectGoogle = async () => {
-    try {
-      await invoke("open_google_login");
-      setNotice(
-        "Google sign-in opened in Meld Desktop. Finish sign-in there; Meld will validate the session before saving it.",
-      );
-    } catch (error) {
-      setNotice(`Google sign-in could not open: ${errorMessage(error)}`);
-    }
-  };
-
-  const connectSpotify = async () => {
-    try {
-      await invoke("open_spotify_login");
-      setNotice("Spotify sign-in opened in Meld Desktop. The session is saved only after token validation.");
-    } catch (error) {
-      setNotice(`Spotify sign-in could not open: ${errorMessage(error)}`);
-    }
-  };
-
-  const logoutSpotify = async () => {
-    try {
-      await invoke("spotify_logout");
-      setSpotifyStatus({ authenticated: false });
-      setSpotifyProfile(null);
-      setNotice("Spotify account disconnected.");
-    } catch (error) {
-      setNotice(`Spotify logout failed: ${errorMessage(error)}`);
-    }
-  };
-
-  const logoutGoogle = () => {
-    setLogoutDialogOpen(true);
-  };
-
   const confirmGoogleLogout = async (clearData: boolean) => {
     try {
       if (clearData) await invoke("clear_local_library_keep_downloads");
@@ -905,16 +631,14 @@ function App() {
     setPlayerMenuOpen(false);
     setMenuItem(item);
     setMenuSpotifyMatch(null);
-    setMenuDownload(null);
+    showMenuDownload(null);
     setLyrics(null);
     setQueueOpen(false);
     setPlayerExpanded(false);
     try {
       const itemState = await invoke<LibraryItemState>("library_item_state", { id: item.id });
       if (item.videoId) {
-        void invoke<DownloadInfo | null>("download_info", { songId: item.id })
-          .then(setMenuDownload)
-          .catch(() => setMenuDownload(null));
+        showMenuDownload(item.id);
         void invoke<SpotifyTrackMatch | null>("spotify_match_for_youtube", { youtubeId: item.videoId })
           .then(setMenuSpotifyMatch)
           .catch(() => setMenuSpotifyMatch(null));
@@ -928,66 +652,6 @@ function App() {
     }
   };
 
-  const toggleShuffle = async () => {
-    const next = !shuffleEnabled;
-    setShuffleEnabled(next);
-    if (settings.rememberShuffleAndRepeat === false) return;
-    try {
-      await invoke("settings_set", { key: "shuffleMode", value: String(next) });
-    } catch (error) {
-      setShuffleEnabled(!next);
-      setNotice(`Shuffle preference could not be saved: ${errorMessage(error)}`);
-    }
-  };
-
-  const cycleRepeat = async () => {
-    const next = repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off";
-    setRepeatMode(next);
-    try {
-      await invoke("settings_set", { key: "repeatMode", value: next === "one" ? "1" : next === "all" ? "2" : "0" });
-    } catch (error) {
-      setNotice(`Repeat preference could not be saved: ${errorMessage(error)}`);
-    }
-  };
-
-  const setSetting = async (key: string, value: boolean) => {
-    const previous = settings[key];
-    setSettings((current) => ({ ...current, [key]: value }));
-    try {
-      await invoke("settings_set", { key, value: String(value) });
-    } catch (error) {
-      setSettings((current) => ({ ...current, [key]: previous }));
-      setNotice(`Setting could not be saved: ${errorMessage(error)}`);
-    }
-  };
-
-  const setAudioQualitySetting = async (value: AudioQuality) => {
-    const previous = audioQuality;
-    setAudioQuality(value);
-    try {
-      await invoke("settings_set", { key: "audioQuality", value });
-    } catch (error) {
-      setAudioQuality(previous);
-      setNotice(`Audio quality could not be saved: ${errorMessage(error)}`);
-    }
-  };
-
-  const arrangeQueueForSettings = (
-    items: YtItem[],
-    currentIndex: number,
-    originalQueueSize: number,
-    shuffleActive = shuffleEnabled,
-  ) =>
-    arrangeQueue(items, currentIndex, originalQueueSize, {
-      shuffle: shuffleActive,
-      playlistFirst: !!settings.shufflePlaylistFirst,
-    });
-
-  const maybeAutoDownloadOnLike = (item: YtItem, liked: boolean) => {
-    if (settings.autoDownloadOnLike !== true || !liked || !item.videoId || item.localPath) return;
-    void invoke("download_start", { item, audioQuality }).catch(() => undefined);
-  };
-
   // Syncs a like/unlike to YouTube Music when a Google session is active. Returns whether the sync succeeded -
   // being signed out counts as success (there is nothing to sync), only an attempted sync that actually failed
   // is worth surfacing to the user.
@@ -999,22 +663,6 @@ function App() {
     } catch {
       return false;
     }
-  };
-
-  const shuffleQueueAfterCurrent = (items: YtItem[], currentId: string | null) =>
-    shuffleEnabled ? shuffleAfterCurrent(items, currentId) : items;
-
-  const toggleSelectedItem = (item: YtItem) => {
-    setSelectedItems((current) =>
-      current.some((value) => value.id === item.id)
-        ? current.filter((value) => value.id !== item.id)
-        : [...current, item],
-    );
-  };
-
-  const closeSelection = () => {
-    setSelectedItems([]);
-    setSelectionMode(false);
   };
 
   const playSelectedItems = async (shuffle: boolean) => {
@@ -1079,55 +727,12 @@ function App() {
   };
 
   const downloadSelectedItems = () => {
-    const downloadable = selectedItems.filter((item) => item.videoId && !item.localPath);
-    downloadable.forEach((item) => void invoke("download_start", { item }).catch(() => undefined));
-    setNotice(
-      downloadable.length > 0
-        ? `Started offline download for ${downloadable.length} selected item${downloadable.length === 1 ? "" : "s"}.`
-        : "No selected item has a remote source video.",
-    );
+    downloadItems(selectedItems);
     closeSelection();
   };
 
   const removeSelectedDownloads = async () => {
-    try {
-      for (const item of selectedItems) await invoke("download_remove", { songId: item.id });
-      setNotice(
-        `Removed offline download for ${selectedItems.length} selected item${selectedItems.length === 1 ? "" : "s"}.`,
-      );
-      closeSelection();
-    } catch (error) {
-      setNotice(`Selected offline download removal failed: ${errorMessage(error)}`);
-    }
-  };
-
-  const moveLyricsProvider = async (provider: string, direction: -1 | 1) => {
-    const enabled = (value: string) =>
-      value === "YouTube" || value === "YouTubeSubtitle" || settings[lyricProviderSettingKeys[value] ?? ""] === true;
-    if (!enabled(provider)) return;
-    const enabledOrder = lyricsProviderOrder.filter(enabled);
-    const index = enabledOrder.indexOf(provider);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= enabledOrder.length) return;
-    [enabledOrder[index], enabledOrder[nextIndex]] = [enabledOrder[nextIndex], enabledOrder[index]];
-    const nextOrder = [...enabledOrder, ...lyricsProviderOrder.filter((value) => !enabled(value))];
-    const previous = lyricsProviderOrder;
-    setLyricsProviderOrder(nextOrder);
-    try {
-      await invoke("settings_set", { key: "lyricsProviderOrder", value: nextOrder.join(",") });
-    } catch (error) {
-      setLyricsProviderOrder(previous);
-      setNotice(`Lyrics provider order could not be saved: ${errorMessage(error)}`);
-    }
-  };
-
-  const hideItem = (item: YtItem) => {
-    const hideVideo =
-      settings.hideVideoSongs &&
-      item.kind === "song" &&
-      !!item.musicVideoType &&
-      item.musicVideoType !== "MUSIC_VIDEO_TYPE_ATV";
-    return (settings.hideExplicit && item.explicit === true) || hideVideo;
+    if (await removeDownloads(selectedItems)) closeSelection();
   };
 
   const loadLibrary = async (
@@ -1276,95 +881,10 @@ function App() {
     }
   };
 
-  const loadLocalPlaylists = async () => {
-    try {
-      setLocalPlaylists(await invoke<(YtItem & { songCount?: number; savedAt?: number })[]>("library_playlists"));
-    } catch (error) {
-      setNotice(`Playlists could not be loaded: ${errorMessage(error)}`);
-    }
-  };
-
-  const syncSavedPlaylists = async () => {
-    if (!sessionStatus.authenticated || settings.ytmSync !== true) {
-      await loadLocalPlaylists();
-      return;
-    }
-    try {
-      const result = await invoke<{ playlists: number }>("sync_youtube_library", { mode: "playlists" });
-      await loadLocalPlaylists();
-      setNotice(`YouTube Music playlist sync finished: ${result.playlists} playlists.`);
-    } catch (error) {
-      setNotice(`YouTube Music playlist sync failed: ${errorMessage(error)}`);
-      await loadLocalPlaylists();
-    }
-  };
-
   const reloadCurrentLibrary = async () => {
     if (libraryMode === "playlists") return syncSavedPlaylists();
     if (libraryMode === "podcasts") return loadPodcastItems(podcastFilter);
     return loadLibrary(libraryMode);
-  };
-
-  const openCreatePlaylistDialog = () => {
-    setPlaylistPickerItems(null);
-    setNewPlaylistTitle("");
-    setCreateSyncedPlaylist(false);
-    setCreatePlaylistOpen(true);
-  };
-
-  const createLocalPlaylist = async () => {
-    const title = newPlaylistTitle.trim();
-    if (!title) return;
-    try {
-      if (createSyncedPlaylist) {
-        await invoke("ytm_create_playlist", { title });
-      } else {
-        await invoke("library_create_playlist", { title });
-      }
-      await loadLocalPlaylists();
-      setCreatePlaylistOpen(false);
-      setNewPlaylistTitle("");
-      setNotice(
-        createSyncedPlaylist ? `Created YouTube Music playlist “${title}”.` : `Created local playlist “${title}”.`,
-      );
-    } catch (error) {
-      setNotice(`Playlist could not be created: ${errorMessage(error)}`);
-    }
-  };
-
-  const addToSelectedPlaylist = async (playlistId: string) => {
-    const items = playlistPickerItems ?? [];
-    if (items.length === 0) return;
-    try {
-      let addedCount = 0;
-      let skippedCount = 0;
-      if (playlistId.startsWith("LOCAL_")) {
-        for (const item of items) {
-          const added = await invoke<boolean>("library_add_to_playlist", { playlistId, item });
-          if (added) addedCount += 1;
-          else skippedCount += 1;
-        }
-      } else {
-        for (const item of items) {
-          if (!item.videoId) {
-            setNotice(`“${item.title}” has no source videoId required for a playlist add.`);
-            return;
-          }
-          await invoke("ytm_add_to_playlist", { playlistId, videoId: item.videoId });
-          addedCount += 1;
-        }
-      }
-      setNotice(
-        skippedCount > 0
-          ? `Added ${addedCount} item${addedCount === 1 ? "" : "s"}; skipped ${skippedCount} already in the playlist.`
-          : `Added ${addedCount} selected item${addedCount === 1 ? "" : "s"} to the playlist.`,
-      );
-      setPlaylistPickerItems(null);
-      setSelectedItems([]);
-      setSelectionMode(false);
-    } catch (error) {
-      setNotice(`Could not add selected items to playlist: ${errorMessage(error)}`);
-    }
   };
 
   const openLocalPlaylist = async (item: YtItem) => {
@@ -1423,52 +943,12 @@ function App() {
     settings.ytmSync,
     spotifyStatus.authenticated,
   ]);
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    void listen<SessionStatus>("account-status", (event) => {
-      setSessionStatus(event.payload);
-      setNotice("Google / YouTube Music account connected and validated.");
-    }).then((stop) => {
-      unlisten = stop;
-    });
-    let stopSpotify: (() => void) | undefined;
-    void listen<SpotifySessionStatus>("spotify-status", (event) => {
-      setSpotifyStatus(event.payload);
-      setNotice("Spotify account connected and token validated.");
-    }).then((stop) => {
-      stopSpotify = stop;
-    });
-    let stopAccountError: (() => void) | undefined;
-    void listen<string>("account-status-error", (event) => {
-      setNotice(`Google account validation failed: ${event.payload}`);
-    }).then((stop) => {
-      stopAccountError = stop;
-    });
-    let stopSpotifyError: (() => void) | undefined;
-    void listen<string>("spotify-status-error", (event) => {
-      setNotice(`Spotify account validation failed: ${event.payload}`);
-    }).then((stop) => {
-      stopSpotifyError = stop;
-    });
-    let stopDownload: (() => void) | undefined;
-    void listen<DownloadInfo>("download-state", (event) => {
-      setMenuDownload((current) => (current?.songId === event.payload.songId ? event.payload : current));
-    }).then((stop) => {
-      stopDownload = stop;
-    });
-    return () => {
-      unlisten?.();
-      stopSpotify?.();
-      stopAccountError?.();
-      stopSpotifyError?.();
-      stopDownload?.();
-    };
-  }, []);
-  useEffect(() => {
+  const loadStartupAccounts = useEffectEvent(() => {
     void loadSessionStatus(true);
     void loadSpotifyStatus();
     void loadSettings();
-  }, []);
+  });
+  useEffect(() => loadStartupAccounts(), []);
   useEffect(() => {
     if (accountAuthStateRef.current === null) {
       accountAuthStateRef.current = sessionStatus.authenticated;
@@ -1479,15 +959,15 @@ function App() {
       if (active === "home") void loadHome();
     }
   }, [active, sessionStatus.authenticated]);
-  useEffect(() => {
-    void loadSpotifyProfile();
-  }, [spotifyStatus.authenticated]);
-  useEffect(() => {
+  const refreshSpotifyProfile = useEffectEvent(() => void loadSpotifyProfile());
+  useEffect(() => refreshSpotifyProfile(), [spotifyStatus.authenticated]);
+  const refreshOpenedSettings = useEffectEvent(() => {
     if (settingsOpen) {
       void loadSettings();
       void loadSessionStatus();
     }
-  }, [settingsOpen]);
+  });
+  useEffect(() => refreshOpenedSettings(), [settingsOpen]);
 
   const runSearch = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -1591,93 +1071,6 @@ function App() {
     }
   };
 
-  const beginSpotifyAdd = async (item: YtItem) => {
-    if (!spotifyStatus.authenticated || !item.videoId) {
-      setNotice("Spotify playlist actions require a connected Spotify account and a source video.");
-      return;
-    }
-    setMenuItem(null);
-    setSpotifyAddItem(item);
-    setSpotifyAddState({ status: "loading", data: { match: null, playlists: [] } });
-    try {
-      const artist = item.artists.map((value) => value.name).join(", ") || item.subtitle || "";
-      const match = await invoke<SpotifyTrackMatch | null>("spotify_resolve_youtube", {
-        youtubeId: item.videoId,
-        title: item.title,
-        artist,
-        durationSec: item.duration ?? -1,
-      });
-      if (!match) {
-        setSpotifyAddState({
-          status: "error",
-          data: { match: null, playlists: [] },
-          error: "This YouTube song could not be matched to a Spotify track.",
-        });
-        return;
-      }
-      const playlists = await invoke<SpotifyPlaylistItem[]>("spotify_playlists");
-      setSpotifyAddState({ status: "ready", data: { match, playlists } });
-    } catch (error) {
-      setSpotifyAddState({ status: "error", data: { match: null, playlists: [] }, error: errorMessage(error) });
-    }
-  };
-
-  const addToSpotifyPlaylist = async (playlist: SpotifyPlaylistItem) => {
-    const match = spotifyAddState?.status === "ready" ? spotifyAddState.data.match : null;
-    if (!match) return;
-    try {
-      await invoke("spotify_add_to_playlist", { playlistId: playlist.id, trackUri: match.uri });
-      setSpotifyAddItem(null);
-      setSpotifyAddState(null);
-      setNotice(`Added “${match.name}” to Spotify playlist “${playlist.name}”.`);
-    } catch (error) {
-      setNotice(`Spotify playlist add failed: ${errorMessage(error)}`);
-    }
-  };
-
-  useEffect(() => {
-    const parsed = parseYouTubeUrl(youtubeMatchUrl);
-    if (!youtubeMatchItem || parsed?.kind !== "video") {
-      setYoutubeMatchPreview(null);
-      return;
-    }
-    let activeRequest = true;
-    setYoutubeMatchPreview({ status: "loading", data: null });
-    void invoke<YtItem | null>("ytm_refetch", { videoId: parsed.id })
-      .then((item) => {
-        if (!activeRequest) return;
-        setYoutubeMatchPreview(
-          item ? { status: "ready", data: item } : { status: "error", data: null, error: "Video not found" },
-        );
-      })
-      .catch((error) => {
-        if (activeRequest) setYoutubeMatchPreview({ status: "error", data: null, error: errorMessage(error) });
-      });
-    return () => {
-      activeRequest = false;
-    };
-  }, [youtubeMatchItem?.item.id, youtubeMatchUrl]);
-
-  const confirmYoutubeVersion = async () => {
-    const match = youtubeMatchItem?.match;
-    const preview = youtubeMatchPreview?.status === "ready" ? youtubeMatchPreview.data : null;
-    if (!match || !preview?.videoId) return;
-    try {
-      const artist = preview.artists.map((value) => value.name).join(", ") || preview.subtitle || "";
-      await invoke("spotify_override_youtube", {
-        spotifyId: match.id,
-        youtubeId: preview.videoId,
-        title: preview.title,
-        artist,
-      });
-      setYoutubeMatchItem(null);
-      setYoutubeMatchPreview(null);
-      setNotice(`Changed the YouTube version for “${match.name}”.`);
-    } catch (error) {
-      setNotice(`YouTube version change failed: ${errorMessage(error)}`);
-    }
-  };
-
   const togglePlayerFavorite = async () => {
     if (!player) return;
     const current = playerItemState ?? {
@@ -1722,16 +1115,13 @@ function App() {
     if (!player) return;
     setPlayerMenuOpen(true);
     setMenuItem(player.item);
-    setMenuDownload(null);
+    showMenuDownload(null);
     setQueueOpen(false);
     try {
       const state = await invoke<LibraryItemState>("library_item_state", { id: player.item.id });
       setPlayerItemState(state);
       setMenuState(state);
-      if (player.item.videoId)
-        void invoke<DownloadInfo | null>("download_info", { songId: player.item.id })
-          .then(setMenuDownload)
-          .catch(() => setMenuDownload(null));
+      if (player.item.videoId) showMenuDownload(player.item.id);
     } catch {
       const state = { liked: false, youtubeLiked: false, inLibrary: false, uploaded: false, pinned: false };
       setPlayerItemState(state);
@@ -1758,65 +1148,7 @@ function App() {
     return () => {
       activeRequest = false;
     };
-  }, [player?.item.id]);
-
-  const requestLyrics = async (item: YtItem, provider = "auto", forceRefresh = false) => {
-    const artist = item.artists.map((value) => value.name).join(", ") || item.subtitle || "";
-    setLyricsAutoScrollEnabled(true);
-    setLyricsProviderLoading(true);
-    setLyrics({
-      status: "loading",
-      data: {
-        provider: provider === "auto" ? "" : provider,
-        text: "",
-        synced: false,
-        matchedTitle: item.title,
-        matchedArtist: artist,
-        lines: [],
-      },
-    });
-    try {
-      const command =
-        provider === "auto" ? (forceRefresh ? "fetch_lyrics_fresh" : "fetch_lyrics") : "fetch_lyrics_from_provider";
-      const args = {
-        title: item.title,
-        artist,
-        duration: item.duration ?? -1,
-        album: item.albumTitle ?? null,
-        id: item.videoId ?? item.id,
-        ...(provider === "auto" ? {} : { provider }),
-      };
-      const data = await invoke<LyricsPayload>(command, args);
-      setLyricsProviderSelection(data.provider);
-      setLyrics({ status: "ready", data });
-    } catch (error) {
-      setLyrics({
-        status: "error",
-        data: {
-          provider: provider === "auto" ? "Automatic" : provider,
-          text: "",
-          synced: false,
-          matchedTitle: item.title,
-          matchedArtist: artist,
-          lines: [],
-        },
-        error: errorMessage(error),
-      });
-    } finally {
-      setLyricsProviderLoading(false);
-    }
-  };
-
-  const openLyrics = async (item: YtItem) => {
-    setLyricsItem(item);
-    setLyricsProviderSelection("auto");
-    await requestLyrics(item);
-  };
-
-  const changeLyricsProvider = async (provider: string) => {
-    setLyricsProviderSelection(provider);
-    if (lyricsItem) await requestLyrics(lyricsItem, provider, provider === "auto");
-  };
+  }, [player?.item.id, setPlayerItemState]);
 
   const isLocalLibraryMenuContext = (item: YtItem) =>
     Boolean(item.localPath) ||
@@ -1869,42 +1201,10 @@ function App() {
       );
     if (action === "share") return shareItem(item);
     if (action === "copy_link") return copyLink(item);
-    if (action === "download") {
-      if (!item.videoId || item.localPath) {
-        setNotice("Offline download requires a remote source video.");
-        return;
-      }
-      setMenuDownload({
-        songId: item.id,
-        path: "",
-        bytes: 0,
-        totalBytes: null,
-        state: "downloading",
-        lyricsCached: false,
-      });
-      setNotice(`Downloading “${item.title}” for offline playback…`);
-      void invoke("download_start", { item, audioQuality })
-        .then(() => setNotice(`Offline download ready for “${item.title}”.`))
-        .catch((error) => setNotice(`Offline download failed: ${errorMessage(error)}`));
-      return;
-    }
-    if (action === "download_cancel") {
-      try {
-        await invoke("download_cancel", { songId: item.id });
-        setNotice(`Cancelling offline download for “${item.title}”…`);
-      } catch (error) {
-        setNotice(`Could not cancel download: ${errorMessage(error)}`);
-      }
-      return;
-    }
+    if (action === "download") return startDownload(item);
+    if (action === "download_cancel") return cancelDownload(item);
     if (action === "download_remove") {
-      try {
-        await invoke("download_remove", { songId: item.id });
-        setMenuDownload(null);
-        setNotice(`Removed offline download for “${item.title}”.`);
-      } catch (error) {
-        setNotice(`Could not remove offline download: ${errorMessage(error)}`);
-      }
+      await removeDownload(item);
       return;
     }
     if (action === "cache_remove") {
@@ -2243,36 +1543,6 @@ function App() {
       void playItem(removed.items[removed.index], removed.items, removed.index, null, autoMixEnabledRef.current);
   };
 
-  const moveQueueItem = (from: number, to: number) => {
-    const moved = moveItem(queueItems, queueIndex, from, to);
-    if (!moved) return;
-    setQueueItems(moved.items);
-    setQueueIndex(moved.index);
-  };
-
-  const flushPlaytime = async () => {
-    const session = playtimeRef.current;
-    if (!session || session.pendingMs <= 0 || session.flushing) return;
-    const amount = Math.round(session.pendingMs);
-    session.pendingMs = 0;
-    session.flushing = true;
-    try {
-      await invoke("history_record_playtime", { historyId: session.historyId, playTimeMs: amount });
-    } catch {
-      session.pendingMs += amount;
-    } finally {
-      session.flushing = false;
-    }
-    if (session.pendingMs >= 15000) void flushPlaytime();
-  };
-  const recordPlaytime = (position: number) => {
-    const session = playtimeRef.current;
-    if (!session || !Number.isFinite(position)) return;
-    const delta = position - session.lastPosition;
-    if (session.playing && delta >= 0 && delta <= 3) session.pendingMs += delta * 1000;
-    session.lastPosition = position;
-    if (session.pendingMs >= 15000) void flushPlaytime();
-  };
   const beginPlaytime = async (item: YtItem) => {
     if (settings.pauseListenHistory === true) return;
     await flushPlaytime();
@@ -2448,60 +1718,6 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playbackEffectKey(player)]);
 
-  // Stream URLs from ytm_player expire (expiresInSeconds) - a song paused longer than that, or one whose
-  // queue neighbor sits paused for a long time, hits a dead URL when playback resumes. onError below tries
-  // this before falling back to a generic error, so a stale-but-otherwise-fine song quietly gets a fresh URL
-  // and resumes at the same position instead of a confusing failure (previously, expiresInSeconds was parsed
-  // by the backend but never read anywhere on the frontend). Guarded by elapsed-time-vs-expiry so it only
-  // fires for the case it targets - a genuinely broken stream errors immediately, well inside its expiry
-  // window, and falls through to the existing error handling unchanged.
-  const streamRecoveryRef = useRef<{ session: unknown; attempts: number }>({ session: null, attempts: 0 });
-  const recoverStream = async (): Promise<boolean> => {
-    if (!player?.item.videoId) return false;
-    const session = player.session;
-    if (streamRecoveryRef.current.session !== session) streamRecoveryRef.current = { session, attempts: 0 };
-    const elapsedSeconds = (Date.now() - streamResolvedAtRef.current) / 1000;
-    const reason = recoveryReason(streamRecoveryRef.current.attempts, elapsedSeconds, player.payload.expiresInSeconds);
-    if (!reason) return false;
-    streamRecoveryRef.current.attempts += 1;
-    const resumeAt = audioRef.current?.currentTime ?? playbackSeconds;
-    const wasPlaying = audioRef.current ? !audioRef.current.paused || audioRef.current.autoplay || isPlaying : false;
-    const item = player.item;
-    const failedUrl = player.payload.streamUrl;
-    const localSource = isLocalStream(failedUrl);
-    setNotice(recoveryNotice(reason, streamRecoveryRef.current.attempts, localSource));
-    try {
-      if (reason === "rejected" || localSource)
-        await invoke("ytm_report_stream_failure", { videoId: item.videoId, streamUrl: failedUrl }).catch(
-          () => undefined,
-        );
-      const payload = await invoke<PlayerPayload>("ytm_player", streamRequest(item, audioQuality));
-      // The user may have started another track while the fresh URL was resolving (last click wins).
-      if (playbackSessionRef.current !== session) return false;
-      streamResolvedAtRef.current = Date.now();
-      setPlayer((current) => withRefreshedPayload(current, session, payload));
-      if (audioRef.current) {
-        audioRef.current.src = mediaSrc(payload.streamUrl) ?? payload.streamUrl;
-        audioRef.current.currentTime = resumeAt;
-        if (wasPlaying)
-          void audioRef.current
-            .play()
-            .then(() => setIsPlaying(true))
-            .catch(() => setIsPlaying(false));
-      }
-      return true;
-    } catch (error) {
-      if (playbackSessionRef.current === session) setNotice(String(error));
-      return false;
-    }
-  };
-
-  useEffect(() => {
-    if (!audioRef.current) return;
-    audioRef.current.playbackRate = playbackSpeed;
-    (audioRef.current as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = settings.varispeed !== true;
-  }, [playbackSpeed, settings.varispeed]);
-
   useEffect(() => {
     if (settings.persistentQueue !== true) {
       persistentQueueLoadedRef.current = false;
@@ -2546,7 +1762,14 @@ function App() {
     } catch {
       localStorage.removeItem("meld:persistentQueue");
     }
-  }, [settings.persistentQueue]);
+  }, [
+    settings.persistentQueue,
+    setNotice,
+    setQueueContinuation,
+    setQueueContinuationKind,
+    setQueueIndex,
+    setQueueItems,
+  ]);
 
   useEffect(() => {
     if (settings.persistentQueue !== true) {
@@ -2601,62 +1824,9 @@ function App() {
     player,
     playbackSeconds,
     isPlaying,
+    setNotice,
+    audioRef,
   ]);
-
-  const togglePlayback = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (audio.paused) {
-      void audio
-        .play()
-        .then(() => setIsPlaying(true))
-        .catch((error) => setNotice(`Audio playback failed: ${errorMessage(error)}`));
-    } else {
-      audio.pause();
-      setIsPlaying(false);
-    }
-  };
-
-  const seekPlayback = (value: number) => {
-    if (!audioRef.current || !Number.isFinite(value)) return;
-    audioRef.current.currentTime = value;
-    setPlaybackSeconds(value);
-  };
-
-  const seekByPlayerGesture = (direction: -1 | 1) => {
-    const now = performance.now();
-    const previous = seekGestureRef.current;
-    const multiplier =
-      settings.seekExtraSeconds === true && now - previous.timestamp < 1000 ? previous.multiplier + 1 : 1;
-    seekGestureRef.current = { timestamp: now, multiplier };
-    const seconds = 5 * multiplier;
-    seekPlayback(
-      Math.min(durationSeconds || Number.MAX_SAFE_INTEGER, Math.max(0, playbackSeconds + direction * seconds)),
-    );
-  };
-
-  const adjustVolumeByWheel = (event: { deltaY: number; preventDefault: () => void }) => {
-    event.preventDefault();
-    const next = Math.min(1, Math.max(0, Number((volume + (event.deltaY < 0 ? 0.05 : -0.05)).toFixed(2))));
-    updateVolume(next);
-  };
-  const updateVolume = (value: number) => {
-    const audio = audioRef.current;
-    if (audio && settings.pauseOnMute === true && value === 0 && !audio.paused) {
-      wasPlayingBeforeMuteRef.current = true;
-      audio.pause();
-      setIsPlaying(false);
-    } else if (audio && settings.pauseOnMute === true && value > 0 && wasPlayingBeforeMuteRef.current && audio.paused) {
-      wasPlayingBeforeMuteRef.current = false;
-      void audio
-        .play()
-        .then(() => setIsPlaying(true))
-        .catch((error) => setNotice(`Audio playback failed: ${errorMessage(error)}`));
-    }
-    setVolume(value);
-    if (audio) audio.volume = value;
-    void invoke("settings_set", { key: "playerVolume", value: String(value) }).catch(() => undefined);
-  };
 
   useEffect(() => {
     const mediaSession = navigator.mediaSession;
@@ -2735,188 +1905,117 @@ function App() {
     queueContinuation,
     queueIndex,
     queueItems.length,
+    setNotice,
+    seekPlayback,
+    audioRef,
   ]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const typing =
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.tagName === "SELECT" ||
-        target?.isContentEditable;
-      if (typing && !(event.key === "Escape")) return;
-      if (event.key === "Escape") {
-        if (settingsOpen) {
-          setSettingsOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (editItem) {
-          setEditItem(null);
-          event.preventDefault();
-          return;
-        }
-        if (spotifyAddItem) {
-          setSpotifyAddItem(null);
-          event.preventDefault();
-          return;
-        }
-        if (spotifyLikedOpen) {
-          setSpotifyLikedOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (spotifyOpenPlaylist) {
-          setSpotifyOpenPlaylist(null);
-          event.preventDefault();
-          return;
-        }
-        if (youtubeMatchItem) {
-          setYoutubeMatchItem(null);
-          event.preventDefault();
-          return;
-        }
-        if (sleepTimerOpen) {
-          setSleepTimerOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (artistPickerItem) {
-          setArtistPickerItem(null);
-          event.preventDefault();
-          return;
-        }
-        if (playlistPickerItems) {
-          setPlaylistPickerItems(null);
-          event.preventDefault();
-          return;
-        }
-        if (createPlaylistOpen) {
-          setCreatePlaylistOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (logoutDialogOpen) {
-          setLogoutDialogOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (lyrics || detail || playlist || menuItem || queueOpen || playerExpanded || infoItem) {
-          closeTransientLayers();
-          event.preventDefault();
-        }
+  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    const typing =
+      target?.tagName === "INPUT" ||
+      target?.tagName === "TEXTAREA" ||
+      target?.tagName === "SELECT" ||
+      target?.isContentEditable;
+    if (typing && !(event.key === "Escape")) return;
+    if (event.key === "Escape") {
+      if (settingsOpen) {
+        setSettingsOpen(false);
+        event.preventDefault();
         return;
       }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+      if (editItem) {
+        setEditItem(null);
         event.preventDefault();
-        document.querySelector<HTMLInputElement>(".search-form input")?.focus();
         return;
       }
-      if (event.altKey && event.key === "ArrowLeft") {
+      if (spotifyAddItem) {
+        setSpotifyAddItem(null);
         event.preventDefault();
-        goBack();
         return;
       }
-      if (event.altKey && event.key === "ArrowRight") {
+      if (spotifyLikedOpen) {
+        setSpotifyLikedOpen(false);
         event.preventDefault();
-        navigateForward();
         return;
       }
-      if (!player) return;
-      if (event.code === "Space") {
+      if (spotifyOpenPlaylist) {
+        setSpotifyOpenPlaylist(null);
         event.preventDefault();
-        togglePlayback();
         return;
       }
-      if (event.key === "ArrowLeft") {
+      if (youtubeMatchItem) {
+        setYoutubeMatchItem(null);
         event.preventDefault();
-        seekPlayback(Math.max(0, playbackSeconds - (event.shiftKey ? 10 : 5)));
         return;
       }
-      if (event.key === "ArrowRight") {
+      if (sleepTimerOpen) {
+        setSleepTimerOpen(false);
         event.preventDefault();
-        seekPlayback(Math.min(durationSeconds || Number.MAX_SAFE_INTEGER, playbackSeconds + (event.shiftKey ? 10 : 5)));
+        return;
       }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    active,
-    artistPickerItem,
-    backStack,
-    createPlaylistOpen,
-    detail,
-    durationSeconds,
-    editItem,
-    forwardStack,
-    infoItem,
-    logoutDialogOpen,
-    lyrics,
-    menuItem,
-    navigateBack,
-    navigateForward,
-    navigateTo,
-    playbackSeconds,
-    player,
-    playerExpanded,
-    playlist,
-    playlistPickerItems,
-    queueOpen,
-    settingsOpen,
-    sleepTimerOpen,
-    spotifyAddItem,
-    spotifyLikedOpen,
-    spotifyOpenPlaylist,
-    youtubeMatchItem,
-  ]);
-
-  const formatTime = (seconds: number) => {
-    const safe = Math.max(0, Math.floor(seconds));
-    return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
-  };
-
-  const loadAutomixItems = async (current: YtItem, existing: YtItem[]) => {
-    if (
-      settings.autoLoadMore === false ||
-      !settings.similarContent ||
-      (settings.disableLoadMoreWhenRepeatAll && repeatMode === "all") ||
-      !current.videoId ||
-      automixLoadingRef.current
-    )
-      return [];
-    automixLoadingRef.current = true;
-    try {
-      const page = await invoke<QueuePage>("ytm_next", {
-        videoId: current.videoId,
-        playlistId: current.playPlaylistId ?? current.playlistId ?? `RDAMVM${current.videoId}`,
-        setVideoId: current.setVideoId ?? null,
-        index: null,
-        params: current.params ?? null,
-        continuation: null,
-      });
-      let additions = page.items.filter(
-        (value) => value.videoId && value.id !== current.id && !existing.some((item) => item.id === value.id),
-      );
-      if (additions.length === 0 && page.relatedBrowseId) {
-        additions = (await invoke<YtItem[]>("ytm_related", { browseId: page.relatedBrowseId })).filter(
-          (value) => value.videoId && value.id !== current.id && !existing.some((item) => item.id === value.id),
-        );
+      if (artistPickerItem) {
+        setArtistPickerItem(null);
+        event.preventDefault();
+        return;
       }
-      if (shuffleEnabled && additions.length > 1) {
-        additions = [...additions];
-        for (let index = additions.length - 1; index > 0; index -= 1) {
-          const swapIndex = Math.floor(Math.random() * (index + 1));
-          [additions[index], additions[swapIndex]] = [additions[swapIndex], additions[index]];
-        }
+      if (playlistPickerItems) {
+        setPlaylistPickerItems(null);
+        event.preventDefault();
+        return;
       }
-      return additions;
-    } catch {
-      return [];
-    } finally {
-      automixLoadingRef.current = false;
+      if (createPlaylistOpen) {
+        setCreatePlaylistOpen(false);
+        event.preventDefault();
+        return;
+      }
+      if (logoutDialogOpen) {
+        setLogoutDialogOpen(false);
+        event.preventDefault();
+        return;
+      }
+      if (lyrics || detail || playlist || menuItem || queueOpen || playerExpanded || infoItem) {
+        closeTransientLayers();
+        event.preventDefault();
+      }
+      return;
     }
-  };
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      document.querySelector<HTMLInputElement>(".search-form input")?.focus();
+      return;
+    }
+    if (event.altKey && event.key === "ArrowLeft") {
+      event.preventDefault();
+      goBack();
+      return;
+    }
+    if (event.altKey && event.key === "ArrowRight") {
+      event.preventDefault();
+      navigateForward();
+      return;
+    }
+    if (!player) return;
+    if (event.code === "Space") {
+      event.preventDefault();
+      togglePlayback();
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      seekPlayback(Math.max(0, playbackSeconds - (event.shiftKey ? 10 : 5)));
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      seekPlayback(Math.min(durationSeconds || Number.MAX_SAFE_INTEGER, playbackSeconds + (event.shiftKey ? 10 : 5)));
+    }
+  });
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => onKeyDown(event);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
 
   const playQueueIndex = async (index: number) => {
     let items = queueItems;
@@ -3231,75 +2330,28 @@ function App() {
     };
   }, [detail?.status, detail?.data.kind, detail?.data.browseId]);
 
-  const activeLyricIndex = useMemo(() => {
-    if (!lyrics || lyrics.status !== "ready" || !lyrics.data.synced || lyrics.data.lines.length === 0) return -1;
-    const position = playbackSeconds * 1000;
-    const nextIndex = lyrics.data.lines.findIndex((line) => line.timeMs > position);
-    return nextIndex < 0 ? lyrics.data.lines.length - 1 : Math.max(0, nextIndex - 1);
-  }, [lyrics, playbackSeconds]);
-
-  useEffect(() => {
-    if (activeLyricIndex < 0 || !lyricsAutoScrollEnabled) return;
-    const line = activeLyricRef.current;
-    const container = lyricsContainerRef.current;
-    if (!line || !container) return;
-    const align = () => {
-      const lineRect = line.getBoundingClientRect();
-      const containerRect = container.getBoundingClientRect();
-      const lineCenter = lineRect.top - containerRect.top + lineRect.height / 2;
-      const targetTop = container.scrollTop + lineCenter - container.clientHeight / 2;
-      const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-      container.scrollTo({ top: Math.min(maxTop, Math.max(0, targetTop)), behavior: "smooth" });
-    };
-    const frame = requestAnimationFrame(align);
-    return () => cancelAnimationFrame(frame);
-  }, [activeLyricIndex, playerExpanded, lyricsAutoScrollEnabled, lyrics?.status]);
+  const { activeLyricIndex } = useLyricsFollow({
+    activeLyricRef,
+    lyrics,
+    lyricsAutoScrollEnabled,
+    lyricsContainerRef,
+    playbackSeconds,
+    playerExpanded,
+  });
 
   const visibleTitle = useMemo(() => navigation.find((item) => item.key === active)?.label ?? "Home", [active]);
   const libraryQuery = librarySearch.trim().toLowerCase();
-  const playlistQuery = playlistSearch.trim().toLowerCase();
   const matchesLibraryQuery = (title: string) =>
     libraryMode === "playlists"
       ? !playlistQuery || title.toLowerCase().includes(playlistQuery)
       : !libraryQuery || title.toLowerCase().includes(libraryQuery);
-  const matchesPlaylistQuery = (title: string) => !playlistQuery || title.toLowerCase().includes(playlistQuery);
-  const hasVisiblePlaylistAutoEntries =
-    (settings.show_liked_playlist !== false && matchesPlaylistQuery("Liked Songs")) ||
-    (settings.show_downloaded_playlist !== false && matchesPlaylistQuery("Downloaded")) ||
-    (settings.show_top_playlist !== false && matchesPlaylistQuery("Top Songs")) ||
-    (settings.show_uploaded_playlist !== false && matchesPlaylistQuery("Uploaded"));
-  const visiblePlaylists = useMemo(() => {
-    const values = localPlaylists.filter((item) => matchesPlaylistQuery(item.title));
-    if (playlistSort === "name") {
-      const sorted = [...values].sort((left, right) => left.title.localeCompare(right.title));
-      return playlistSortDescending ? sorted.reverse() : sorted;
-    }
-    if (playlistSort === "count") {
-      const sorted = [...values].sort((left, right) => (left.songCount ?? 0) - (right.songCount ?? 0));
-      return playlistSortDescending ? sorted.reverse() : sorted;
-    }
-    return playlistSortDescending ? values : [...values].reverse();
-  }, [localPlaylists, playlistQuery, playlistSort, playlistSortDescending]);
-  const visiblePlaylistPicker = useMemo(() => {
-    const query = playlistPickerSearch.trim().toLowerCase();
-    const values = localPlaylists.filter((item) => !query || item.title.toLowerCase().includes(query));
-    if (playlistPickerSort === "name") {
-      const sorted = [...values].sort((left, right) => left.title.localeCompare(right.title));
-      return playlistPickerSortDescending ? sorted.reverse() : sorted;
-    }
-    if (playlistPickerSort === "count") {
-      const sorted = [...values].sort((left, right) => (left.songCount ?? 0) - (right.songCount ?? 0));
-      return playlistPickerSortDescending ? sorted.reverse() : sorted;
-    }
-    return playlistPickerSortDescending ? values : [...values].reverse();
-  }, [localPlaylists, playlistPickerSearch, playlistPickerSort, playlistPickerSortDescending]);
   const visibleLocalHistory = useMemo(() => {
     const queryText = historyQuery.trim().toLowerCase();
     if (history.status !== "ready") return [];
     return history.data.filter(
       (item) => !hideItem(item) && (!queryText || `${item.title} ${item.subtitle}`.toLowerCase().includes(queryText)),
     );
-  }, [history.data, history.status, historyQuery, settings.hideExplicit, settings.hideVideoSongs]);
+  }, [hideItem, history.data, history.status, historyQuery]);
   const statsQueueItems = useMemo(
     () => (stats.status === "ready" ? stats.data.rows.map((row) => row.item) : []),
     [stats.data.rows, stats.status],
@@ -3335,8 +2387,7 @@ function App() {
     libraryQuery,
     librarySort,
     librarySortDescending,
-    settings.hideExplicit,
-    settings.hideVideoSongs,
+    hideItem,
   ]);
 
   return (
