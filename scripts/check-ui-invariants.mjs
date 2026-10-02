@@ -5,6 +5,7 @@ import {
   checkCapabilities,
   checkDestructivePolicy,
   checkErrorBoundaries,
+  checkOccurrenceKeys,
   checkFeatureModules,
   checkScreenSplit,
   checkServerState,
@@ -18,6 +19,7 @@ const problems = [
   ...checkCapabilities((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
   ...checkDestructivePolicy((path) => (existsSync(path) ? readFileSync(path, "utf8") : null), readUiSource()),
   ...checkErrorBoundaries((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
+  ...checkOccurrenceKeys(readUiSource()),
   ...checkUiInvariants(readUiSource()),
   ...checkLogoutClearsWebview(readFileSync("src-tauri/src/lib.rs", "utf8")),
 ];

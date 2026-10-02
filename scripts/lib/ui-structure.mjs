@@ -256,3 +256,16 @@ export function checkErrorBoundaries(readFile) {
     problems.push("PlayerBar must render <PlayerAudio> before the controls' <ErrorBoundary>");
   return problems;
 }
+
+/**
+ * U4-015: list keys and selection use occurrence keys (src/lib/identity.ts). A key built from an id plus the list
+ * position, or a selection check by id, treats two copies of the same song as one row.
+ */
+export function checkOccurrenceKeys(uiSource) {
+  const problems = [];
+  if (/key=\{`[^`]*\.id\}-\$\{\w*[iI]ndex\}`\}/.test(uiSource))
+    problems.push("a list key combines an id with the index; use withOccurrences");
+  if (/selectedItems\.some\(\(\w+\) => \w+\.id === /.test(uiSource))
+    problems.push("selection is checked by id; use isSelected(occurrence key)");
+  return problems;
+}

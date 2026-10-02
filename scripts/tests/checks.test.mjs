@@ -20,6 +20,7 @@ import {
   checkCapabilities,
   checkDestructivePolicy,
   checkErrorBoundaries,
+  checkOccurrenceKeys,
   checkFeatureModules,
   checkScreenSplit,
   checkServerState,
@@ -310,5 +311,15 @@ test("ui: pages, overlays and player controls have their own error boundary (U4-
     path === "src/features/player/PlayerBar.tsx" ? read(path) + "\n// <audio ref={audioRef} />" : read(path);
   assert.deepEqual(checkErrorBoundaries(audioInBar), [
     "PlayerBar.tsx renders <audio>; keep it in PlayerAudio outside the boundary",
+  ]);
+});
+
+test("ui: list keys and selection tell duplicate songs apart (U4-015)", () => {
+  assert.deepEqual(checkOccurrenceKeys(readUiSource()), []);
+  assert.deepEqual(checkOccurrenceKeys("<div key={`${item.id}-${index}`} />"), [
+    "a list key combines an id with the index; use withOccurrences",
+  ]);
+  assert.deepEqual(checkOccurrenceKeys("checked={selectedItems.some((value) => value.id === item.id)}"), [
+    "selection is checked by id; use isSelected(occurrence key)",
   ]);
 });

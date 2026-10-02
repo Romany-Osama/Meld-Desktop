@@ -1,6 +1,7 @@
 import { Dispatch, SetStateAction } from "react";
 import { mediaSrc } from "../../lib/media";
 import { YtItem, PlayerPayload } from "../../types";
+import { withOccurrences } from "../../lib/identity";
 
 export type QueuePanelProps = {
   clearQueue: () => void;
@@ -55,11 +56,8 @@ export function QueuePanel({
                   <p>No songs are queued.</p>
                 </div>
               ) : (
-                queueItems.map((item, index) => (
-                  <div
-                    key={`${item.id}-${index}`}
-                    className={index === queueIndex ? "queue-item active" : "queue-item"}
-                  >
+                withOccurrences(queueItems, "queue").map(({ item, key, index }) => (
+                  <div key={key} className={index === queueIndex ? "queue-item active" : "queue-item"}>
                     <button
                       className="queue-item-play"
                       onClick={() => {

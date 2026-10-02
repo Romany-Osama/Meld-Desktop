@@ -81,3 +81,33 @@ describe("QueuePanel", () => {
     expect(renderToStaticMarkup(<QueuePanel {...props} queueOpen player={null} />)).toBe("");
   });
 });
+
+describe("PlaylistScreen (U4-015)", () => {
+  it("keeps a song that is in the playlist twice as two separately selectable rows", async () => {
+    const { PlaylistScreen } = await import("./playlist/PlaylistScreen");
+    const selected = new Set(["playlist:P:song:a#1"]);
+    const html = renderToStaticMarkup(
+      <PlaylistScreen
+        audioQuality={null as never}
+        closePlaylist={noop}
+        isSelected={(key) => selected.has(key)}
+        loadPlaylistMore={asyncNoop}
+        openMenu={asyncNoop}
+        playItem={asyncNoop}
+        playlist={{
+          status: "ready",
+          data: {
+            playlist: { id: "P", kind: "playlist", title: "Mix", subtitle: "", artists: [] },
+            songs: [song("a", "Twice"), song("b", "Once"), song("a", "Twice")],
+          },
+        }}
+        selectionMode
+        settings={{}}
+        toggleSelectedItem={noop}
+      />,
+    );
+    const boxes = [...html.matchAll(/<input[^>]*aria-label="Select Twice"[^>]*>/g)].map((match) => match[0]);
+    expect(boxes).toHaveLength(2);
+    expect(boxes.map((box) => box.includes("checked"))).toEqual([false, true]);
+  });
+});

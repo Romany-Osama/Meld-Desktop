@@ -5,6 +5,7 @@ import { ItemCard } from "../../components/ItemCard";
 import { AudioQuality } from "../../lib/audioQuality";
 import { YtItem, LoadState, RemoteHistoryPage, SessionStatus } from "../../types";
 import type { Destructive } from "../../app/destructive";
+import { withOccurrences } from "../../lib/identity";
 
 export type HistoryScreenProps = {
   audioQuality: AudioQuality;
@@ -19,6 +20,8 @@ export type HistoryScreenProps = {
   openLyrics: (item: YtItem) => Promise<void>;
   openMenu: (item: YtItem) => Promise<void>;
   remoteHistory: LoadState<RemoteHistoryPage>;
+  /** Whether the row with this occurrence key is selected (U4-015). */
+  isSelected: (key: string) => boolean;
   selectedItems: YtItem[];
   selectionMode: boolean;
   sessionStatus: SessionStatus;
@@ -27,7 +30,7 @@ export type HistoryScreenProps = {
   destructive: Destructive;
   setSelectionMode: Dispatch<SetStateAction<boolean>>;
   settings: Record<string, boolean>;
-  toggleSelectedItem: (item: YtItem) => void;
+  toggleSelectedItem: (item: YtItem, key?: string) => void;
   visibleLocalHistory: YtItem[];
 };
 
@@ -44,6 +47,7 @@ export function HistoryScreen({
   openLyrics,
   openMenu,
   remoteHistory,
+  isSelected,
   selectedItems,
   selectionMode,
   sessionStatus,
@@ -150,14 +154,14 @@ export function HistoryScreen({
           )}
           {historySource === "local" && history.status === "ready" && history.data.length > 0 && (
             <div className="result-list">
-              {visibleLocalHistory.map((item, index) => (
-                <div className="result-row" key={`${item.id}-${index}`}>
+              {withOccurrences(visibleLocalHistory, "history").map(({ item, key, index }) => (
+                <div className="result-row" key={key}>
                   {selectionMode && (
                     <input
                       className="selection-checkbox"
                       type="checkbox"
-                      checked={selectedItems.some((value) => value.id === item.id)}
-                      onChange={() => toggleSelectedItem(item)}
+                      checked={isSelected(key)}
+                      onChange={() => toggleSelectedItem(item, key)}
                       aria-label={`Select ${item.title}`}
                     />
                   )}
@@ -227,14 +231,14 @@ export function HistoryScreen({
                     <h3>{section.title}</h3>
                   </div>
                   <div className="result-list">
-                    {songs.map((item, index) => (
-                      <div className="result-row" key={`${section.title}-${item.id}-${index}`}>
+                    {withOccurrences(songs, `remote-history:${section.title}`).map(({ item, key, index }) => (
+                      <div className="result-row" key={key}>
                         {selectionMode && (
                           <input
                             className="selection-checkbox"
                             type="checkbox"
-                            checked={selectedItems.some((value) => value.id === item.id)}
-                            onChange={() => toggleSelectedItem(item)}
+                            checked={isSelected(key)}
+                            onChange={() => toggleSelectedItem(item, key)}
                             aria-label={`Select ${item.title}`}
                           />
                         )}

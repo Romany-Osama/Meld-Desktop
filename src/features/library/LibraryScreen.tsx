@@ -15,6 +15,7 @@ import {
   SpotifyLikedTracksPayload,
   SpotifySessionStatus,
 } from "../../types";
+import { withOccurrences } from "../../lib/identity";
 
 export type LibraryScreenProps = {
   audioQuality: AudioQuality;
@@ -64,6 +65,8 @@ export type LibraryScreenProps = {
   podcastRefreshing: boolean;
   refreshSavedPodcasts: () => Promise<void>;
   reloadCurrentLibrary: () => Promise<void>;
+  /** Whether the row with this occurrence key is selected (U4-015). */
+  isSelected: (key: string) => boolean;
   selectedItems: YtItem[];
   selectionMode: boolean;
   setLibraryMixSort: Dispatch<SetStateAction<"created" | "name">>;
@@ -102,7 +105,7 @@ export type LibraryScreenProps = {
   spotifyLibrary: LoadState<SpotifyLibraryNode>;
   spotifyLikedTracks: LoadState<SpotifyLikedTracksPayload>;
   spotifyStatus: SpotifySessionStatus;
-  toggleSelectedItem: (item: YtItem) => void;
+  toggleSelectedItem: (item: YtItem, key?: string) => void;
   topPeriod: "all" | "day" | "week" | "month" | "year";
   visiblePlaylists: (YtItem & { songCount?: number; savedAt?: number })[];
 };
@@ -143,6 +146,7 @@ export function LibraryScreen({
   podcastRefreshing,
   refreshSavedPodcasts,
   reloadCurrentLibrary,
+  isSelected,
   selectedItems,
   selectionMode,
   setLibraryMixSort,
@@ -631,8 +635,8 @@ export function LibraryScreen({
                   <span>YouTube Music uploads</span>
                 </button>
               )}
-              {filteredLibraryData.map((item) => (
-                <div className="library-mix-card" key={`mix-${item.kind}-${item.id}`}>
+              {withOccurrences(filteredLibraryData, "library-mix").map(({ item, key }) => (
+                <div className="library-mix-card" key={key}>
                   <ItemCard item={item} onOpen={openItem} onMenu={(value) => void openMenu(value)} />
                   <span className="library-mix-kind">{item.kind}</span>
                 </div>
@@ -686,8 +690,8 @@ export function LibraryScreen({
                   </span>
                 </button>
               )}
-              {filteredLibraryData.map((item) => (
-                <div className="result-row" key={`mix-list-${item.kind}-${item.id}`}>
+              {withOccurrences(filteredLibraryData, "library-mix-list").map(({ item, key }) => (
+                <div className="result-row" key={key}>
                   <ItemCard item={item} onOpen={openItem} />
                   {item.kind === "song" && (
                     <InlineLikeButton
@@ -941,14 +945,14 @@ export function LibraryScreen({
             library.status === "ready" &&
             filteredLibraryData.length > 0 && (
               <div className="result-list">
-                {filteredLibraryData.map((item) => (
-                  <div className="result-row" key={`${item.kind}-${item.id}`}>
+                {withOccurrences(filteredLibraryData, `library:${libraryMode}`).map(({ item, key }) => (
+                  <div className="result-row" key={key}>
                     {selectionMode && (
                       <input
                         className="selection-checkbox"
                         type="checkbox"
-                        checked={selectedItems.some((value) => value.id === item.id)}
-                        onChange={() => toggleSelectedItem(item)}
+                        checked={isSelected(key)}
+                        onChange={() => toggleSelectedItem(item, key)}
                         aria-label={`Select ${item.title}`}
                       />
                     )}

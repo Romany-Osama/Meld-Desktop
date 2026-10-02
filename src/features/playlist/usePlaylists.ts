@@ -7,18 +7,12 @@ import type { SetNotice } from "../../app/notifications";
 export type PlaylistsDeps = {
   sessionStatus: SessionStatus;
   setNotice: SetNotice;
-  setSelectedItems: Dispatch<SetStateAction<YtItem[]>>;
+  clearSelected: () => void;
   setSelectionMode: Dispatch<SetStateAction<boolean>>;
   settings: Record<string, boolean>;
 };
 
-export function usePlaylists({
-  sessionStatus,
-  setNotice,
-  setSelectedItems,
-  setSelectionMode,
-  settings,
-}: PlaylistsDeps) {
+export function usePlaylists({ sessionStatus, setNotice, clearSelected, setSelectionMode, settings }: PlaylistsDeps) {
   const [playlistSearch, setPlaylistSearch] = useState("");
   const [playlistView, setPlaylistView] = useState<"grid" | "list">("grid");
   const [playlistSort, setPlaylistSort] = useState<PlaylistSort>("created");
@@ -110,7 +104,7 @@ export function usePlaylists({
           : `Added ${addedCount} selected item${addedCount === 1 ? "" : "s"} to the playlist.`,
       );
       setPlaylistPickerItems(null);
-      setSelectedItems([]);
+      clearSelected();
       setSelectionMode(false);
     } catch (error) {
       setNotice(`Could not add selected items to playlist: ${errorMessage(error)}`, "error");
