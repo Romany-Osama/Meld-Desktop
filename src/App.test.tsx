@@ -36,7 +36,11 @@ const responses: Record<string, unknown> = {
   history_items: [],
   library_playlists: [],
 };
-const invoke = vi.fn(async (command: string, _args?: unknown): Promise<unknown> => responses[command] ?? null);
+// Per-test answers that take precedence over `responses` (for example a deferred, slow answer).
+const overrides: Record<string, (args: unknown) => Promise<unknown>> = {};
+const invoke = vi.fn(async (command: string, args?: unknown): Promise<unknown> =>
+  overrides[command] ? overrides[command](args) : (responses[command] ?? null),
+);
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => invoke(command, args),
   convertFileSrc: (path: string) => path,
@@ -47,7 +51,16 @@ vi.mock("@tauri-apps/api/app", () => ({ getVersion: async () => "0.0.0-test" }))
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  for (const command of Object.keys(overrides)) delete overrides[command];
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => (resolve = done));
+  return { promise, resolve };
+}
+
+const album = (browseId: string, title: string) => ({ kind: "album", title, subtitle: "Artist", items: [], browseId });
 
 it("mounts, renders the shell and starts the initial loads", async () => {
   const { default: App } = await import("./App");
@@ -102,7 +115,9 @@ it("returns to a detail page that was open when the user navigated away (U4-004)
   invoke.mockClear();
   await click(screen.getByRole("button", { name: "Back" }));
   expect(route()).toBe("/album/MPREb_test");
-  expect(invoke).toHaveBeenCalledWith("ytm_detail", { kind: "album", browseId: "MPREb_test" });
+  // The page comes back from the cache as it was left, without fetching it again (U4-010).
+  expect(invoke).not.toHaveBeenCalledWith("ytm_detail", expect.anything());
+  expect(screen.getAllByText("Test Album").length).toBeGreaterThan(0);
   // The album was opened from Home, so Home is the selected destination again.
   expect(screen.getByRole("button", { name: /Home/, current: "page" })).toBeTruthy();
 });
@@ -171,4 +186,76 @@ it("opens pasted YouTube Music links as pages (U4-007)", async () => {
   expect(route()).toBe("/home");
   await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Back" })));
   expect(route()).toBe("/album/MPREb_test");
+});
+
+it("never lets a slow page replace the page opened after it (U4-009)", async () => {
+  const { default: App } = await import("./App");
+  const slowA = deferred<unknown>();
+  overrides.ytm_detail = (args) => {
+    const { browseId } = args as { browseId: string };
+    return browseId === "MPREb_A" ? slowA.promise : Promise.resolve(album("MPREb_B", "Second Album"));
+  };
+  const { container } = await act(async () => render(<App />));
+  const route = () => container.querySelector("main")?.getAttribute("data-route");
+  const input = container.querySelector<HTMLInputElement>(".search-form input")!;
+  const paste = async (text: string) =>
+    act(async () => {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.submit(input.closest("form")!);
+    });
+  await paste("https://music.youtube.com/browse/MPREb_A");
+  expect(route()).toBe("/album/MPREb_A");
+  await paste("https://music.youtube.com/browse/MPREb_B");
+  expect(route()).toBe("/album/MPREb_B");
+  expect(screen.getAllByText("Second Album").length).toBeGreaterThan(0);
+  await act(async () => slowA.resolve(album("MPREb_A", "First Album")));
+  expect(route()).toBe("/album/MPREb_B");
+  expect(screen.queryByText("First Album")).toBeNull();
+  expect(screen.getAllByText("Second Album").length).toBeGreaterThan(0);
+});
+
+it("drops search results that arrive after a newer search (U4-009)", async () => {
+  const { default: App } = await import("./App");
+  const slow = deferred<unknown>();
+  const song = (id: string, title: string) => ({ id, kind: "song", title, subtitle: "", artists: [], videoId: id });
+  overrides.ytm_search = (args) =>
+    (args as { query: string }).query === "first"
+      ? slow.promise
+      : Promise.resolve({ items: [song("vid_second", "Second result")], continuation: null });
+  const { container } = await act(async () => render(<App />));
+  const input = container.querySelector<HTMLInputElement>(".search-form input")!;
+  const searchFor = async (text: string) =>
+    act(async () => {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.submit(input.closest("form")!);
+    });
+  await searchFor("first");
+  await searchFor("second");
+  expect(screen.getAllByText("Second result").length).toBeGreaterThan(0);
+  await act(async () => slow.resolve({ items: [song("vid_first", "First result")], continuation: null }));
+  expect(container.querySelector("main")?.getAttribute("data-route")).toBe("/search?q=second");
+  expect(screen.queryByText("First result")).toBeNull();
+  expect(screen.getAllByText("Second result").length).toBeGreaterThan(0);
+});
+
+it("shows search results as they were left when going back (U4-010)", async () => {
+  const { default: App } = await import("./App");
+  overrides.ytm_search = async () => ({
+    items: [{ id: "vid_lofi", kind: "song", title: "Lofi result", subtitle: "", artists: [], videoId: "vid_lofi" }],
+    continuation: null,
+  });
+  const { container } = await act(async () => render(<App />));
+  const route = () => container.querySelector("main")?.getAttribute("data-route");
+  const input = container.querySelector<HTMLInputElement>(".search-form input")!;
+  await act(async () => {
+    fireEvent.change(input, { target: { value: "lofi" } });
+    fireEvent.submit(input.closest("form")!);
+  });
+  expect(route()).toBe("/search?q=lofi");
+  await act(async () => void fireEvent.click(screen.getByRole("button", { name: /Library/ })));
+  invoke.mockClear();
+  await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Back" })));
+  expect(route()).toBe("/search?q=lofi");
+  expect(screen.getAllByText("Lofi result").length).toBeGreaterThan(0);
+  expect(invoke).not.toHaveBeenCalledWith("ytm_search", expect.anything());
 });

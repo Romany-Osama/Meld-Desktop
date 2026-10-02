@@ -9,25 +9,18 @@ import { restoreQueue, restoreSession } from "./lib/persistentPlayback";
 import { errorMessage, noticeSummary, shuffled } from "./lib/util";
 import { mediaSrc } from "./lib/media";
 import {
-  DetailPage,
-  HomePage,
   LibraryItemState,
   LibrarySongFilter,
   LibrarySort,
-  LoadState,
   NavKey,
   PersistentPlayback,
   PlayerPayload,
   PlaylistContinuationPage,
-  PlaylistPage,
   PlaylistSort,
   QueuePage,
-  RemoteHistoryPage,
-  SearchPage,
   SettingEntry,
   SpotifyTrackItem,
   SpotifyTrackMatch,
-  StatsPayload,
   YtItem,
 } from "./types";
 import { navigation } from "./app/navigation";
@@ -77,6 +70,14 @@ import {
 import { Layer, LayerState, topmostLayer } from "./app/layers";
 import { LAST_ROUTE_KEY, parseLastRoute, serializeLastRoute } from "./app/lastRoute";
 import { parseLink } from "./app/links";
+import { useResourceCache } from "./data/useResource";
+import type { DetailRef, PodcastFilter, TopPeriod } from "./data/keys";
+import { useHomeData } from "./features/home/useHomeData";
+import { useSearchData } from "./features/search/useSearchData";
+import { useLibraryData } from "./features/library/useLibraryData";
+import { useHistoryData } from "./features/history/useHistoryData";
+import { useDetailData } from "./features/detail/useDetailData";
+import { playlistIdOf, usePlaylistData } from "./features/playlist/usePlaylistData";
 
 function App() {
   const { notice, setNotice } = useNotice();
@@ -127,33 +128,15 @@ function App() {
   const pageScrollRef = useRef<HTMLDivElement>(null);
   // Scroll offset to restore once the page shown by back/forward has rendered (U4-004).
   const pendingScrollRef = useRef<number | null>(null);
-  const [home, setHome] = useState<LoadState<HomePage>>({ status: "loading", data: { sections: [] } });
-  const [homeMoreLoading, setHomeMoreLoading] = useState(false);
-  const [speedDial, setSpeedDial] = useState<YtItem[]>([]);
+  // Server state lives in the resource cache and the feature data hooks (U4-008); App keeps view state.
+  const cache = useResourceCache();
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
-  const [search, setSearch] = useState<LoadState<SearchPage>>({
-    status: "idle",
-    data: { items: [], continuation: null },
-  });
-  const [searchMoreLoading, setSearchMoreLoading] = useState(false);
-  const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [searchFocused, setSearchFocused] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement>(null);
-  const [library, setLibrary] = useState<LoadState<YtItem[]>>({ status: "idle", data: [] });
-  const [libraryMixSongs, setLibraryMixSongs] = useState<YtItem[]>([]);
-  const [history, setHistory] = useState<LoadState<YtItem[]>>({ status: "idle", data: [] });
   const [historySource, setHistorySource] = useState<HistorySource>("local");
   const [historyQuery, setHistoryQuery] = useState("");
   const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>("all");
-  const [stats, setStats] = useState<LoadState<StatsPayload>>({
-    status: "idle",
-    data: { period: "all", totalPlays: 0, totalMinutes: 0, uniqueSongs: 0, rows: [], artists: [], albums: [] },
-  });
-  const [remoteHistory, setRemoteHistory] = useState<LoadState<RemoteHistoryPage>>({
-    status: "idle",
-    data: { sections: [] },
-  });
   const [librarySyncing, setLibrarySyncing] = useState(false);
   const [libraryMode, setLibraryMode] = useState<LibraryMode>("mix");
   const [librarySongFilter, setLibrarySongFilter] = useState<LibrarySongFilter>("liked");
@@ -197,10 +180,25 @@ function App() {
     visiblePlaylistPicker,
     localPlaylists,
   } = usePlaylists({ sessionStatus, setNotice, setSelectedItems, setSelectionMode, settings });
-  const [topPeriod, setTopPeriod] = useState<"all" | "day" | "week" | "month" | "year">("all");
+  const [topPeriod, setTopPeriod] = useState<TopPeriod>("all");
   const topSize = 50;
-  const [podcastFilter, setPodcastFilter] = useState<"episodes" | "channels" | "downloaded">("episodes");
+  const [podcastFilter, setPodcastFilter] = useState<PodcastFilter>("episodes");
   const [podcastRefreshing, setPodcastRefreshing] = useState(false);
+  const { home, homeMoreLoading, loadHome, loadHomeMore, speedDial, loadSpeedDial } = useHomeData({ cache, setNotice });
+  const { search, searchMoreLoading, loadSearch, clearSearch, loadSearchMore, searchHistory, loadSearchHistory } =
+    useSearchData({ cache, setNotice, submittedQuery });
+  const { library, libraryMixSongs, loadLibrary, loadPodcastItems, markLibraryLoading } = useLibraryData({
+    cache,
+    libraryMode,
+    podcastFilter,
+    topPeriod,
+    topSize,
+  });
+  const { history, remoteHistory, stats, loadHistory, loadRemoteHistory, loadStats } = useHistoryData({
+    cache,
+    googleSignedIn: sessionStatus.authenticated,
+    statsPeriod,
+  });
   const {
     artistPickerItem,
     setArtistPickerItem,
@@ -232,11 +230,24 @@ function App() {
     setPlayerItemState,
     confirmYoutubeVersion,
   } = useItemMenu({ setNotice });
-  const [playlist, setPlaylist] = useState<LoadState<PlaylistPage> | null>(null);
-  const [detail, setDetail] = useState<LoadState<DetailPage> | null>(null);
-  const [detailMoreLoading, setDetailMoreLoading] = useState(false);
-  const [detailRefreshing, setDetailRefreshing] = useState(false);
-  const [detailArtistSubscribed, setDetailArtistSubscribed] = useState(false);
+  // Which detail page and playlist are open is view state; their data comes from the cache (U4-008).
+  const [detailRef, setDetailRef] = useState<DetailRef | null>(null);
+  const [openPlaylist, setOpenPlaylist] = useState<YtItem | null>(null);
+  const {
+    detail,
+    loadDetail,
+    loadDetailMore,
+    detailMoreLoading,
+    refreshPodcastDetail,
+    detailRefreshing,
+    detailArtistSubscribed,
+    setDetailArtistSubscribed,
+  } = useDetailData({ cache, detailRef, setNotice });
+  const { playlist, loadPlaylist, reloadPlaylist, loadPlaylistMore } = usePlaylistData({
+    cache,
+    openPlaylist,
+    setNotice,
+  });
   const [recapOpen, setRecapOpen] = useState(false);
   const {
     lyricsProviderOrder,
@@ -384,8 +395,8 @@ function App() {
     setLyrics(null);
     setQueueOpen(false);
     setPlayerExpanded(false);
-    setDetail(null);
-    setPlaylist(null);
+    setDetailRef(null);
+    setOpenPlaylist(null);
     setInfoItem(null);
   };
 
@@ -490,9 +501,9 @@ function App() {
       case "expandedPlayer":
         return setPlayerExpanded(false);
       case "playlist":
-        return setPlaylist(null);
+        return setOpenPlaylist(null);
       case "detail":
-        return setDetail(null);
+        return setDetailRef(null);
       case "spotifyPlaylist":
         return setSpotifyOpenPlaylist(null);
       case "spotifyLiked":
@@ -513,100 +524,6 @@ function App() {
   };
 
   const hasTransientLayer = topmostLayer(layerState) !== null;
-
-  const loadHomeMore = async () => {
-    if (home.status !== "ready" || !home.data.continuation || homeMoreLoading) return;
-    setHomeMoreLoading(true);
-    try {
-      const next = await invoke<HomePage>("ytm_home_continuation", { continuation: home.data.continuation });
-      setHome((current) => {
-        if (current.status !== "ready") return current;
-        const sections = [...current.data.sections];
-        for (const nextSection of next.sections) {
-          const existing = sections.find((section) => section.title === nextSection.title);
-          if (!existing) {
-            sections.push(nextSection);
-            continue;
-          }
-          for (const item of nextSection.items)
-            if (!existing.items.some((value) => value.id === item.id)) existing.items.push(item);
-          existing.browseId ??= nextSection.browseId;
-          existing.browseKind ??= nextSection.browseKind;
-          existing.params ??= nextSection.params;
-        }
-        return { status: "ready", data: { sections, continuation: next.continuation } };
-      });
-    } catch (error) {
-      setNotice(`Home continuation failed: ${errorMessage(error)}`);
-    } finally {
-      setHomeMoreLoading(false);
-    }
-  };
-
-  const loadHistory = async () => {
-    setHistory((current) => ({ ...current, status: "loading", error: undefined }));
-    try {
-      setHistory({ status: "ready", data: await invoke<YtItem[]>("history_items") });
-    } catch (error) {
-      setHistory({ status: "error", data: [], error: errorMessage(error) });
-    }
-  };
-
-  const loadStats = async (period = statsPeriod) => {
-    setStats((current) => ({ ...current, status: "loading", error: undefined }));
-    try {
-      setStats({ status: "ready", data: await invoke<StatsPayload>("library_stats", { period }) });
-    } catch (error) {
-      setStats({
-        status: "error",
-        data: { period, totalPlays: 0, totalMinutes: 0, uniqueSongs: 0, rows: [], artists: [], albums: [] },
-        error: errorMessage(error),
-      });
-    }
-  };
-
-  const loadRemoteHistory = async () => {
-    if (!sessionStatus.authenticated) {
-      setRemoteHistory({
-        status: "error",
-        data: { sections: [] },
-        error: "Connect a Google / YouTube Music account to view remote history.",
-      });
-      return;
-    }
-    setRemoteHistory((current) => ({ ...current, status: "loading", error: undefined }));
-    try {
-      setRemoteHistory({ status: "ready", data: await invoke<RemoteHistoryPage>("ytm_history") });
-    } catch (error) {
-      setRemoteHistory({ status: "error", data: { sections: [] }, error: errorMessage(error) });
-    }
-  };
-
-  const loadSpeedDial = async () => {
-    try {
-      setSpeedDial(await invoke<YtItem[]>("speed_dial_items"));
-    } catch (error) {
-      setNotice(`Speed Dial unavailable: ${errorMessage(error)}`);
-    }
-  };
-
-  const loadSearchHistory = async () => {
-    try {
-      setSearchHistory(await invoke<string[]>("search_history_items"));
-    } catch {
-      setSearchHistory([]);
-    }
-  };
-
-  const loadHome = async () => {
-    setHome((state) => ({ ...state, status: "loading", error: undefined }));
-    try {
-      const data = await invoke<HomePage>("ytm_home");
-      setHome({ status: "ready", data });
-    } catch (error) {
-      setHome({ status: "error", data: { sections: [] }, error: errorMessage(error) });
-    }
-  };
 
   const loadStartupContent = useEffectEvent(() => {
     void loadHome();
@@ -796,54 +713,6 @@ function App() {
     if (await removeDownloads(selectedItems)) closeSelection();
   };
 
-  const loadLibrary = async (
-    mode:
-      "mix" | "local" | "songs" | "liked" | "uploaded" | "downloads" | "cache" | "top" | "albums" | "artists" = "mix",
-  ) => {
-    setLibrary((state) => ({ ...state, status: "loading", error: undefined }));
-    try {
-      let data: YtItem[];
-      if (mode === "mix") {
-        const [playlists, songs, albums, artists] = await Promise.all([
-          invoke<(YtItem & { songCount?: number; savedAt?: number })[]>("library_playlists"),
-          invoke<YtItem[]>("library_mix_songs"),
-          invoke<YtItem[]>("library_albums"),
-          invoke<YtItem[]>("library_artists"),
-        ]);
-        setLibraryMixSongs(songs);
-        data = [...playlists, ...albums, ...artists].filter(
-          (item, index, values) => values.findIndex((value) => value.id === item.id) === index,
-        );
-      } else {
-        setLibraryMixSongs([]);
-        const command =
-          mode === "local"
-            ? "library_local_files"
-            : mode === "songs"
-              ? "library_songs"
-              : mode === "liked"
-                ? "library_liked_songs"
-                : mode === "uploaded"
-                  ? "library_uploaded_songs"
-                  : mode === "downloads"
-                    ? "library_downloads"
-                    : mode === "cache"
-                      ? "library_player_cache"
-                      : mode === "albums"
-                        ? "library_albums"
-                        : mode === "artists"
-                          ? "library_artists"
-                          : null;
-        data = command
-          ? await invoke<YtItem[]>(command)
-          : await invoke<YtItem[]>("library_top_songs", { period: topPeriod, limit: topSize });
-      }
-      setLibrary({ status: "ready", data });
-    } catch (error) {
-      setLibrary({ status: "error", data: [], error: errorMessage(error) });
-    }
-  };
-
   const importLocalFiles = async () => {
     try {
       const imported = await invoke<YtItem[]>("local_files_pick");
@@ -891,25 +760,6 @@ function App() {
     }
   };
 
-  const loadPodcastItems = async (filter: "episodes" | "channels" | "downloaded") => {
-    if (filter === "downloaded") {
-      setLibrary((state) => ({ ...state, status: "loading", error: undefined }));
-      try {
-        setLibrary({ status: "ready", data: await invoke<YtItem[]>("library_downloaded_podcasts") });
-      } catch (error) {
-        setLibrary({ status: "error", data: [], error: errorMessage(error) });
-      }
-      return;
-    }
-    setLibrary((state) => ({ ...state, status: "loading", error: undefined }));
-    try {
-      const command = filter === "episodes" ? "library_saved_podcasts" : "ytm_podcast_channels";
-      setLibrary({ status: "ready", data: await invoke<YtItem[]>(command) });
-    } catch (error) {
-      setLibrary({ status: "error", data: [], error: errorMessage(error) });
-    }
-  };
-
   const syncLibraryMode = async (mode: "local" | "songs" | "liked" | "uploaded" | "downloads") => {
     if (mode === "local" || mode === "downloads" || !sessionStatus.authenticated || settings.ytmSync !== true) {
       await loadLibrary(mode);
@@ -922,7 +772,7 @@ function App() {
       return;
     }
     setLibrarySyncing(true);
-    setLibrary((state) => ({ ...state, status: "loading", error: undefined }));
+    markLibraryLoading(mode);
     try {
       const syncMode = mode === "songs" ? "library" : mode;
       const result = await invoke<{ likedSongs: number; librarySongs: number; uploadedSongs: number }>(
@@ -948,20 +798,13 @@ function App() {
     return loadLibrary(libraryMode);
   };
 
-  const openLocalPlaylist = async (item: YtItem) => {
-    try {
-      setDetail(null);
-      if (item.id.startsWith("LOCAL_")) {
-        const songs = await invoke<YtItem[]>("library_playlist_songs", { playlistId: item.id });
-        setPlaylist({ status: "ready", data: { playlist: item, songs } });
-      } else {
-        setPlaylist({ status: "loading", data: { playlist: item, songs: [] } });
-        const data = await invoke<PlaylistPage>("ytm_playlist", { playlistId: item.id });
-        setPlaylist({ status: "ready", data });
-      }
-    } catch (error) {
-      setPlaylist(null);
-      setNotice(`Playlist could not be opened: ${errorMessage(error)}`);
+  const openLocalPlaylist = async (item: YtItem, { reuse = false }: { reuse?: boolean } = {}) => {
+    setDetailRef(null);
+    setOpenPlaylist(item);
+    const outcome = await loadPlaylist(item, { reuse });
+    if (outcome.status === "error") {
+      setOpenPlaylist((current) => (current && playlistIdOf(current) === playlistIdOf(item) ? null : current));
+      setNotice(`Playlist could not be opened: ${outcome.error}`);
     }
   };
 
@@ -1052,7 +895,7 @@ function App() {
         .catch(() => undefined);
     const link = parseLink(value);
     if (link) {
-      setSearch({ status: "idle", data: { items: [], continuation: null } });
+      clearSearch(value);
       if (!typed) return;
       if (link.kind === "video") {
         await openItem({
@@ -1070,31 +913,8 @@ function App() {
       }
       return;
     }
-    setSearch({ status: "loading", data: { items: [], continuation: null } });
-    try {
-      const data = await invoke<SearchPage>("ytm_search", { query: value });
-      setSearch({ status: "ready", data });
-    } catch (error) {
-      setSearch({ status: "error", data: { items: [], continuation: null }, error: errorMessage(error) });
-    }
-  };
-
-  const loadSearchMore = async () => {
-    if (search.status !== "ready" || !search.data.continuation || searchMoreLoading) return;
-    setSearchMoreLoading(true);
-    try {
-      const next = await invoke<SearchPage>("ytm_search_continuation", { continuation: search.data.continuation });
-      setSearch((current) => {
-        if (current.status !== "ready") return current;
-        const items = [...current.data.items];
-        for (const item of next.items) if (!items.some((existing) => existing.id === item.id)) items.push(item);
-        return { status: "ready", data: { items, continuation: next.continuation } };
-      });
-    } catch (error) {
-      setNotice(`Search continuation failed: ${errorMessage(error)}`);
-    } finally {
-      setSearchMoreLoading(false);
-    }
+    // Back/forward to a search shows the results as they were left (U4-010); a typed search fetches them again.
+    await loadSearch(value, { reuse: !typed });
   };
 
   const shareItem = async (item: YtItem) => {
@@ -1482,13 +1302,11 @@ function App() {
       try {
         if (playlistId.startsWith("LOCAL_")) {
           await invoke("library_remove_from_playlist", { playlistId, songId: item.id });
-          const songs = await invoke<YtItem[]>("library_playlist_songs", { playlistId });
-          setPlaylist((current) => (current ? { status: "ready", data: { ...current.data, songs } } : current));
+          await reloadPlaylist();
           setNotice(`Removed “${item.title}” from the local playlist.`);
         } else if (item.videoId && item.setVideoId) {
           await invoke("ytm_remove_from_playlist", { playlistId, videoId: item.videoId, setVideoId: item.setVideoId });
-          const data = await invoke<PlaylistPage>("ytm_playlist", { playlistId });
-          setPlaylist({ status: "ready", data });
+          await reloadPlaylist();
           setNotice(`Removed “${item.title}” from the YouTube Music playlist.`);
         } else {
           setNotice("This playlist item has no source setVideoId required for removal.");
@@ -2101,60 +1919,13 @@ function App() {
     }).catch(() => undefined);
   }, [player, queueContinuation, queueIndex, queueItems.length]);
 
-  const loadDetailMore = async () => {
-    if (!detail || detail.status !== "ready" || !detail.data.continuation || detailMoreLoading) return;
-    setDetailMoreLoading(true);
-    try {
-      const next =
-        detail.data.kind === "browse"
-          ? await invoke<DetailPage>("ytm_browse_continuation", {
-              browseId: detail.data.browseId ?? "",
-              continuation: detail.data.continuation,
-            })
-          : await invoke<DetailPage>("ytm_detail_continuation", {
-              kind: detail.data.kind,
-              continuation: detail.data.continuation,
-            });
-      if (detail.data.kind === "podcast" && detail.data.browseId) {
-        await invoke("ytm_podcast_cache_detail_page", { browseId: detail.data.browseId, page: next });
-      }
-      setDetail((current) => {
-        if (!current || current.status !== "ready") return current;
-        const items = [...current.data.items];
-        for (const item of next.items) if (!items.some((existing) => existing.id === item.id)) items.push(item);
-        return { status: "ready", data: { ...current.data, items, continuation: next.continuation } };
-      });
-    } catch (error) {
-      setNotice(`More ${detail.data.kind} items could not be loaded: ${errorMessage(error)}`);
-    } finally {
-      setDetailMoreLoading(false);
-    }
-  };
-
-  const loadPlaylistMore = async () => {
-    const continuation = playlist?.data.continuation;
-    if (!continuation || playlist?.status !== "ready") return;
-    try {
-      const next = await invoke<{ songs: YtItem[]; continuation?: string | null }>("ytm_playlist_continuation", {
-        continuation,
-      });
-      setPlaylist({
-        status: "ready",
-        data: {
-          ...playlist.data,
-          songs: [
-            ...playlist.data.songs,
-            ...next.songs.filter((song) => !playlist.data.songs.some((existing) => existing.id === song.id)),
-          ],
-          continuation: next.continuation,
-        },
-      });
-    } catch (error) {
-      setNotice(`Playlist continuation failed: ${errorMessage(error)}`);
-    }
-  };
-
-  const openItem = async (item: YtItem, sourceQueue: YtItem[] = [item], sourceIndex = 0) => {
+  /** Opens or plays `item`. With `reuse` (Back/forward), a page fetched a few minutes ago is shown as it was (U4-010). */
+  const openItem = async (
+    item: YtItem,
+    sourceQueue: YtItem[] = [item],
+    sourceIndex = 0,
+    { reuse = false }: { reuse?: boolean } = {},
+  ) => {
     setNotice("");
     const libraryQueueModes = ["mix", "songs", "liked", "uploaded", "downloads", "cache", "local", "top"];
     const playableLibraryItems = filteredLibraryData.filter((value) => value.videoId || value.localPath);
@@ -2169,82 +1940,32 @@ function App() {
       await playItem(item, libraryQueue, libraryIndex >= 0 ? libraryIndex : sourceIndex, null, false);
       return;
     }
-    if (item.kind === "browse" && (item.browseId || item.id)) {
-      setPlaylist(null);
-      setDetail({
-        status: "loading",
-        data: {
-          kind: "browse",
-          title: item.title,
-          subtitle: item.subtitle,
-          thumbnail: item.thumbnail,
-          items: [],
-          browseId: item.browseId ?? item.id,
-        },
-      });
-      try {
-        const data = await invoke<DetailPage>("ytm_browse", {
-          browseId: item.browseId ?? item.id,
-          params: item.params ?? null,
-        });
-        setDetail({ status: "ready", data: { ...data, browseId: data.browseId ?? item.browseId ?? item.id } });
-      } catch (error) {
-        setDetail({
-          status: "error",
-          data: {
-            kind: "browse",
-            title: item.title,
-            subtitle: item.subtitle,
-            thumbnail: item.thumbnail,
-            items: [],
-            browseId: item.browseId ?? item.id,
-          },
-          error: errorMessage(error),
-        });
-      }
-      return;
-    }
-    if (["album", "artist", "podcast"].includes(item.kind) && (item.browseId || item.id)) {
-      setPlaylist(null);
-      setDetail({
-        status: "loading",
-        data: {
+    if (["album", "artist", "podcast", "browse"].includes(item.kind) && (item.browseId || item.id)) {
+      const ref: DetailRef = {
+        kind: item.kind as DetailRef["kind"],
+        browseId: item.browseId ?? item.id,
+        params: item.kind === "browse" ? (item.params ?? null) : undefined,
+      };
+      setOpenPlaylist(null);
+      setDetailRef(ref);
+      await loadDetail(
+        ref,
+        {
           kind: item.kind,
           title: item.title,
           subtitle: item.subtitle,
           thumbnail: item.thumbnail,
           items: [],
-          browseId: item.browseId ?? null,
+          browseId: ref.browseId,
         },
-      });
-      try {
-        const data = await invoke<DetailPage>("ytm_detail", { kind: item.kind, browseId: item.browseId ?? item.id });
-        setDetail({ status: "ready", data: { ...data, browseId: data.browseId ?? item.browseId ?? null } });
-      } catch (error) {
-        setDetail({
-          status: "error",
-          data: {
-            kind: item.kind,
-            title: item.title,
-            subtitle: item.subtitle,
-            thumbnail: item.thumbnail,
-            items: [],
-            browseId: item.browseId ?? null,
-          },
-          error: errorMessage(error),
-        });
-      }
+        { reuse },
+      );
       return;
     }
     if (item.kind === "playlist" && (item.browseId || item.id)) {
-      setDetail(null);
-      setPlaylist({ status: "loading", data: { playlist: item, songs: [] } });
-      try {
-        const data = await invoke<PlaylistPage>("ytm_playlist", { playlistId: item.browseId ?? item.id });
-        setPlaylist({ status: "ready", data });
-      } catch (error) {
-        setPlaylist({ status: "error", data: { playlist: item, songs: [] }, error: errorMessage(error) });
-      }
+      setDetailRef(null);
+      setOpenPlaylist(item);
+      await loadPlaylist(item, { reuse });
       return;
     }
     if ((item.kind === "song" || item.kind === "episode") && item.videoId) {
@@ -2294,20 +2015,26 @@ function App() {
       case "artist":
       case "podcast":
       case "browse":
-        await openItem({
-          id: route.browseId,
-          kind: route.name,
-          title: "",
-          subtitle: "",
-          artists: [],
-          browseId: route.browseId,
-          params: route.name === "browse" ? route.params : undefined,
-        });
+        await openItem(
+          {
+            id: route.browseId,
+            kind: route.name,
+            title: "",
+            subtitle: "",
+            artists: [],
+            browseId: route.browseId,
+            params: route.name === "browse" ? route.params : undefined,
+          },
+          undefined,
+          undefined,
+          { reuse: true },
+        );
         return;
       case "playlist": {
         const known = localPlaylists.find((item) => item.id === route.playlistId);
         await openLocalPlaylist(
           known ?? { id: route.playlistId, kind: "playlist", title: "Playlist", subtitle: "", artists: [] },
+          { reuse: true },
         );
         return;
       }
@@ -2336,27 +2063,6 @@ function App() {
     if (!sameRoute(route, pageRoute)) pushHistory();
     await showRoute(route, active);
     return true;
-  };
-
-  const refreshPodcastDetail = async () => {
-    if (
-      !detail ||
-      detail.status !== "ready" ||
-      detail.data.kind !== "podcast" ||
-      !detail.data.browseId ||
-      detailRefreshing
-    )
-      return;
-    setDetailRefreshing(true);
-    try {
-      const data = await invoke<DetailPage>("ytm_detail", { kind: "podcast", browseId: detail.data.browseId });
-      setDetail({ status: "ready", data: { ...data, browseId: data.browseId ?? detail.data.browseId } });
-      setNotice("Podcast details refreshed.");
-    } catch (error) {
-      setNotice(`Podcast refresh failed: ${errorMessage(error)}`);
-    } finally {
-      setDetailRefreshing(false);
-    }
   };
 
   const toggleDetailArtistSubscription = async () => {
@@ -2388,25 +2094,6 @@ function App() {
     const index = queue.findIndex((value) => value.id === item.id);
     await openItem(item, queue.length > 0 ? queue : [item], index >= 0 ? index : 0);
   };
-  useEffect(() => {
-    let activeRequest = true;
-    if (!detail || detail.status !== "ready" || detail.data.kind !== "artist" || !detail.data.browseId) {
-      setDetailArtistSubscribed(false);
-      return () => {
-        activeRequest = false;
-      };
-    }
-    void invoke<boolean>("library_artist_state", { artistId: detail.data.browseId })
-      .then((value) => {
-        if (activeRequest) setDetailArtistSubscribed(value);
-      })
-      .catch(() => {
-        if (activeRequest) setDetailArtistSubscribed(false);
-      });
-    return () => {
-      activeRequest = false;
-    };
-  }, [detail?.status, detail?.data.kind, detail?.data.browseId]);
 
   const { activeLyricIndex } = useLyricsFollow({
     activeLyricRef,
@@ -2476,8 +2163,8 @@ function App() {
     historySource,
     statsPeriod,
     settingsPage: null,
-    detail: detail ? { kind: detail.data.kind, browseId: detail.data.browseId } : null,
-    playlistId: playlist ? (playlist.data.playlist.browseId ?? playlist.data.playlist.id) : null,
+    detail: detailRef,
+    playlistId: openPlaylist ? playlistIdOf(openPlaylist) : null,
     spotifyPlaylistId: spotifyOpenPlaylist?.id ?? null,
     spotifyLikedOpen,
   });
@@ -2641,8 +2328,8 @@ function App() {
                 setLyrics(null);
                 setQueueOpen(false);
                 setPlayerExpanded(false);
-                setDetail(null);
-                setPlaylist(null);
+                setDetailRef(null);
+                setOpenPlaylist(null);
                 setInfoItem(null);
               }}
               title="Settings"
@@ -3692,7 +3379,7 @@ function App() {
         openDetailItem={openDetailItem}
         openMenu={openMenu}
         refreshPodcastDetail={refreshPodcastDetail}
-        setDetail={setDetail}
+        closeDetail={() => setDetailRef(null)}
         settings={settings}
         toggleDetailArtistSubscription={toggleDetailArtistSubscription}
       />
@@ -3704,7 +3391,7 @@ function App() {
         playlist={playlist}
         selectedItems={selectedItems}
         selectionMode={selectionMode}
-        setPlaylist={setPlaylist}
+        closePlaylist={() => setOpenPlaylist(null)}
         settings={settings}
         toggleSelectedItem={toggleSelectedItem}
       />

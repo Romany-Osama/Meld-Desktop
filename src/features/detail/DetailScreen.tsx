@@ -1,4 +1,3 @@
-import { Dispatch, SetStateAction } from "react";
 import { InlineLikeButton } from "../../components/InlineLikeButton";
 import { AudioQuality } from "../../lib/audioQuality";
 import { mediaSrc } from "../../lib/media";
@@ -14,7 +13,7 @@ export type DetailScreenProps = {
   openDetailItem: (item: YtItem) => Promise<void>;
   openMenu: (item: YtItem) => Promise<void>;
   refreshPodcastDetail: () => Promise<void>;
-  setDetail: Dispatch<SetStateAction<LoadState<DetailPage> | null>>;
+  closeDetail: () => void;
   settings: Record<string, boolean>;
   toggleDetailArtistSubscription: () => Promise<void>;
 };
@@ -29,7 +28,7 @@ export function DetailScreen({
   openDetailItem,
   openMenu,
   refreshPodcastDetail,
-  setDetail,
+  closeDetail,
   settings,
   toggleDetailArtistSubscription,
 }: DetailScreenProps) {
@@ -38,7 +37,7 @@ export function DetailScreen({
       {detail && (
         <div className="detail-overlay" role="dialog" aria-modal="true">
           <div className="detail-panel">
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setDetail(null)}>
+            <button className="close-button" title="Close" aria-label="Close" onClick={closeDetail}>
               ×
             </button>
             {detail.status === "loading" && (

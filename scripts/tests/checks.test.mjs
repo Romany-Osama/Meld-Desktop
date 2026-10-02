@@ -16,7 +16,14 @@ import {
   RESTORED_UI_COMMANDS,
 } from "../lib/ui-invariants.mjs";
 import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
-import { checkFeatureModules, checkScreenSplit, FEATURE_MODULES, ROUTE_SCREENS } from "../lib/ui-structure.mjs";
+import {
+  checkFeatureModules,
+  checkScreenSplit,
+  checkServerState,
+  FEATURE_MODULES,
+  ROUTE_SCREENS,
+  SERVER_STATE_HOOKS,
+} from "../lib/ui-structure.mjs";
 
 const goodRepo = () => ({
   packageJson: { version: "0.2.0" },
@@ -242,4 +249,21 @@ test("ui: feature state lives in feature hooks that App.tsx composes (U4-002)", 
       ? read(path).replace("function App() {", "function App() {\n  const [queueItems, setQueueItems] = useState([]);")
       : read(path);
   assert.deepEqual(checkFeatureModules(redeclared), ["App.tsx declares queueItems, which useQueue owns"]);
+});
+
+test("ui: server state lives in data hooks, not in App.tsx (U4-008)", () => {
+  const read = (path) => (existsSync(path) ? readFileSync(path, "utf8") : null);
+  assert.deepEqual(checkServerState(read), []);
+  const missing = (path) => (path === SERVER_STATE_HOOKS.detail.path ? null : read(path));
+  assert.deepEqual(checkServerState(missing), [`detail: ${SERVER_STATE_HOOKS.detail.path} is missing`]);
+  const fetching = (path) =>
+    path === "src/App.tsx"
+      ? read(path).replace("function App() {", 'function App() {\n  void invoke<HomePage>("ytm_home");')
+      : read(path);
+  assert.deepEqual(checkServerState(fetching), ["App.tsx fetches ytm_home; server state belongs in a data hook"]);
+  const stateful = (path) =>
+    path === "src/App.tsx"
+      ? read(path).replace("function App() {", "function App() {\n  const [detail, setDetail] = useState(null);")
+      : read(path);
+  assert.deepEqual(checkServerState(stateful), ["App.tsx keeps detail in useState; it is server state"]);
 });
