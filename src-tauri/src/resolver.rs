@@ -15,6 +15,13 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub const FAILED_CLIENT_TTL: Duration = Duration::from_secs(5 * 60);
+/// How long a client whose streams were refused by the media server goes to the back of the order.
+pub const DEMOTED_CLIENT_TTL: Duration = Duration::from_secs(30 * 60);
+/// googlevideo serves the first ~1 MB of a stream even when the URL is not really usable (for example
+/// ANDROID_VR 1.65 URLs without a PO token from some networks) and answers 403 past it, so the
+/// access probe reads a small range beyond this offset.
+pub const STREAM_PROBE_MIN_OFFSET: u64 = 1_048_576;
+pub const STREAM_PROBE_LEN: u64 = 1024;
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -212,6 +219,7 @@ pub enum Category {
     Unplayable,
     NoAudio,
     CipherUnsolved,
+    StreamForbidden,
     Network,
 }
 
@@ -227,6 +235,7 @@ impl Category {
             Category::Unplayable => "not playable by this client",
             Category::NoAudio => "no usable audio format",
             Category::CipherUnsolved => "stream signature could not be solved",
+            Category::StreamForbidden => "YouTube's media server refused the stream (403)",
             Category::Network => "network error",
         }
     }
@@ -329,6 +338,7 @@ pub struct AudioCandidate {
     pub url: FormatUrl,
     pub mime: String,
     pub bitrate: i64,
+    pub content_length: Option<u64>,
 }
 
 /// Audio-only, original-language formats, best first (or lowest first for LOW quality).
@@ -391,6 +401,10 @@ pub fn audio_candidates(response: &Value, prefer_low: bool) -> Vec<AudioCandidat
                 url,
                 mime: mime.to_owned(),
                 bitrate: format.get("bitrate").and_then(Value::as_i64).unwrap_or(0),
+                content_length: format
+                    .get("contentLength")
+                    .and_then(Value::as_str)
+                    .and_then(|v| v.parse::<u64>().ok()),
             })
         })
         .collect();
@@ -499,6 +513,65 @@ pub fn generate_cpn(random: &[u8; 16]) -> String {
         .iter()
         .map(|byte| CPN_ALPHABET[(*byte & 63) as usize] as char)
         .collect()
+}
+
+/// Byte range (inclusive) the resolver reads to prove a stream URL serves the whole file, or `None` when
+/// the file is small enough that the first request already covers it.
+pub fn stream_probe_range(content_length: Option<u64>) -> Option<(u64, u64)> {
+    let length = content_length?;
+    if length <= STREAM_PROBE_MIN_OFFSET + STREAM_PROBE_LEN {
+        return None;
+    }
+    let start = (length / 2)
+        .max(STREAM_PROBE_MIN_OFFSET)
+        .min(length - STREAM_PROBE_LEN);
+    Some((start, start + STREAM_PROBE_LEN - 1))
+}
+
+/// Outcome of a media-server request for a resolved stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamAccess {
+    Ok,
+    /// The URL is refused; another client must be used.
+    Forbidden,
+    /// Anything else (server error, odd status): not proof the URL is bad.
+    Inconclusive,
+}
+
+pub fn stream_access(status: u16) -> StreamAccess {
+    match status {
+        200 | 206 => StreamAccess::Ok,
+        401 | 403 | 404 | 410 => StreamAccess::Forbidden,
+        _ => StreamAccess::Inconclusive,
+    }
+}
+
+/// Clients whose streams the media server recently refused for any song. Refusals usually apply to the
+/// whole client on the current network, so those clients are tried last for a while (PLAY-005).
+#[derive(Debug, Default)]
+pub struct ClientHealth {
+    demoted: HashMap<&'static str, Instant>,
+}
+
+impl ClientHealth {
+    pub fn demote(&mut self, client: &'static str, now: Instant) {
+        self.demoted.insert(client, now);
+    }
+
+    pub fn is_demoted(&self, client: &str, now: Instant) -> bool {
+        self.demoted
+            .get(client)
+            .is_some_and(|at| now.saturating_duration_since(*at) < DEMOTED_CLIENT_TTL)
+    }
+
+    /// Stable reorder: healthy clients keep their order, demoted ones move to the end.
+    pub fn reorder(&self, clients: &mut [ClientProfile], now: Instant) {
+        clients.sort_by_key(|client| self.is_demoted(client.key, now));
+    }
+
+    pub fn clear(&mut self) {
+        self.demoted.clear();
+    }
 }
 
 #[cfg(test)]
@@ -694,5 +767,66 @@ mod tests {
         ] {
             assert!(validate_stream_url(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn stream_probe_reads_past_the_first_megabyte() {
+        assert_eq!(stream_probe_range(None), None);
+        assert_eq!(stream_probe_range(Some(500_000)), None);
+        assert_eq!(
+            stream_probe_range(Some(STREAM_PROBE_MIN_OFFSET + STREAM_PROBE_LEN)),
+            None
+        );
+        // 4 MB file: probe the middle.
+        assert_eq!(
+            stream_probe_range(Some(4_001_721)),
+            Some((2_000_860, 2_001_883))
+        );
+        // 1.5 MB file: never before the 1 MiB gate, never past the end.
+        let (start, end) = stream_probe_range(Some(1_500_000)).unwrap();
+        assert!(start >= STREAM_PROBE_MIN_OFFSET && end < 1_500_000);
+        let (start, end) = stream_probe_range(Some(STREAM_PROBE_MIN_OFFSET + 1500)).unwrap();
+        assert_eq!(start, STREAM_PROBE_MIN_OFFSET);
+        assert!(end < STREAM_PROBE_MIN_OFFSET + 1500);
+        assert_eq!(end - start + 1, STREAM_PROBE_LEN);
+    }
+
+    #[test]
+    fn stream_access_classifies_media_server_status() {
+        assert_eq!(stream_access(206), StreamAccess::Ok);
+        assert_eq!(stream_access(200), StreamAccess::Ok);
+        assert_eq!(stream_access(403), StreamAccess::Forbidden);
+        assert_eq!(stream_access(410), StreamAccess::Forbidden);
+        assert_eq!(stream_access(503), StreamAccess::Inconclusive);
+        assert!(!Category::StreamForbidden.is_final());
+    }
+
+    #[test]
+    fn demoted_clients_move_to_the_back_then_recover() {
+        let now = Instant::now();
+        let mut health = ClientHealth::default();
+        health.demote("ANDROID_VR_1_65_10", now);
+        let mut clients = client_order(false, true, Hints::default(), &[]);
+        health.reorder(&mut clients, now);
+        let order: Vec<&str> = clients.iter().map(|c| c.key).collect();
+        assert_eq!(order.last(), Some(&"ANDROID_VR_1_65_10"));
+        assert_eq!(order[0], "VISIONOS_0_1");
+        assert!(order.contains(&"WEB_REMIX"));
+        let later = now + DEMOTED_CLIENT_TTL + Duration::from_secs(1);
+        let mut clients = client_order(false, true, Hints::default(), &[]);
+        health.reorder(&mut clients, later);
+        assert_eq!(clients[0].key, "ANDROID_VR_1_65_10");
+        health.clear();
+        assert!(!health.is_demoted("ANDROID_VR_1_65_10", now));
+    }
+
+    #[test]
+    fn audio_candidates_keep_content_length() {
+        let response = serde_json::json!({"streamingData": {"adaptiveFormats": [
+            {"itag": 251, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 130000,
+             "contentLength": "4001721", "url": "https://rr1---sn-x.googlevideo.com/videoplayback?id=1"}
+        ]}});
+        let candidates = audio_candidates(&response, false);
+        assert_eq!(candidates[0].content_length, Some(4_001_721));
     }
 }

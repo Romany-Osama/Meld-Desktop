@@ -238,6 +238,10 @@ const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(3600);
 /// A transfer that receives no bytes for this long is treated as stalled (TR-H5).
 const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+/// Cap for the resolver's small range probe of a freshly resolved stream URL.
+const STREAM_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+/// Media-server requests a download may make: the first plus re-resolves after a refused URL.
+const MAX_STREAM_REQUESTS: u8 = 3;
 
 fn http() -> &'static Client {
     HTTP.get_or_init(|| build_http_client(HTTP_CONNECT_TIMEOUT, HTTP_REQUEST_TIMEOUT))
@@ -1282,6 +1286,68 @@ fn resolver_memory() -> &'static Mutex<resolver::FailureMemory> {
     MEMORY.get_or_init(|| Mutex::new(resolver::FailureMemory::default()))
 }
 
+fn client_health() -> &'static Mutex<resolver::ClientHealth> {
+    static HEALTH: OnceLock<Mutex<resolver::ClientHealth>> = OnceLock::new();
+    HEALTH.get_or_init(|| Mutex::new(resolver::ClientHealth::default()))
+}
+
+/// The media server refused a stream from `client`: never use that client for this song again for a
+/// while, and try it last for every other song (its URLs are usually refused network-wide).
+fn mark_stream_refused(video_id: &str, client: Option<&str>) {
+    let Some(key) = client.and_then(|key| {
+        resolver::CLIENTS
+            .iter()
+            .find(|profile| profile.key == key)
+            .map(|profile| profile.key)
+    }) else {
+        return;
+    };
+    let now = std::time::Instant::now();
+    if let Ok(mut memory) = resolver_memory().lock() {
+        memory.mark_failed(video_id, key, now);
+    }
+    if let Ok(mut health) = client_health().lock() {
+        health.demote(key, now);
+    }
+}
+
+/// Reads a small range past the first megabyte of a resolved stream. googlevideo serves the start of
+/// some URLs and answers 403 after it, which would break playback mid-song and every download.
+async fn probe_stream_access(
+    url: &str,
+    content_length: Option<u64>,
+) -> Result<(), (resolver::Category, String)> {
+    let length = content_length.or_else(|| {
+        url::Url::parse(url).ok().and_then(|parsed| {
+            parsed
+                .query_pairs()
+                .find(|(key, _)| key == "clen")
+                .and_then(|(_, value)| value.parse::<u64>().ok())
+        })
+    });
+    let Some((start, end)) = resolver::stream_probe_range(length) else {
+        return Ok(());
+    };
+    let Ok(response) = http()
+        .get(url)
+        .header(RANGE, format!("bytes={start}-{end}"))
+        .timeout(STREAM_PROBE_TIMEOUT)
+        .send()
+        .await
+    else {
+        // A network hiccup is not proof that the URL is bad; the player's own recovery covers it.
+        return Ok(());
+    };
+    let status = response.status().as_u16();
+    match resolver::stream_access(status) {
+        resolver::StreamAccess::Forbidden => Err((
+            resolver::Category::StreamForbidden,
+            format!("HTTP {status} for bytes {start}-{end}"),
+        )),
+        _ => Ok(()),
+    }
+}
+
 fn resolver_attempts() -> &'static Mutex<HashMap<String, Vec<resolver::Attempt>>> {
     static ATTEMPTS: OnceLock<Mutex<HashMap<String, Vec<resolver::Attempt>>>> = OnceLock::new();
     ATTEMPTS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -1739,6 +1805,7 @@ async fn try_player_client(
         &cpn,
     )
     .map_err(|error| (Category::CipherUnsolved, error))?;
+    probe_stream_access(&stream_url, candidate.content_length).await?;
     let mut payload = player_metadata(&response, video_id);
     payload.stream_url = stream_url;
     payload.mime_type = candidate.mime.clone();
@@ -1770,6 +1837,9 @@ async fn resolve_player_payload(
     if clients.is_empty() {
         // Every client failed recently: start over rather than refusing to play.
         clients = resolver::client_order(session.is_some(), true, hints, &[]);
+    }
+    if let Ok(health) = client_health().lock() {
+        health.reorder(&mut clients, std::time::Instant::now());
     }
     let mut attempts = Vec::new();
     let mut js_state: Option<Result<u32, String>> = None;
@@ -1813,6 +1883,9 @@ async fn resolve_player_payload(
                 break;
             }
             Err((category, detail)) => {
+                if category == resolver::Category::StreamForbidden {
+                    mark_stream_refused(id, Some(client.key));
+                }
                 attempts.push(resolver::Attempt {
                     client: client.key,
                     category,
@@ -2115,6 +2188,31 @@ fn artwork_extension(content_type: &str) -> &'static str {
         "image/webp" => "webp",
         _ => "cover",
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum DownloadRetry {
+    Proceed,
+    /// The media server refused the URL: resolve again with another client.
+    Reresolve,
+    /// The saved partial file no longer matches the stream: start from byte 0.
+    Restart,
+}
+
+fn download_retry(status: reqwest::StatusCode, offset: i64) -> DownloadRetry {
+    if resolver::stream_access(status.as_u16()) == resolver::StreamAccess::Forbidden {
+        DownloadRetry::Reresolve
+    } else if offset > 0 && status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+        DownloadRetry::Restart
+    } else {
+        DownloadRetry::Proceed
+    }
+}
+
+/// A transfer is complete only when it delivered every byte the server announced (PLAY-044, partial:
+/// lengths the server does not announce are not validated yet).
+fn transfer_complete(bytes: i64, expected: Option<i64>) -> bool {
+    bytes > 0 && expected.is_none_or(|expected| bytes == expected)
 }
 
 fn can_resume_partial_download(existing_bytes: i64, status: reqwest::StatusCode) -> bool {
@@ -2443,25 +2541,45 @@ async fn download_start(
     }
     let state_for_lyrics = state.clone();
     let result: Result<(i64, Option<i64>, bool, Option<String>), String> = async {
-        let payload = resolve_player_payload(video_id, item.playlist_id.as_deref(), normalize_audio_quality(audio_quality.as_deref()), &state).await?;
+        let quality = normalize_audio_quality(audio_quality.as_deref());
+        let mut payload = resolve_player_payload(video_id, item.playlist_id.as_deref(), quality, &state).await?;
         {
             let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
             db.execute("UPDATE songs SET duration = ?1 WHERE id = ?2 AND duration = 0", params![payload.duration, song_id]).map_err(|error| format!("download duration state failed: {error}"))?;
         }
         // The client's default 20s timeout would abort any download that legitimately takes longer (a large
         // file on a slow connection); override it with a generous cap, and catch a truly stalled connection
-        // separately below via a per-chunk idle timeout instead.
-        let mut request = http().get(&payload.stream_url).timeout(TRANSFER_TIMEOUT);
-        if existing_partial_bytes > 0 { request = request.header(RANGE, format!("bytes={existing_partial_bytes}-")); }
-        let response = request.send().await.map_err(|error| format!("audio cache request failed: {error}"))?;
-        let resume = can_resume_partial_download(existing_partial_bytes, response.status());
-        let response = if resume {
-            response
-        } else {
-            if existing_partial_bytes > 0 { let _ = fs::remove_file(&partial_path); }
-            http().get(&payload.stream_url).timeout(TRANSFER_TIMEOUT).send().await.map_err(|error| format!("audio cache request failed: {error}"))?
-        }.error_for_status().map_err(|error| format!("audio cache response failed: {error}"))?;
-        let total_bytes = response.content_length().map(|value| value as i64).map(|value| if resume { value + existing_partial_bytes } else { value });
+        // separately below via a per-chunk idle timeout instead. Every request is a range request (like the
+        // audio element's), and a URL the media server refuses is re-resolved with another client.
+        let mut offset = existing_partial_bytes;
+        let mut requests = 0_u8;
+        let response = loop {
+            requests += 1;
+            let response = http().get(&payload.stream_url).timeout(TRANSFER_TIMEOUT).header(RANGE, format!("bytes={offset}-")).send().await.map_err(|error| format!("audio cache request failed: {}", resolver::redact(&error.without_url().to_string())))?;
+            let status = response.status();
+            if requests < MAX_STREAM_REQUESTS {
+                match download_retry(status, offset) {
+                    DownloadRetry::Reresolve => {
+                        mark_stream_refused(video_id, payload.source_client.as_deref());
+                        payload = resolve_player_payload(video_id, item.playlist_id.as_deref(), quality, &state).await?;
+                        continue;
+                    }
+                    DownloadRetry::Restart => {
+                        offset = 0;
+                        let _ = fs::remove_file(&partial_path);
+                        continue;
+                    }
+                    DownloadRetry::Proceed => {}
+                }
+            }
+            if !status.is_success() {
+                return Err(format!("audio cache response failed: HTTP {status} from {}", payload.source_client.as_deref().unwrap_or("YouTube")));
+            }
+            break response;
+        };
+        let resume = can_resume_partial_download(offset, response.status());
+        if offset > 0 && !resume { let _ = fs::remove_file(&partial_path); }
+        let total_bytes = response.content_length().map(|value| value as i64).map(|value| if resume { value + offset } else { value });
         {
             let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
             db.execute("UPDATE downloads SET total_bytes = ?1 WHERE song_id = ?2", params![total_bytes, song_id]).map_err(|error| format!("download size state failed: {error}"))?;
@@ -2472,7 +2590,7 @@ async fn download_start(
             tokio::fs::File::create(&partial_path).await.map_err(|error| format!("download cache file failed: {error}"))?
         };
         let mut stream = response.bytes_stream();
-        let mut bytes = if resume { existing_partial_bytes } else { 0_i64 };
+        let mut bytes = if resume { offset } else { 0_i64 };
         while let Some(chunk) = next_chunk_within(&mut stream, STALL_TIMEOUT, "download").await? {
             if cancel.load(Ordering::Acquire) { return Err("download cancelled".to_owned()); }
             let chunk = chunk.map_err(|error| format!("download stream failed: {error}"))?;
@@ -2486,6 +2604,10 @@ async fn download_start(
         }
         file.flush().await.map_err(|error| format!("download cache flush failed: {error}"))?;
         drop(file);
+        if !transfer_complete(bytes, total_bytes) {
+            // The partial file is kept so the next attempt resumes from it.
+            return Err(format!("download incomplete: received {bytes} of {} bytes", total_bytes.unwrap_or(0)));
+        }
         fs::rename(&partial_path, &final_path).map_err(|error| format!("download cache finalize failed: {error}"))?;
         let artwork_path = cache_download_artwork(&song_id, item.thumbnail.as_deref()).await;
         let artist = item.artists.iter().map(|value| value.name.as_str()).collect::<Vec<_>>().join(", ");
@@ -2593,8 +2715,9 @@ async fn ytm_player(
         tokio::spawn(async move {
             let result: Result<(), String> = async {
                 if let Some(parent) = cache_path.parent() { tokio::fs::create_dir_all(parent).await.map_err(|error| format!("player cache directory failed: {error}"))?; }
-                let response = http().get(&cache_url).timeout(TRANSFER_TIMEOUT).send().await.map_err(|error| format!("player cache request failed: {error}"))?.error_for_status().map_err(|error| format!("player cache response failed: {error}"))?;
+                let response = http().get(&cache_url).timeout(TRANSFER_TIMEOUT).header(RANGE, "bytes=0-").send().await.map_err(|error| format!("player cache request failed: {}", error.without_url()))?.error_for_status().map_err(|error| format!("player cache response failed: {}", error.without_url()))?;
                 let mut file = tokio::fs::File::create(format!("{}.part", cache_path.to_string_lossy())).await.map_err(|error| format!("player cache file failed: {error}"))?;
+                let expected = response.content_length().map(|value| value as i64);
                 let mut stream = response.bytes_stream();
                 let mut bytes = 0_i64;
                 while let Some(chunk) = next_chunk_within(&mut stream, STALL_TIMEOUT, "player cache").await? {
@@ -2604,6 +2727,7 @@ async fn ytm_player(
                 }
                 file.flush().await.map_err(|error| format!("player cache flush failed: {error}"))?;
                 drop(file);
+                if !transfer_complete(bytes, expected) { return Err(format!("player cache incomplete: {bytes} bytes")); }
                 if player_cache_is_blocked(&cache_id) { return Err("player cache was removed".to_owned()); }
                 fs::rename(format!("{}.part", cache_path.to_string_lossy()), &cache_path).map_err(|error| format!("player cache finalize failed: {error}"))?;
                 if player_cache_is_blocked(&cache_id) { let _ = fs::remove_file(&cache_path); return Err("player cache was removed".to_owned()); }
@@ -7932,6 +8056,9 @@ fn account_logout(
         .map_err(|_| "visitor state poisoned")? = None;
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     forget_google_session(&db).map_err(|e| format!("account logout failed: {e}"))?;
+    if let Ok(mut health) = client_health().lock() {
+        health.clear();
+    }
     if let Ok(mut memory) = resolver_memory().lock() {
         memory.clear();
     }
@@ -9690,7 +9817,10 @@ mod tests {
             let sts = ensure_player_js().await.expect("player js");
             eprintln!("player js ready in {:?} (sts {sts})", started.elapsed());
             for key in std::env::var("MELD_LIVE_CLIENTS")
-                .unwrap_or_else(|_| "WEB_REMIX,ANDROID_VR_1_65_10".to_owned())
+                .unwrap_or_else(|_| {
+                    "WEB_REMIX,ANDROID_VR_1_65_10,VISIONOS_0_1,ANDROID_VR_1_43_32,IOS_21_03_3"
+                        .to_owned()
+                })
                 .split(',')
             {
                 let client = resolver::CLIENTS.iter().find(|c| c.key == key).unwrap();
@@ -9707,20 +9837,26 @@ mod tests {
                 .await
                 {
                     Ok(payload) => {
+                        // A resolved URL must serve the whole file (the download path), not just the start.
                         let response = http()
                             .get(&payload.stream_url)
-                            .header(RANGE, "bytes=0-65535")
+                            .header(RANGE, "bytes=0-")
+                            .timeout(TRANSFER_TIMEOUT)
                             .send()
                             .await
                             .unwrap();
+                        let status = response.status();
+                        let expected = response.content_length();
+                        let body = response.bytes().await.unwrap();
                         eprintln!(
-                            "{key}: {} {} in {:?} -> HTTP {}",
+                            "{key}: {} {} in {:?} -> HTTP {status}, {} of {expected:?} bytes",
                             payload.mime_type,
                             payload.bitrate,
                             started.elapsed(),
-                            response.status()
+                            body.len()
                         );
-                        assert_eq!(response.status().as_u16(), 206, "{key}");
+                        assert_eq!(status.as_u16(), 206, "{key}");
+                        assert_eq!(Some(body.len() as u64), expected, "{key}");
                     }
                     Err((category, detail)) => eprintln!("{key}: {} ({detail})", category.label()),
                 }
@@ -9868,6 +10004,59 @@ mod tests {
             reqwest::StatusCode::PARTIAL_CONTENT
         ));
         assert!(!can_resume_partial_download(1024, reqwest::StatusCode::OK));
+    }
+
+    #[test]
+    fn truncated_transfers_never_count_as_complete() {
+        assert!(transfer_complete(4_001_721, Some(4_001_721)));
+        assert!(!transfer_complete(1_048_576, Some(4_001_721)));
+        assert!(!transfer_complete(0, None));
+        assert!(!transfer_complete(0, Some(0)));
+        assert!(transfer_complete(512, None));
+    }
+
+    #[test]
+    fn refused_download_urls_are_reresolved_and_stale_partials_restart() {
+        use reqwest::StatusCode;
+        assert_eq!(
+            download_retry(StatusCode::FORBIDDEN, 0),
+            DownloadRetry::Reresolve
+        );
+        assert_eq!(
+            download_retry(StatusCode::GONE, 4096),
+            DownloadRetry::Reresolve
+        );
+        assert_eq!(
+            download_retry(StatusCode::RANGE_NOT_SATISFIABLE, 4096),
+            DownloadRetry::Restart
+        );
+        assert_eq!(
+            download_retry(StatusCode::PARTIAL_CONTENT, 4096),
+            DownloadRetry::Proceed
+        );
+        assert_eq!(download_retry(StatusCode::OK, 0), DownloadRetry::Proceed);
+        assert_eq!(
+            download_retry(StatusCode::SERVICE_UNAVAILABLE, 0),
+            DownloadRetry::Proceed
+        );
+    }
+
+    #[test]
+    fn refused_stream_excludes_client_for_song_and_demotes_it() {
+        mark_stream_refused("refused-test-video", Some("IOS_21_03_3"));
+        mark_stream_refused("refused-test-video", Some("not-a-client"));
+        mark_stream_refused("refused-test-video", None);
+        let now = std::time::Instant::now();
+        let excluded = resolver_memory()
+            .lock()
+            .unwrap()
+            .excluded("refused-test-video", now);
+        assert_eq!(excluded, vec!["IOS_21_03_3"]);
+        assert!(client_health()
+            .lock()
+            .unwrap()
+            .is_demoted("IOS_21_03_3", now));
+        client_health().lock().unwrap().clear();
     }
 
     #[test]
