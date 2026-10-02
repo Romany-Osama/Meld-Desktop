@@ -154,4 +154,3 @@ export type PersistentPlayback = {
 export type LibrarySongFilter = "liked" | "library" | "uploaded" | "downloaded" | "top";
 export type LibrarySort = "created" | "name" | "artist" | "playtime";
 export type PlaylistSort = "created" | "name" | "count";
-export type ParsedYouTubeUrl = { kind: "video" | "playlist" | "album" | "artist"; id: string };

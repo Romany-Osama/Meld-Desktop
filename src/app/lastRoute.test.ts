@@ -21,10 +21,10 @@ describe("last route", () => {
 
   it("does not restore a search for a link, which would open or play it", () => {
     for (const query of [
-      "https://music.youtube.com/watch?v=abc",
-      "youtu.be/abc",
-      "www.youtube.com/watch?v=abc",
-      "open.spotify.com/track/1",
+      "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
+      "youtu.be/dQw4w9WgXcQ",
+      "music.youtube.com/browse/MPREb_4pL8gzRtw1p",
+      "open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
     ])
       expect(restorableRoute({ name: "search", query })).toEqual({ name: "search", query: "" });
     expect(restorableRoute({ name: "search", query: "youtube rewind songs" })).toEqual({

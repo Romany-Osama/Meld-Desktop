@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Dispatch, SetStateAction, useState, useEffect } from "react";
-import { parseYouTubeUrl } from "../../lib/urls";
+import { parseLink } from "../../app/links";
 import { errorMessage } from "../../lib/util";
 import { YtItem, SpotifyTrackMatch, LoadState, LibraryItemState } from "../../types";
 
@@ -33,14 +33,14 @@ export function useItemMenu({ setNotice }: ItemMenuDeps) {
   const [playerItemState, setPlayerItemState] = useState<LibraryItemState | null>(null);
 
   useEffect(() => {
-    const parsed = parseYouTubeUrl(youtubeMatchUrl);
+    const parsed = parseLink(youtubeMatchUrl);
     if (!youtubeMatchItem || parsed?.kind !== "video") {
       setYoutubeMatchPreview(null);
       return;
     }
     let activeRequest = true;
     setYoutubeMatchPreview({ status: "loading", data: null });
-    void invoke<YtItem | null>("ytm_refetch", { videoId: parsed.id })
+    void invoke<YtItem | null>("ytm_refetch", { videoId: parsed.videoId })
       .then((item) => {
         if (!activeRequest) return;
         setYoutubeMatchPreview(

@@ -27,6 +27,10 @@ const responses: Record<string, unknown> = {
     ],
   },
   ytm_detail: { kind: "album", title: "Test Album", subtitle: "Artist", items: [], browseId: "MPREb_test" },
+  ytm_playlist: {
+    playlist: { id: "OLAK5uy_test", kind: "playlist", title: "Test Playlist", subtitle: "", artists: [] },
+    songs: [],
+  },
   speed_dial_items: [],
   search_history_items: [],
   history_items: [],
@@ -143,4 +147,28 @@ it("restores the last safe page after a restart (U4-006)", async () => {
   const again = await act(async () => render(<App />));
   expect(again.container.querySelector("main")?.getAttribute("data-route")).toBe("/home");
   localStorage.clear();
+});
+
+it("opens pasted YouTube Music links as pages (U4-007)", async () => {
+  const { default: App } = await import("./App");
+  const { container } = await act(async () => render(<App />));
+  const route = () => container.querySelector("main")?.getAttribute("data-route");
+  const input = container.querySelector<HTMLInputElement>(".search-form input")!;
+  const search = async (text: string) =>
+    act(async () => {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.submit(input.closest("form")!);
+    });
+  await search("https://music.youtube.com/browse/MPREb_test");
+  expect(route()).toBe("/album/MPREb_test");
+  expect(invoke).toHaveBeenCalledWith("ytm_detail", { kind: "album", browseId: "MPREb_test" });
+  await search("music.youtube.com/playlist?list=OLAK5uy_test");
+  expect(route()).toBe("/playlist/OLAK5uy_test");
+  expect(invoke).toHaveBeenCalledWith("ytm_playlist", { playlistId: "OLAK5uy_test" });
+  // A link opens its page without a search page in between: Back closes the playlist screen (D-028), then returns to
+  // the album the link was pasted on.
+  await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Back" })));
+  expect(route()).toBe("/home");
+  await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Back" })));
+  expect(route()).toBe("/album/MPREb_test");
 });

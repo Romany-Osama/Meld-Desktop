@@ -30,7 +30,6 @@ import {
   StatsPayload,
   YtItem,
 } from "./types";
-import { parseYouTubeUrl } from "./lib/urls";
 import { navigation } from "./app/navigation";
 import { secondaryNavigation } from "./app/navigation";
 import { lyricsProviderNames } from "./features/lyrics/providers";
@@ -67,14 +66,17 @@ import {
   LibraryMode,
   librarySongFilterFor,
   Route,
+  isValidRoute,
   routeFromView,
   routeKey,
   routePath,
+  sameRoute,
   StatsPeriod,
   topLevelOf,
 } from "./app/routes";
 import { Layer, LayerState, topmostLayer } from "./app/layers";
 import { LAST_ROUTE_KEY, parseLastRoute, serializeLastRoute } from "./app/lastRoute";
+import { parseLink } from "./app/links";
 
 function App() {
   const { notice, setNotice } = useNotice();
@@ -1032,7 +1034,8 @@ function App() {
     event.preventDefault();
     const value = query.trim();
     if (!value) return;
-    navigateTo("search_input");
+    // A pasted page link opens that page straight away, so Back returns to where the link was pasted (U4-007).
+    if (parseLink(value)?.kind !== "route") navigateTo("search_input");
     await searchFor(value);
   };
 
@@ -1047,41 +1050,24 @@ function App() {
       void invoke("search_history_add", { query: value })
         .then(() => loadSearchHistory())
         .catch(() => undefined);
-    const parsedUrl = parseYouTubeUrl(value);
-    if (parsedUrl && !typed) {
+    const link = parseLink(value);
+    if (link) {
       setSearch({ status: "idle", data: { items: [], continuation: null } });
-      return;
-    }
-    if (parsedUrl) {
-      setSearch({ status: "idle", data: { items: [], continuation: null } });
-      const item: YtItem =
-        parsedUrl.kind === "video"
-          ? {
-              id: parsedUrl.id,
-              kind: "song",
-              title: "YouTube video",
-              subtitle: value,
-              artists: [],
-              videoId: parsedUrl.id,
-            }
-          : parsedUrl.kind === "album"
-            ? {
-                id: `MPREb_${parsedUrl.id}`,
-                kind: "album",
-                title: "YouTube Music album",
-                subtitle: value,
-                artists: [],
-                browseId: `MPREb_${parsedUrl.id}`,
-              }
-            : {
-                id: parsedUrl.id,
-                kind: parsedUrl.kind,
-                title: parsedUrl.kind === "playlist" ? "YouTube playlist" : "YouTube artist",
-                subtitle: value,
-                artists: [],
-                browseId: parsedUrl.id,
-              };
-      await openItem(item);
+      if (!typed) return;
+      if (link.kind === "video") {
+        await openItem({
+          id: link.videoId,
+          kind: "song",
+          title: "YouTube video",
+          subtitle: value,
+          artists: [],
+          videoId: link.videoId,
+        });
+      } else if (link.kind === "route") {
+        await openRoute(link.route);
+      } else {
+        setNotice(`Spotify ${link.type} links cannot be opened directly. Search for it by name instead.`);
+      }
       return;
     }
     setSearch({ status: "loading", data: { items: [], continuation: null } });
@@ -2337,6 +2323,19 @@ function App() {
         openSpotifyLiked();
         return;
     }
+  };
+
+  /** Opens a typed route (U4-003) as a new history entry. Returns false for an invalid route. */
+  const openRoute = async (route: Route): Promise<boolean> => {
+    if (!isValidRoute(route)) return false;
+    if (route.name === "settings") {
+      setSettingsPage(route.page);
+      setSettingsOpen(true);
+      return true;
+    }
+    if (!sameRoute(route, pageRoute)) pushHistory();
+    await showRoute(route, active);
+    return true;
   };
 
   const refreshPodcastDetail = async () => {

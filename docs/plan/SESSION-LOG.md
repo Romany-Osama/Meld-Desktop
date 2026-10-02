@@ -76,3 +76,19 @@
 - Step 3: playback-cache limit with LRU eviction, usage UI, start-up orphan cleanup (PLAY-041, R6-023, R6-026, D-020).
 
 **Next task:** TR-L9 (Prettier/ESLint, line endings, enforced in CI), then R6-075/TR-H9 (required checks).
+
+## 2026-10-02 — Session 5 (tooling, CI protection, Phase 1 router work, unreleased)
+
+**Done**
+- TR-L9: Prettier + ESLint, line endings, enforced in CI (#21).
+- R6-075 / TR-H9: required checks; branch protection on `main` (Windows build and tests, Lint and format, Dependency audit, Release dry run; strict; admins included) (#22).
+- Step 6 tests: QUEUE-001, PLAY-021/031/035/055 (D-023, D-024) (#23).
+- U4-001 (D-025) App.tsx split into screens; U4-002 (D-026) 12 feature hooks (#25 merged into #24; #24 targets `main`).
+- U4-003/U4-004 typed routes + route-based Back/Forward with tab and scroll (D-027); U4-005 one overlay stacking order (D-028); U4-006 restore last safe page (D-029); U4-007 one link parser `src/app/links.ts` (D-030; fixes YTM playlist/album link bug). Branch `feat/u4-003-router`.
+
+**Partial / open**
+- PR #24 (U4-001/U4-002) waiting for the Windows CI check, then merge.
+- `feat/u4-003-router` (U4-003…U4-007) pushed; PR must be merged after #24 (bring branch up to date with `main` first; strict protection).
+- `feat/source-parity-next` commit a0227856 (like-response/avatar fix) is not on `main` — owner to confirm porting.
+
+**Next task:** merge #24, then the router PR, then U4-008 (separate server state from view state), U4-009…U4-015, TR-M1.
