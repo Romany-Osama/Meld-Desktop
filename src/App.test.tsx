@@ -15,9 +15,9 @@ const responses: Record<string, unknown> = {
   history_items: [],
   library_playlists: [],
 };
-const invoke = vi.fn(async (command: string): Promise<unknown> => responses[command] ?? null);
+const invoke = vi.fn(async (command: string, _args?: unknown): Promise<unknown> => responses[command] ?? null);
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (command: string, args?: unknown) => invoke(command, args as never),
+  invoke: (command: string, args?: unknown) => invoke(command, args),
   convertFileSrc: (path: string) => path,
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => undefined }));
