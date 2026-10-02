@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 // TR-M3: exactly one "Audio quality" control in Settings. TR-M4/TR-H1: restored v0.1.8 commands stay wired to the UI.
 export const RESTORED_UI_COMMANDS = [
   "account_refresh_profile",
@@ -54,4 +57,13 @@ export function checkLogoutClearsWebview(libSource) {
       problems.push(`${name} no longer clears WebView browsing data`);
   }
   return problems;
+}
+
+/** All UI source under src/ (.ts and .tsx, without tests), concatenated: App.tsx is split into feature modules (U4-001). */
+export function readUiSource(root = "src") {
+  return readdirSync(root, { recursive: true })
+    .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
+    .sort()
+    .map((name) => readFileSync(join(root, name), "utf8"))
+    .join("\n");
 }

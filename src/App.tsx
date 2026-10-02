@@ -1,521 +1,111 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
-import { UpdatePanel, useStartupUpdateCheck } from "./UpdatePanel";
-import { PlaybackCachePanel } from "./PlaybackCachePanel";
-import { FINAL_STREAM_ERROR, isLocalStream, recoveryNotice, recoveryReason } from "./lib/streamRecovery";
-import { type AudioQuality, parseAudioQuality, streamRequest } from "./lib/audioQuality";
-import { appendNewPlayable, arrangeQueue, moveItem, removeAt, shuffleAfterCurrent } from "./lib/queue";
-import {
-  playbackEffectKey,
-  resumeStartPosition,
-  shouldAutoplay,
-  startOccurrence,
-  withRefreshedPayload,
-} from "./lib/playbackSession";
+import { parseAudioQuality, streamRequest } from "./lib/audioQuality";
+import { appendNewPlayable, removeAt } from "./lib/queue";
+import { playbackEffectKey, resumeStartPosition, shouldAutoplay, startOccurrence } from "./lib/playbackSession";
 import { restoreQueue, restoreSession } from "./lib/persistentPlayback";
-
-type NavKey = "home" | "search_input" | "library" | "history" | "stats";
-type ItemKind = "song" | "episode" | "album" | "playlist" | "artist" | "podcast";
-
-type YtItem = {
-  id: string;
-  kind: ItemKind | string;
-  title: string;
-  subtitle: string;
-  thumbnail?: string | null;
-  artists: { name: string; id?: string | null }[];
-  browseId?: string | null;
-  playlistId?: string | null;
-  videoId?: string | null;
-  setVideoId?: string | null;
-  playPlaylistId?: string | null;
-  playVideoId?: string | null;
-  params?: string | null;
-  explicit?: boolean;
-  musicVideoType?: string | null;
-  historyRemoveToken?: string | null;
-  albumId?: string | null;
-  albumTitle?: string | null;
-  localPath?: string | null;
-  duration?: number;
-};
-
-type HomeSection = {
-  title: string;
-  label?: string | null;
-  thumbnail?: string | null;
-  browseId?: string | null;
-  params?: string | null;
-  browseKind?: string | null;
-  items: YtItem[];
-};
-
-type HomePage = { sections: HomeSection[]; continuation?: string | null };
-type SearchPage = { items: YtItem[]; continuation?: string | null };
-type PlaylistPage = { playlist: YtItem; songs: YtItem[]; continuation?: string | null };
-type RemoteHistorySection = { title: string; songs: YtItem[] };
-type RemoteHistoryPage = { sections: RemoteHistorySection[] };
-type StatsRow = { item: YtItem; plays: number; minutes: number };
-type StatsGroup = { id: string; title: string; subtitle: string; thumbnail?: string | null; plays: number };
-type StatsPayload = {
-  period: string;
-  totalPlays: number;
-  totalMinutes: number;
-  uniqueSongs: number;
-  rows: StatsRow[];
-  artists: StatsGroup[];
-  albums: StatsGroup[];
-};
-type DetailPage = {
-  kind: string;
-  title: string;
-  subtitle: string;
-  thumbnail?: string | null;
-  items: YtItem[];
-  continuation?: string | null;
-  browseId?: string | null;
-};
-type LyricsPayload = {
-  provider: string;
-  text: string;
-  synced: boolean;
-  matchedTitle: string;
-  matchedArtist: string;
-  lines: { timeMs: number; text: string }[];
-};
-type SettingEntry = { key: string; value: string };
-type SessionStatus = {
-  authenticated: boolean;
-  accountName?: string | null;
-  accountEmail?: string | null;
-  accountChannelHandle?: string | null;
-  accountAvatar?: string | null;
-};
-type SpotifySessionStatus = { authenticated: boolean; tokenExpiry?: number | null };
-type SpotifyProfile = { id: string; displayName?: string | null; avatar?: string | null };
-type SpotifyPlaylistItem = {
-  id: string;
-  name: string;
-  description?: string | null;
-  image?: string | null;
-  owner?: string | null;
-};
-type SpotifyFolderItem = { uri: string; name: string; totalChildren: number };
-type SpotifyLibraryNode = { folders: SpotifyFolderItem[]; playlists: SpotifyPlaylistItem[]; totalCount: number };
-type SpotifyTrackItem = {
-  id: string;
-  uri: string;
-  uid?: string | null;
-  name: string;
-  artist: string;
-  album: string;
-  image?: string | null;
-  durationMs: number;
-};
-type SpotifyLikedTracksPayload = { tracks: SpotifyTrackItem[]; totalCount: number };
-type SpotifyTrackPage = { tracks: SpotifyTrackItem[]; totalCount: number; offset: number; limit: number };
-type SpotifyTrackMatch = { id: string; uri: string; name: string; artist: string; durationMs: number };
-type LibraryItemState = {
-  liked: boolean;
-  youtubeLiked: boolean;
-  inLibrary: boolean;
-  uploaded: boolean;
-  pinned: boolean;
-  podcastSaved?: boolean;
-};
-type DownloadInfo = {
-  songId: string;
-  path: string;
-  bytes: number;
-  totalBytes?: number | null;
-  state: "downloading" | "completed" | "failed" | "cancelled" | string;
-  error?: string | null;
-  lyricsCached: boolean;
-  artworkPath?: string | null;
-};
-type PlayerPayload = {
-  videoId: string;
-  title?: string | null;
-  artist?: string | null;
-  streamUrl: string;
-  mimeType: string;
-  bitrate: number;
-  expiresInSeconds: number;
-  sourceClient?: string | null;
-};
-type QueuePage = {
-  title?: string | null;
-  items: YtItem[];
-  currentIndex?: number | null;
-  continuation?: string | null;
-  relatedBrowseId?: string | null;
-  relatedParams?: string | null;
-};
-type PlaylistContinuationPage = { songs: YtItem[]; continuation?: string | null };
-
-type LoadState<T> = { status: "idle" | "loading" | "ready" | "error"; data: T; error?: string };
-type PlaytimeSession = {
-  historyId: number;
-  songId: string;
-  lastPosition: number;
-  pendingMs: number;
-  playing: boolean;
-  flushing: boolean;
-};
-type PersistentPlayback = {
-  items: YtItem[];
-  index: number;
-  continuation: string | null;
-  continuationKind: "next" | "playlist" | null;
-  item?: YtItem | null;
-  position?: number;
-  playing?: boolean;
-};
-type LibrarySongFilter = "liked" | "library" | "uploaded" | "downloaded" | "top";
-type LibrarySort = "created" | "name" | "artist" | "playtime";
-type PlaylistSort = "created" | "name" | "count";
-
-const navigation: { key: NavKey; label: string; icon: string }[] = [
-  { key: "home", label: "Home", icon: "⌂" },
-  { key: "search_input", label: "Search", icon: "⌕" },
-  { key: "library", label: "Library", icon: "▤" },
-];
-
-const secondaryNavigation: { key: NavKey; label: string; icon: string }[] = [
-  { key: "history", label: "History", icon: "↺" },
-  { key: "stats", label: "Stats", icon: "▥" },
-];
-
-const lyricsProviderNames = [
-  "BetterLyrics",
-  "Paxsenix",
-  "LrcLib",
-  "KuGou",
-  "LyricsPlus",
-  "Musixmatch",
-  "YouTubeSubtitle",
-  "YouTube",
-] as const;
-const lyricProviderSettingKeys: Record<string, string> = {
-  BetterLyrics: "enableBetterLyrics",
-  Paxsenix: "enablePaxsenix",
-  LrcLib: "enableLrclib",
-  KuGou: "enableKugou",
-  LyricsPlus: "enableLyricsPlus",
-  Musixmatch: "enableMusixmatch",
-};
-
-// Fisher–Yates. `array.sort(() => Math.random() - 0.5)` is biased and engine-dependent.
-function shuffled<T>(values: readonly T[]): T[] {
-  const result = [...values];
-  for (let index = result.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
-  }
-  return result;
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function noticeSummary(message: string) {
-  if (message.length <= 180) return message;
-  const requestDetails = message.indexOf(" for url ");
-  if (requestDetails > 0) return `${message.slice(0, requestDetails)} · request details available on hover`;
-  return `${message.slice(0, 177).trimEnd()}…`;
-}
-
-type ParsedYouTubeUrl = { kind: "video" | "playlist" | "album" | "artist"; id: string };
-
-function parseYouTubeUrl(value: string): ParsedYouTubeUrl | null {
-  const url = value.trim();
-  const videoPatterns = [
-    /(?:https?:\/\/)?(?:www\.)?(?:music\.)?youtube\.com\/watch\?.*?v=([a-zA-Z0-9_-]{11})/i,
-    /(?:https?:\/\/)?youtu\.be\/([a-zA-Z0-9_-]{11})/i,
-    /(?:https?:\/\/)?(?:www\.)?youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/i,
-  ];
-  for (const pattern of videoPatterns) {
-    const match = url.match(pattern);
-    if (match?.[1]) return { kind: "video", id: match[1] };
-  }
-  const playlistMatch = url.match(
-    /(?:https?:\/\/)?(?:www\.)?(?:music\.)?youtube\.com\/playlist\?.*?list=([a-zA-Z0-9_-]+)/i,
-  );
-  if (!url.includes("music.youtube.com") && playlistMatch?.[1]) return { kind: "playlist", id: playlistMatch[1] };
-  if (url.includes("music.youtube.com")) {
-    if (playlistMatch?.[1]) return { kind: "album", id: playlistMatch[1] };
-    const artistMatch =
-      url.match(/(?:https?:\/\/)?(?:www\.)?music\.youtube\.com\/channel\/([a-zA-Z0-9_-]+)/i) ??
-      url.match(/(?:https?:\/\/)?(?:www\.)?music\.youtube\.com\/browse\/(MPRE[a-zA-Z0-9_-]+)/i);
-    if (artistMatch?.[1]) return { kind: "artist", id: artistMatch[1] };
-  }
-  return null;
-}
-
-function mediaSrc(value?: string | null) {
-  if (!value) return null;
-  return /^(?:https?:|data:|asset:|blob:)/i.test(value) ? value : convertFileSrc(value);
-}
-
-function ItemCard({
-  item,
-  onOpen,
-  onMenu,
-}: {
-  item: YtItem;
-  onOpen: (item: YtItem) => void;
-  onMenu?: (item: YtItem) => void;
-}) {
-  return (
-    <div className="item-card-shell">
-      <button className="item-card" onClick={() => onOpen(item)} title={`Open ${item.kind}`}>
-        <div className="item-art-wrap">
-          {mediaSrc(item.thumbnail) ? (
-            <img className="item-art" src={mediaSrc(item.thumbnail) as string} alt="" loading="lazy" />
-          ) : (
-            <div className="item-art empty-art">{item.kind.slice(0, 1).toUpperCase()}</div>
-          )}
-        </div>
-        <strong>{item.title || "Untitled"}</strong>
-        <span>{item.subtitle || item.kind}</span>
-      </button>
-      {onMenu && (
-        <button
-          className="card-menu-trigger"
-          onClick={() => onMenu(item)}
-          title={`More options for ${item.title}`}
-          aria-label={`More options for ${item.title}`}
-        >
-          ⋮
-        </button>
-      )}
-    </div>
-  );
-}
-
-function InlineLikeButton({
-  item,
-  autoDownloadOnLike = false,
-  audioQuality = "auto",
-}: {
-  item: YtItem;
-  autoDownloadOnLike?: boolean;
-  audioQuality?: AudioQuality;
-}) {
-  const [liked, setLiked] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    void invoke<LibraryItemState>("library_item_state", { id: item.id })
-      .then((state) => {
-        if (active) setLiked(state.liked);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [item.id]);
-
-  const toggle = async () => {
-    if ((!item.videoId && !item.localPath) || busy) return;
-    setBusy(true);
-    try {
-      const nextLiked = !liked;
-      await invoke("library_toggle_liked", { item, liked: nextLiked });
-      setLiked(nextLiked);
-      if (autoDownloadOnLike && nextLiked && item.videoId)
-        void invoke("download_start", { item, audioQuality }).catch(() => undefined);
-      if (item.videoId) {
-        try {
-          const session = await invoke<SessionStatus>("session_status");
-          if (session.authenticated) await invoke("ytm_toggle_like", { videoId: item.videoId, liked: nextLiked, item });
-        } catch {
-          // Meld keeps the local favorite when the optional signed-in sync is unavailable.
-        }
-      }
-    } catch {
-      // The parent menu/notice owns the detailed error surface; this button stays unchanged on failure.
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <button
-      className={liked ? "inline-like liked" : "inline-like"}
-      disabled={(!item.videoId && !item.localPath) || busy}
-      onClick={() => void toggle()}
-      title={liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}
-      aria-label={liked ? `Unlike ${item.title}` : `Like ${item.title}`}
-    >
-      {liked ? "♥" : "♡"}
-    </button>
-  );
-}
-
-function Section({
-  section,
-  onOpen,
-  onMenu,
-  shouldHide,
-}: {
-  section: HomeSection;
-  onOpen: (item: YtItem) => void;
-  onMenu: (item: YtItem) => void;
-  shouldHide: (item: YtItem) => boolean;
-}) {
-  return (
-    <section className="content-section">
-      <div className="section-heading">
-        <div>
-          <h2>{section.title}</h2>
-          {section.label && <p>{section.label}</p>}
-        </div>
-        {section.browseId && section.browseKind && (
-          <button
-            className="text-button"
-            onClick={() =>
-              onOpen({
-                id: section.browseId!,
-                kind: section.browseKind!,
-                title: section.title,
-                subtitle: section.label ?? "",
-                thumbnail: section.thumbnail,
-                artists: [],
-                browseId: section.browseId,
-                params: section.params,
-              })
-            }
-          >
-            Show all
-          </button>
-        )}
-      </div>
-      <div className="card-row">
-        {section.items
-          .filter((item) => !shouldHide(item))
-          .map((item) => (
-            <ItemCard key={`${item.kind}-${item.id}`} item={item} onOpen={onOpen} onMenu={onMenu} />
-          ))}
-      </div>
-    </section>
-  );
-}
-
-function SpotifyLibraryBlock({
-  node,
-  liked,
-  folderStack,
-  onOpenFolder,
-  onOpenPlaylist,
-  onOpenLiked,
-  onBack,
-  onRetry,
-}: {
-  node: LoadState<SpotifyLibraryNode>;
-  liked: LoadState<SpotifyLikedTracksPayload>;
-  folderStack: { uri: string; name: string }[];
-  onOpenFolder: (folder: SpotifyFolderItem) => void;
-  onOpenPlaylist: (playlist: SpotifyPlaylistItem) => void;
-  onOpenLiked: () => void;
-  onBack: () => void;
-  onRetry: () => void;
-}) {
-  return (
-    <section className="spotify-library-block">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Spotify library</p>
-          <h3>{folderStack.length > 0 ? folderStack[folderStack.length - 1].name : "Playlists"}</h3>
-        </div>
-        {folderStack.length > 0 && (
-          <button className="text-button" onClick={onBack}>
-            Back
-          </button>
-        )}
-      </div>
-      {node.status === "loading" && (
-        <div className="state-panel">
-          <div className="spinner" />
-          <p>Loading Spotify library…</p>
-        </div>
-      )}
-      {node.status === "error" && (
-        <div className="state-panel error">
-          <h2>Spotify library unavailable</h2>
-          <p>{node.error}</p>
-          <button className="primary-button" onClick={onRetry}>
-            Retry
-          </button>
-        </div>
-      )}
-      {node.status === "ready" && node.data.folders.length === 0 && node.data.playlists.length === 0 && (
-        <div className="state-panel">
-          <h2>{folderStack.length > 0 ? "Folder is empty" : "No Spotify playlists"}</h2>
-          <p>Spotify returned no library items for this location.</p>
-        </div>
-      )}
-      {liked.status === "ready" && liked.data.totalCount > 0 && (
-        <button className="playlist-list-row spotify-playlist-row spotify-liked-row" onClick={onOpenLiked}>
-          <span className="library-auto-icon">♥</span>
-          <span>
-            <strong>Liked Songs</strong>
-            <small>
-              {liked.data.totalCount} Spotify saved song{liked.data.totalCount === 1 ? "" : "s"}
-            </small>
-          </span>
-          <span aria-hidden="true">›</span>
-        </button>
-      )}
-      {node.status === "ready" && (
-        <div className="spotify-library-items">
-          {node.data.folders.map((folder) => (
-            <button
-              className="playlist-list-row spotify-folder-row"
-              key={folder.uri}
-              onClick={() => onOpenFolder(folder)}
-            >
-              <span className="library-auto-icon">▣</span>
-              <span>
-                <strong>{folder.name}</strong>
-                <small>
-                  {folder.totalChildren} item{folder.totalChildren === 1 ? "" : "s"}
-                </small>
-              </span>
-              <span aria-hidden="true">›</span>
-            </button>
-          ))}
-          {node.data.playlists.map((playlist) => (
-            <button
-              className="playlist-list-row spotify-playlist-row"
-              key={playlist.id}
-              onClick={() => onOpenPlaylist(playlist)}
-            >
-              <span className="item-art-wrap small-art-wrap">
-                {mediaSrc(playlist.image) ? (
-                  <img className="item-art" src={mediaSrc(playlist.image) as string} alt="" loading="lazy" />
-                ) : (
-                  <span className="item-art empty-art">S</span>
-                )}
-              </span>
-              <span>
-                <strong>{playlist.name}</strong>
-                <small>{playlist.owner ? `Spotify · ${playlist.owner}` : "Spotify playlist"}</small>
-              </span>
-              <span aria-hidden="true">›</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
+import { errorMessage, noticeSummary, shuffled } from "./lib/util";
+import { mediaSrc } from "./lib/media";
+import {
+  DetailPage,
+  HomePage,
+  LibraryItemState,
+  LibrarySongFilter,
+  LibrarySort,
+  LoadState,
+  NavKey,
+  PersistentPlayback,
+  PlayerPayload,
+  PlaylistContinuationPage,
+  PlaylistPage,
+  PlaylistSort,
+  QueuePage,
+  RemoteHistoryPage,
+  SearchPage,
+  SettingEntry,
+  SpotifyTrackItem,
+  SpotifyTrackMatch,
+  StatsPayload,
+  YtItem,
+} from "./types";
+import { parseYouTubeUrl } from "./lib/urls";
+import { navigation } from "./app/navigation";
+import { secondaryNavigation } from "./app/navigation";
+import { lyricsProviderNames } from "./features/lyrics/providers";
+import { HomeScreen } from "./features/home/HomeScreen";
+import { LibraryScreen } from "./features/library/LibraryScreen";
+import { StatsScreen } from "./features/stats/StatsScreen";
+import { HistoryScreen } from "./features/history/HistoryScreen";
+import { SearchScreen } from "./features/search/SearchScreen";
+import { LyricsPanel } from "./features/lyrics/LyricsPanel";
+import { ExpandedPlayer } from "./features/player/ExpandedPlayer";
+import { QueuePanel } from "./features/queue/QueuePanel";
+import { PlayerBar } from "./features/player/PlayerBar";
+import { PlaylistScreen } from "./features/playlist/PlaylistScreen";
+import { DetailScreen } from "./features/detail/DetailScreen";
+import { SettingsScreen } from "./features/settings/SettingsScreen";
+import { SpotifyPlaylistScreen } from "./features/spotify/SpotifyPlaylistScreen";
+import { SpotifyLikedScreen } from "./features/spotify/SpotifyLikedScreen";
+import { useSelection } from "./features/selection/useSelection";
+import { useNotice } from "./features/notifications/useNotice";
+import { useSleepTimer } from "./features/player/useSleepTimer";
+import { useLyrics } from "./features/lyrics/useLyrics";
+import { useLyricsFollow } from "./features/lyrics/useLyrics";
+import { useItemMenu } from "./features/menu/useItemMenu";
+import { useAccounts } from "./features/accounts/useAccounts";
+import { useSpotifyLibrary } from "./features/spotify/useSpotifyLibrary";
+import { useSettingsState } from "./features/settings/useSettingsState";
+import { usePlaylists } from "./features/playlist/usePlaylists";
+import { useQueue } from "./features/queue/useQueue";
+import { usePlayer } from "./features/player/usePlayer";
+import { useDownloads } from "./features/downloads/useDownloads";
 
 function App() {
+  const { notice, setNotice } = useNotice();
+  const {
+    settingsOpen,
+    setSettingsOpen,
+    settingsPage,
+    setSettingsPage,
+    audioQuality,
+    setAudioQuality,
+    settings,
+    setSettings,
+    settingsLoading,
+    setSettingsLoading,
+    setSetting,
+    setAudioQualitySetting,
+    hideItem,
+  } = useSettingsState({ setNotice });
+  const {
+    menuDownload,
+    showMenuDownload,
+    startDownload,
+    cancelDownload,
+    removeDownload,
+    downloadItems,
+    removeDownloads,
+    maybeAutoDownloadOnLike,
+  } = useDownloads({ audioQuality, setNotice, settings });
+  const {
+    logoutDialogOpen,
+    setLogoutDialogOpen,
+    sessionStatus,
+    setSessionStatus,
+    spotifyStatus,
+    spotifyProfile,
+    setSpotifyProfile,
+    loadSessionStatus,
+    loadSpotifyStatus,
+    connectGoogle,
+    connectSpotify,
+    logoutSpotify,
+    logoutGoogle,
+  } = useAccounts({ setNotice });
+  const { selectedItems, setSelectedItems, selectionMode, setSelectionMode, toggleSelectedItem, closeSelection } =
+    useSelection();
   const [active, setActive] = useState<NavKey>("home");
   const [backStack, setBackStack] = useState<NavKey[]>([]);
   const [forwardStack, setForwardStack] = useState<NavKey[]>([]);
@@ -568,157 +158,190 @@ function App() {
   const [libraryMixSort, setLibraryMixSort] = useState<"created" | "name">("created");
   const [libraryMixSortDescending, setLibraryMixSortDescending] = useState(true);
   const [libraryView, setLibraryView] = useState<"grid" | "list">("grid");
-  const [playlistSearch, setPlaylistSearch] = useState("");
-  const [playlistView, setPlaylistView] = useState<"grid" | "list">("grid");
-  const [playlistSort, setPlaylistSort] = useState<PlaylistSort>("created");
-  const [playlistSortDescending, setPlaylistSortDescending] = useState(true);
+  const {
+    playlistSearch,
+    setPlaylistSearch,
+    playlistView,
+    setPlaylistView,
+    playlistSort,
+    setPlaylistSort,
+    playlistSortDescending,
+    setPlaylistSortDescending,
+    playlistPickerItems,
+    setPlaylistPickerItems,
+    playlistPickerSearch,
+    setPlaylistPickerSearch,
+    playlistPickerSort,
+    setPlaylistPickerSort,
+    playlistPickerSortDescending,
+    setPlaylistPickerSortDescending,
+    createPlaylistOpen,
+    setCreatePlaylistOpen,
+    newPlaylistTitle,
+    setNewPlaylistTitle,
+    createSyncedPlaylist,
+    setCreateSyncedPlaylist,
+    loadLocalPlaylists,
+    syncSavedPlaylists,
+    openCreatePlaylistDialog,
+    createLocalPlaylist,
+    addToSelectedPlaylist,
+    playlistQuery,
+    hasVisiblePlaylistAutoEntries,
+    visiblePlaylists,
+    visiblePlaylistPicker,
+  } = usePlaylists({ sessionStatus, setNotice, setSelectedItems, setSelectionMode, settings });
   const [topPeriod, setTopPeriod] = useState<"all" | "day" | "week" | "month" | "year">("all");
   const topSize = 50;
   const [podcastFilter, setPodcastFilter] = useState<"episodes" | "channels" | "downloaded">("episodes");
   const [podcastRefreshing, setPodcastRefreshing] = useState(false);
-  const [localPlaylists, setLocalPlaylists] = useState<(YtItem & { songCount?: number; savedAt?: number })[]>([]);
-  const [playlistPickerItems, setPlaylistPickerItems] = useState<YtItem[] | null>(null);
-  const [playlistPickerSearch, setPlaylistPickerSearch] = useState("");
-  const [playlistPickerSort, setPlaylistPickerSort] = useState<PlaylistSort>("name");
-  const [playlistPickerSortDescending, setPlaylistPickerSortDescending] = useState(false);
-  const [selectedItems, setSelectedItems] = useState<YtItem[]>([]);
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [artistPickerItem, setArtistPickerItem] = useState<YtItem | null>(null);
-  const [editItem, setEditItem] = useState<YtItem | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editArtist, setEditArtist] = useState("");
-  const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
-  const [newPlaylistTitle, setNewPlaylistTitle] = useState("");
-  const [createSyncedPlaylist, setCreateSyncedPlaylist] = useState(false);
+  const {
+    artistPickerItem,
+    setArtistPickerItem,
+    editItem,
+    setEditItem,
+    editTitle,
+    setEditTitle,
+    editArtist,
+    setEditArtist,
+    infoItem,
+    setInfoItem,
+    menuItem,
+    setMenuItem,
+    playerMenuOpen,
+    setPlayerMenuOpen,
+    speedDialogOpen,
+    setSpeedDialogOpen,
+    menuSpotifyMatch,
+    setMenuSpotifyMatch,
+    youtubeMatchItem,
+    setYoutubeMatchItem,
+    youtubeMatchUrl,
+    setYoutubeMatchUrl,
+    youtubeMatchPreview,
+    setYoutubeMatchPreview,
+    menuState,
+    setMenuState,
+    playerItemState,
+    setPlayerItemState,
+    confirmYoutubeVersion,
+  } = useItemMenu({ setNotice });
   const [playlist, setPlaylist] = useState<LoadState<PlaylistPage> | null>(null);
   const [detail, setDetail] = useState<LoadState<DetailPage> | null>(null);
   const [detailMoreLoading, setDetailMoreLoading] = useState(false);
   const [detailRefreshing, setDetailRefreshing] = useState(false);
   const [detailArtistSubscribed, setDetailArtistSubscribed] = useState(false);
   const [recapOpen, setRecapOpen] = useState(false);
-  const [infoItem, setInfoItem] = useState<YtItem | null>(null);
-  const [notice, setNotice] = useState("");
-  useStartupUpdateCheck((update) =>
-    setNotice(
-      update.portable
-        ? `Meld Desktop ${update.version} is available. Settings → About has the download page.`
-        : `Meld Desktop ${update.version} is available. Install it from Settings → About.`,
-    ),
-  );
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<
-    "main" | "appearance" | "content" | "player" | "privacy" | "storage" | "integrations" | "about"
-  >("main");
-  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
-  const [audioQuality, setAudioQuality] = useState<AudioQuality>("auto");
-  const [settings, setSettings] = useState<Record<string, boolean>>({
-    hideExplicit: false,
-    hideVideoSongs: false,
-    useLoginForBrowse: true,
-    enableBetterLyrics: true,
-    enablePaxsenix: true,
-    enableLrclib: true,
-    enableKugou: true,
-    enableLyricsPlus: false,
-    enableMusixmatch: false,
-    ytmSync: true,
-    similarContent: true,
-    autoLoadMore: true,
-    disableLoadMoreWhenRepeatAll: false,
-    autoDownloadOnLike: false,
-    autoSkipNextOnError: false,
-    persistentShuffleAcrossQueues: false,
-    rememberShuffleAndRepeat: true,
-    shufflePlaylistFirst: false,
-    preventDuplicateTracksInQueue: false,
-    show_liked_playlist: true,
-    show_downloaded_playlist: true,
-    show_uploaded_playlist: true,
-    show_top_playlist: true,
-    show_cached_playlist: true,
-    varispeed: false,
-    seekExtraSeconds: false,
-    pauseOnMute: false,
-    pauseListenHistory: false,
-    pauseSearchHistory: false,
-    persistentQueue: true,
-    sidebarCollapsed: false,
-  });
-  const [lyricsProviderOrder, setLyricsProviderOrder] = useState<string[]>([...lyricsProviderNames]);
-  const [lyricsItem, setLyricsItem] = useState<YtItem | null>(null);
-  const [lyricsProviderSelection, setLyricsProviderSelection] = useState("auto");
-  const [lyricsProviderLoading, setLyricsProviderLoading] = useState(false);
-  const [settingsLoading, setSettingsLoading] = useState(false);
-  const [sessionStatus, setSessionStatus] = useState<SessionStatus>({ authenticated: false });
-  const [spotifyStatus, setSpotifyStatus] = useState<SpotifySessionStatus>({ authenticated: false });
-  const [spotifyProfile, setSpotifyProfile] = useState<SpotifyProfile | null>(null);
-  const [spotifyLibrary, setSpotifyLibrary] = useState<LoadState<SpotifyLibraryNode>>({
-    status: "idle",
-    data: { folders: [], playlists: [], totalCount: 0 },
-  });
-  const [spotifyFolderStack, setSpotifyFolderStack] = useState<{ uri: string; name: string }[]>([]);
-  const [spotifyPlaylistTracks, setSpotifyPlaylistTracks] = useState<LoadState<SpotifyTrackPage>>({
-    status: "idle",
-    data: { tracks: [], totalCount: 0, offset: 0, limit: 100 },
-  });
-  const [spotifyLikedTracks, setSpotifyLikedTracks] = useState<LoadState<SpotifyLikedTracksPayload>>({
-    status: "idle",
-    data: { tracks: [], totalCount: 0 },
-  });
-  const [spotifyOpenPlaylist, setSpotifyOpenPlaylist] = useState<SpotifyPlaylistItem | null>(null);
-  const [spotifyRenameName, setSpotifyRenameName] = useState("");
-  const [spotifyPlaylistLoadingMore, setSpotifyPlaylistLoadingMore] = useState(false);
-  const [spotifyDetailQuery, setSpotifyDetailQuery] = useState("");
-  const [spotifyDetailSort, setSpotifyDetailSort] = useState<"original" | "name" | "artist" | "duration">("original");
-  const [spotifyDetailSortDescending, setSpotifyDetailSortDescending] = useState(true);
-  const [spotifyReorderUnlocked, setSpotifyReorderUnlocked] = useState(false);
-  const [spotifyLikedOpen, setSpotifyLikedOpen] = useState(false);
-  const [spotifyAddItem, setSpotifyAddItem] = useState<YtItem | null>(null);
-  const [spotifyAddState, setSpotifyAddState] = useState<LoadState<{
-    match: SpotifyTrackMatch | null;
-    playlists: SpotifyPlaylistItem[];
-  }> | null>(null);
-  const [menuItem, setMenuItem] = useState<YtItem | null>(null);
-  const [playerMenuOpen, setPlayerMenuOpen] = useState(false);
-  const [speedDialogOpen, setSpeedDialogOpen] = useState(false);
-  const [menuSpotifyMatch, setMenuSpotifyMatch] = useState<SpotifyTrackMatch | null>(null);
-  const [youtubeMatchItem, setYoutubeMatchItem] = useState<{ item: YtItem; match: SpotifyTrackMatch } | null>(null);
-  const [youtubeMatchUrl, setYoutubeMatchUrl] = useState("");
-  const [youtubeMatchPreview, setYoutubeMatchPreview] = useState<LoadState<YtItem | null> | null>(null);
-  const [menuState, setMenuState] = useState<LibraryItemState>({
-    liked: false,
-    youtubeLiked: false,
-    inLibrary: false,
-    uploaded: false,
-    pinned: false,
-  });
-  const [menuDownload, setMenuDownload] = useState<DownloadInfo | null>(null);
-  const [playerItemState, setPlayerItemState] = useState<LibraryItemState | null>(null);
-  const [lyrics, setLyrics] = useState<LoadState<LyricsPayload> | null>(null);
-  const [playerExpanded, setPlayerExpanded] = useState(false);
-  const [queueOpen, setQueueOpen] = useState(false);
-  const [player, setPlayer] = useState<{ item: YtItem; payload: PlayerPayload; session: number } | null>(null);
-  const [queueItems, setQueueItems] = useState<YtItem[]>([]);
-  const [queueContinuation, setQueueContinuation] = useState<string | null>(null);
-  const [queueContinuationKind, setQueueContinuationKind] = useState<"next" | "playlist" | null>(null);
-  const [shuffleEnabled, setShuffleEnabled] = useState(false);
-  const [repeatMode, setRepeatMode] = useState<"off" | "all" | "one">("off");
-  const [queueIndex, setQueueIndex] = useState(-1);
-  const [playbackSeconds, setPlaybackSeconds] = useState(0);
-  const [durationSeconds, setDurationSeconds] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [lyricsAutoScrollEnabled, setLyricsAutoScrollEnabled] = useState(true);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
-  const activeLyricRef = useRef<HTMLButtonElement | null>(null);
-  const automixLoadingRef = useRef(false);
-  const autoMixEnabledRef = useRef(false);
-  const playRequestIdRef = useRef(0);
-  const activePlayerIdRef = useRef<string | null>(null);
-  const seekGestureRef = useRef({ timestamp: 0, multiplier: 1 });
-  const wasPlayingBeforeMuteRef = useRef(false);
+  const {
+    lyricsProviderOrder,
+    setLyricsProviderOrder,
+    lyricsProviderSelection,
+    lyricsProviderLoading,
+    lyrics,
+    setLyrics,
+    lyricsAutoScrollEnabled,
+    setLyricsAutoScrollEnabled,
+    lyricsContainerRef,
+    activeLyricRef,
+    moveLyricsProvider,
+    openLyrics,
+    changeLyricsProvider,
+  } = useLyrics({ setNotice, settings });
+  const {
+    spotifyLibrary,
+    spotifyFolderStack,
+    setSpotifyFolderStack,
+    spotifyPlaylistTracks,
+    spotifyLikedTracks,
+    spotifyOpenPlaylist,
+    setSpotifyOpenPlaylist,
+    spotifyRenameName,
+    setSpotifyRenameName,
+    spotifyPlaylistLoadingMore,
+    spotifyDetailQuery,
+    setSpotifyDetailQuery,
+    spotifyDetailSort,
+    setSpotifyDetailSort,
+    spotifyDetailSortDescending,
+    setSpotifyDetailSortDescending,
+    spotifyReorderUnlocked,
+    setSpotifyReorderUnlocked,
+    spotifyLikedOpen,
+    setSpotifyLikedOpen,
+    spotifyAddItem,
+    setSpotifyAddItem,
+    spotifyAddState,
+    setSpotifyAddState,
+    loadSpotifyProfile,
+    loadSpotifyLibrary,
+    loadSpotifyLikedTracks,
+    openSpotifyFolder,
+    openSpotifyPlaylist,
+    visibleSpotifyPlaylistTracks,
+    moveSpotifyTrack,
+    loadMoreSpotifyPlaylistTracks,
+    renameSpotifyPlaylist,
+    removeSpotifyTrack,
+    findYouTubeMatchForSpotifyTrack,
+    downloadSpotifyPlaylist,
+    openSpotifyLiked,
+    beginSpotifyAdd,
+    addToSpotifyPlaylist,
+  } = useSpotifyLibrary({ audioQuality, setMenuItem, setNotice, setSpotifyProfile, spotifyStatus });
+  const {
+    playerExpanded,
+    setPlayerExpanded,
+    player,
+    setPlayer,
+    playbackSeconds,
+    setPlaybackSeconds,
+    durationSeconds,
+    setDurationSeconds,
+    volume,
+    setVolume,
+    playbackSpeed,
+    setPlaybackSpeed,
+    isPlaying,
+    setIsPlaying,
+    audioRef,
+    playRequestIdRef,
+    activePlayerIdRef,
+    playtimeRef,
+    streamResolvedAtRef,
+    playbackSessionRef,
+    flushPlaytime,
+    recordPlaytime,
+    recoverStream,
+    togglePlayback,
+    seekPlayback,
+    seekByPlayerGesture,
+    adjustVolumeByWheel,
+    updateVolume,
+    formatTime,
+  } = usePlayer({ audioQuality, setNotice, settings });
+  const {
+    queueOpen,
+    setQueueOpen,
+    queueItems,
+    setQueueItems,
+    queueContinuation,
+    setQueueContinuation,
+    queueContinuationKind,
+    setQueueContinuationKind,
+    shuffleEnabled,
+    setShuffleEnabled,
+    repeatMode,
+    setRepeatMode,
+    queueIndex,
+    setQueueIndex,
+    autoMixEnabledRef,
+    toggleShuffle,
+    cycleRepeat,
+    arrangeQueueForSettings,
+    shuffleQueueAfterCurrent,
+    moveQueueItem,
+    loadAutomixItems,
+  } = useQueue({ setNotice, settings });
   const taskbarPreviousRef = useRef<() => void>(() => undefined);
   const taskbarToggleRef = useRef<() => void>(() => undefined);
   const taskbarNextRef = useRef<() => void>(() => undefined);
@@ -730,19 +353,22 @@ function App() {
   const resumePlayingRef = useRef(false);
   const resumePendingRef = useRef(false);
   const accountAuthStateRef = useRef<boolean | null>(null);
-  const playtimeRef = useRef<PlaytimeSession | null>(null);
-  const streamResolvedAtRef = useRef(0);
-  // Unique per playItem() call (PLAY-035). The audio-source effect is keyed on it, so replaying the same song restarts
-  // predictably while a refreshed stream URL or metadata update for the same session keeps the current position.
-  const playbackSessionRef = useRef(0);
   const lastLibrarySyncRef = useRef<Record<string, number>>({});
-  const [sleepTimerOpen, setSleepTimerOpen] = useState(false);
-  const [sleepTimerMinutes, setSleepTimerMinutes] = useState(30);
-  const [sleepTimerDefault, setSleepTimerDefault] = useState(30);
-  const [sleepTimerStopAfterCurrent, setSleepTimerStopAfterCurrent] = useState(false);
-  const [sleepTimerFadeOut, setSleepTimerFadeOut] = useState(false);
-  const [sleepTimerExpiresAt, setSleepTimerExpiresAt] = useState<number | null>(null);
-  const [sleepTimerEndOfSong, setSleepTimerEndOfSong] = useState(false);
+  const {
+    sleepTimerOpen,
+    setSleepTimerOpen,
+    sleepTimerMinutes,
+    setSleepTimerMinutes,
+    sleepTimerDefault,
+    setSleepTimerDefault,
+    sleepTimerStopAfterCurrent,
+    setSleepTimerStopAfterCurrent,
+    sleepTimerFadeOut,
+    setSleepTimerFadeOut,
+    sleepTimerEndOfSong,
+    clearSleepTimer,
+    startSleepTimer,
+  } = useSleepTimer({ audioRef, durationSeconds, playbackSeconds, setMenuItem, setNotice, volume });
 
   const closeTransientLayers = () => {
     setMenuItem(null);
@@ -826,69 +452,6 @@ function App() {
   const hasTransientLayer = Boolean(
     settingsOpen || lyrics || playerExpanded || queueOpen || menuItem || detail || playlist || infoItem,
   );
-
-  const clearSleepTimer = () => {
-    setSleepTimerExpiresAt(null);
-    setSleepTimerEndOfSong(false);
-    setSleepTimerStopAfterCurrent(false);
-    if (audioRef.current) audioRef.current.volume = volume;
-  };
-
-  const startSleepTimer = (endOfSong = false) => {
-    setSleepTimerEndOfSong(endOfSong);
-    setSleepTimerExpiresAt(endOfSong ? null : Date.now() + sleepTimerMinutes * 60_000);
-    if (audioRef.current) audioRef.current.volume = volume;
-    setSleepTimerOpen(false);
-    setMenuItem(null);
-    setNotice(
-      endOfSong ? "Sleep timer will stop after the current song." : `Sleep timer set for ${sleepTimerMinutes} minutes.`,
-    );
-  };
-
-  // Values that change on every playback tick live in a ref. Having `playbackSeconds` in the dependency list re-created
-  // the 1 s interval on every `timeupdate` (~4 Hz), so the callback never ran while music was playing.
-  const sleepTimerLiveRef = useRef({
-    volume,
-    durationSeconds,
-    playbackSeconds,
-    stopAfterCurrent: sleepTimerStopAfterCurrent,
-    fadeOut: sleepTimerFadeOut,
-  });
-  sleepTimerLiveRef.current = {
-    volume,
-    durationSeconds,
-    playbackSeconds,
-    stopAfterCurrent: sleepTimerStopAfterCurrent,
-    fadeOut: sleepTimerFadeOut,
-  };
-
-  useEffect(() => {
-    if (sleepTimerExpiresAt === null && !sleepTimerEndOfSong) return;
-    const timer = window.setInterval(() => {
-      const live = sleepTimerLiveRef.current;
-      const remainingMs =
-        sleepTimerExpiresAt === null
-          ? Math.max(0, (live.durationSeconds - live.playbackSeconds) * 1000)
-          : sleepTimerExpiresAt - Date.now();
-      if (sleepTimerExpiresAt !== null && remainingMs <= 0) {
-        if (live.stopAfterCurrent) {
-          setSleepTimerExpiresAt(null);
-          setSleepTimerEndOfSong(true);
-          setSleepTimerStopAfterCurrent(false);
-        } else {
-          audioRef.current?.pause();
-          setSleepTimerExpiresAt(null);
-          setSleepTimerEndOfSong(false);
-          setSleepTimerStopAfterCurrent(false);
-          if (audioRef.current) audioRef.current.volume = live.volume;
-        }
-        return;
-      }
-      const multiplier = live.fadeOut ? Math.min(1, Math.max(0, remainingMs / 60_000)) : 1;
-      if (audioRef.current) audioRef.current.volume = live.volume * multiplier;
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [sleepTimerExpiresAt, sleepTimerEndOfSong]);
 
   const loadHomeMore = async () => {
     if (home.status !== "ready" || !home.data.continuation || homeMoreLoading) return;
@@ -984,216 +547,16 @@ function App() {
     }
   };
 
-  useEffect(() => {
+  const loadStartupContent = useEffectEvent(() => {
     void loadHome();
     void loadSpeedDial();
     void loadSearchHistory();
-  }, []);
-  useEffect(() => {
+  });
+  useEffect(() => loadStartupContent(), []);
+  const loadVisibleStats = useEffectEvent(() => {
     if (active === "stats") void loadStats(statsPeriod);
-  }, [active, statsPeriod]);
-
-  const loadSessionStatus = async (refreshGoogleProfile = false) => {
-    try {
-      const current = await invoke<SessionStatus>("session_status");
-      setSessionStatus(current);
-      if (refreshGoogleProfile && current.authenticated) {
-        try {
-          const refreshed = await invoke<SessionStatus>("account_refresh_profile");
-          setSessionStatus(refreshed);
-        } catch {
-          // Keep the last locally saved profile when offline or when the upstream request fails.
-        }
-      }
-    } catch (error) {
-      setNotice(`Account status could not be read: ${errorMessage(error)}`);
-    }
-  };
-
-  const loadSpotifyStatus = async () => {
-    try {
-      setSpotifyStatus(await invoke<SpotifySessionStatus>("spotify_session_status"));
-    } catch (error) {
-      setNotice(`Spotify status could not be read: ${errorMessage(error)}`);
-    }
-  };
-
-  const loadSpotifyProfile = async () => {
-    if (!spotifyStatus.authenticated) {
-      setSpotifyProfile(null);
-      setSpotifyLibrary({ status: "idle", data: { folders: [], playlists: [], totalCount: 0 } });
-      setSpotifyLikedTracks({ status: "idle", data: { tracks: [], totalCount: 0 } });
-      setSpotifyFolderStack([]);
-      return;
-    }
-    try {
-      setSpotifyProfile(await invoke<SpotifyProfile>("spotify_profile"));
-    } catch (error) {
-      setSpotifyProfile(null);
-      setNotice(`Spotify profile could not be loaded: ${errorMessage(error)}`);
-    }
-  };
-
-  const loadSpotifyLibrary = async (folderUri: string | null = null) => {
-    if (!spotifyStatus.authenticated) return;
-    setSpotifyLibrary((current) => ({ ...current, status: "loading", error: undefined }));
-    try {
-      setSpotifyLibrary({
-        status: "ready",
-        data: await invoke<SpotifyLibraryNode>("spotify_library_node", { folderUri }),
-      });
-    } catch (error) {
-      setSpotifyLibrary({
-        status: "error",
-        data: { folders: [], playlists: [], totalCount: 0 },
-        error: errorMessage(error),
-      });
-    }
-  };
-
-  const loadSpotifyLikedTracks = async () => {
-    if (!spotifyStatus.authenticated) return;
-    setSpotifyLikedTracks((current) => ({ ...current, status: "loading", error: undefined }));
-    try {
-      setSpotifyLikedTracks({ status: "ready", data: await invoke<SpotifyLikedTracksPayload>("spotify_liked_tracks") });
-    } catch (error) {
-      setSpotifyLikedTracks({ status: "error", data: { tracks: [], totalCount: 0 }, error: errorMessage(error) });
-    }
-  };
-
-  const openSpotifyFolder = async (folder: SpotifyFolderItem) => {
-    setSpotifyFolderStack((current) => [...current, { uri: folder.uri, name: folder.name }]);
-    await loadSpotifyLibrary(folder.uri);
-  };
-
-  const openSpotifyPlaylist = async (playlistItem: SpotifyPlaylistItem) => {
-    setSpotifyOpenPlaylist(playlistItem);
-    setSpotifyRenameName(playlistItem.name);
-    setSpotifyPlaylistTracks({ status: "loading", data: { tracks: [], totalCount: 0, offset: 0, limit: 100 } });
-    try {
-      setSpotifyPlaylistTracks({
-        status: "ready",
-        data: await invoke<SpotifyTrackPage>("spotify_playlist_tracks", { playlistId: playlistItem.id, offset: 0 }),
-      });
-    } catch (error) {
-      setSpotifyPlaylistTracks({
-        status: "error",
-        data: { tracks: [], totalCount: 0, offset: 0, limit: 100 },
-        error: errorMessage(error),
-      });
-    }
-  };
-
-  const visibleSpotifyPlaylistTracks =
-    spotifyPlaylistTracks.status === "ready"
-      ? [...spotifyPlaylistTracks.data.tracks]
-          .filter(
-            (track) =>
-              !spotifyDetailQuery.trim() ||
-              `${track.name} ${track.artist} ${track.album}`
-                .toLowerCase()
-                .includes(spotifyDetailQuery.trim().toLowerCase()),
-          )
-          .sort((left, right) => {
-            if (spotifyDetailSort === "original") {
-              const leftIndex = spotifyPlaylistTracks.data.tracks.indexOf(left);
-              const rightIndex = spotifyPlaylistTracks.data.tracks.indexOf(right);
-              return spotifyDetailSortDescending ? rightIndex - leftIndex : leftIndex - rightIndex;
-            }
-            const leftValue =
-              spotifyDetailSort === "duration"
-                ? left.durationMs
-                : spotifyDetailSort === "artist"
-                  ? left.artist.toLowerCase()
-                  : left.name.toLowerCase();
-            const rightValue =
-              spotifyDetailSort === "duration"
-                ? right.durationMs
-                : spotifyDetailSort === "artist"
-                  ? right.artist.toLowerCase()
-                  : right.name.toLowerCase();
-            const comparison = leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
-            return spotifyDetailSortDescending ? -comparison : comparison;
-          })
-      : [];
-
-  const moveSpotifyTrack = async (track: SpotifyTrackItem, direction: "up" | "down") => {
-    if (!spotifyOpenPlaylist || !track.uid || spotifyPlaylistTracks.status !== "ready") return;
-    const tracks = spotifyPlaylistTracks.data.tracks;
-    const index = tracks.findIndex((value) => value.uid === track.uid);
-    if (index < 0) return;
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= tracks.length) return;
-    const beforeUid = direction === "up" ? tracks[targetIndex].uid : (tracks[targetIndex + 1]?.uid ?? null);
-    try {
-      await invoke("spotify_move_in_playlist", { playlistId: spotifyOpenPlaylist.id, uids: [track.uid], beforeUid });
-      await openSpotifyPlaylist(spotifyOpenPlaylist);
-      setNotice(`Moved “${track.name}” ${direction}.`);
-    } catch (error) {
-      setNotice(`Spotify track could not be moved: ${errorMessage(error)}`);
-    }
-  };
-
-  const loadMoreSpotifyPlaylistTracks = async () => {
-    if (
-      !spotifyOpenPlaylist ||
-      spotifyPlaylistTracks.status !== "ready" ||
-      spotifyPlaylistLoadingMore ||
-      spotifyPlaylistTracks.data.tracks.length >= spotifyPlaylistTracks.data.totalCount
-    )
-      return;
-    setSpotifyPlaylistLoadingMore(true);
-    try {
-      const next = await invoke<SpotifyTrackPage>("spotify_playlist_tracks", {
-        playlistId: spotifyOpenPlaylist.id,
-        offset: spotifyPlaylistTracks.data.tracks.length,
-      });
-      setSpotifyPlaylistTracks({
-        status: "ready",
-        data: { ...next, tracks: [...spotifyPlaylistTracks.data.tracks, ...next.tracks] },
-      });
-    } catch (error) {
-      setNotice(`More Spotify tracks could not be loaded: ${errorMessage(error)}`);
-    } finally {
-      setSpotifyPlaylistLoadingMore(false);
-    }
-  };
-
-  const renameSpotifyPlaylist = async () => {
-    if (!spotifyOpenPlaylist || !spotifyRenameName.trim()) return;
-    try {
-      await invoke("spotify_rename_playlist", {
-        playlistId: spotifyOpenPlaylist.id,
-        newName: spotifyRenameName.trim(),
-      });
-      const updated = { ...spotifyOpenPlaylist, name: spotifyRenameName.trim() };
-      setSpotifyOpenPlaylist(updated);
-      setNotice(`Renamed Spotify playlist to “${updated.name}”.`);
-      await loadSpotifyLibrary(spotifyFolderStack[spotifyFolderStack.length - 1]?.uri ?? null);
-    } catch (error) {
-      setNotice(`Spotify playlist could not be renamed: ${errorMessage(error)}`);
-    }
-  };
-
-  const removeSpotifyTrack = async (track: SpotifyTrackItem) => {
-    if (!spotifyOpenPlaylist || !track.uid) {
-      setNotice("Spotify could not remove this track because the playlist item uid was not returned.");
-      return;
-    }
-    if (!window.confirm(`Remove “${track.name}” from “${spotifyOpenPlaylist.name}”?`)) return;
-    try {
-      await invoke("spotify_remove_from_playlist", { playlistId: spotifyOpenPlaylist.id, uid: track.uid });
-      setNotice(`Removed “${track.name}” from Spotify playlist.`);
-      await openSpotifyPlaylist(spotifyOpenPlaylist);
-    } catch (error) {
-      setNotice(`Spotify track could not be removed: ${errorMessage(error)}`);
-    }
-  };
-
-  const findYouTubeMatchForSpotifyTrack = async (track: SpotifyTrackItem) => {
-    const result = await invoke<SearchPage>("ytm_search", { query: `${track.artist} ${track.name}`.trim() });
-    return result.items.find((candidate) => candidate.kind === "song") ?? null;
-  };
+  });
+  useEffect(() => loadVisibleStats(), [active, statsPeriod]);
 
   const playSpotifyTrack = async (track: SpotifyTrackItem) => {
     try {
@@ -1207,54 +570,6 @@ function App() {
     } catch (error) {
       setNotice(`Spotify track could not be opened in YouTube Music: ${errorMessage(error)}`);
     }
-  };
-
-  const downloadSpotifyPlaylist = async () => {
-    if (!spotifyOpenPlaylist || spotifyPlaylistTracks.status !== "ready") return;
-    let queued = 0;
-    let skipped = 0;
-    const tracks = [...spotifyPlaylistTracks.data.tracks];
-    let offset = tracks.length;
-    try {
-      while (offset < spotifyPlaylistTracks.data.totalCount) {
-        setNotice(
-          `Loading Spotify playlist tracks for offline download… ${offset}/${spotifyPlaylistTracks.data.totalCount}`,
-        );
-        const next = await invoke<SpotifyTrackPage>("spotify_playlist_tracks", {
-          playlistId: spotifyOpenPlaylist.id,
-          offset,
-        });
-        if (next.tracks.length === 0) break;
-        tracks.push(...next.tracks);
-        offset = tracks.length;
-      }
-      setSpotifyPlaylistTracks({ status: "ready", data: { ...spotifyPlaylistTracks.data, tracks } });
-    } catch (error) {
-      setNotice(`Spotify playlist pages could not be loaded: ${errorMessage(error)}`);
-      return;
-    }
-    setNotice(`Matching Spotify playlist “${spotifyOpenPlaylist.name}” for offline download…`);
-    for (const track of tracks) {
-      try {
-        const item = await findYouTubeMatchForSpotifyTrack(track);
-        if (!item?.videoId) {
-          skipped++;
-          continue;
-        }
-        await invoke("download_start", { item, audioQuality });
-        queued++;
-      } catch {
-        skipped++;
-      }
-    }
-    setNotice(
-      `Spotify playlist download queued: ${queued} track${queued === 1 ? "" : "s"}${skipped ? `; ${skipped} unmatched` : ""}.`,
-    );
-  };
-
-  const openSpotifyLiked = () => {
-    setSpotifyLikedOpen(true);
-    if (spotifyLikedTracks.status === "idle") void loadSpotifyLikedTracks();
   };
 
   const loadSettings = async () => {
@@ -1295,41 +610,6 @@ function App() {
     }
   };
 
-  const connectGoogle = async () => {
-    try {
-      await invoke("open_google_login");
-      setNotice(
-        "Google sign-in opened in Meld Desktop. Finish sign-in there; Meld will validate the session before saving it.",
-      );
-    } catch (error) {
-      setNotice(`Google sign-in could not open: ${errorMessage(error)}`);
-    }
-  };
-
-  const connectSpotify = async () => {
-    try {
-      await invoke("open_spotify_login");
-      setNotice("Spotify sign-in opened in Meld Desktop. The session is saved only after token validation.");
-    } catch (error) {
-      setNotice(`Spotify sign-in could not open: ${errorMessage(error)}`);
-    }
-  };
-
-  const logoutSpotify = async () => {
-    try {
-      await invoke("spotify_logout");
-      setSpotifyStatus({ authenticated: false });
-      setSpotifyProfile(null);
-      setNotice("Spotify account disconnected.");
-    } catch (error) {
-      setNotice(`Spotify logout failed: ${errorMessage(error)}`);
-    }
-  };
-
-  const logoutGoogle = () => {
-    setLogoutDialogOpen(true);
-  };
-
   const confirmGoogleLogout = async (clearData: boolean) => {
     try {
       if (clearData) await invoke("clear_local_library_keep_downloads");
@@ -1351,16 +631,14 @@ function App() {
     setPlayerMenuOpen(false);
     setMenuItem(item);
     setMenuSpotifyMatch(null);
-    setMenuDownload(null);
+    showMenuDownload(null);
     setLyrics(null);
     setQueueOpen(false);
     setPlayerExpanded(false);
     try {
       const itemState = await invoke<LibraryItemState>("library_item_state", { id: item.id });
       if (item.videoId) {
-        void invoke<DownloadInfo | null>("download_info", { songId: item.id })
-          .then(setMenuDownload)
-          .catch(() => setMenuDownload(null));
+        showMenuDownload(item.id);
         void invoke<SpotifyTrackMatch | null>("spotify_match_for_youtube", { youtubeId: item.videoId })
           .then(setMenuSpotifyMatch)
           .catch(() => setMenuSpotifyMatch(null));
@@ -1374,66 +652,6 @@ function App() {
     }
   };
 
-  const toggleShuffle = async () => {
-    const next = !shuffleEnabled;
-    setShuffleEnabled(next);
-    if (settings.rememberShuffleAndRepeat === false) return;
-    try {
-      await invoke("settings_set", { key: "shuffleMode", value: String(next) });
-    } catch (error) {
-      setShuffleEnabled(!next);
-      setNotice(`Shuffle preference could not be saved: ${errorMessage(error)}`);
-    }
-  };
-
-  const cycleRepeat = async () => {
-    const next = repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off";
-    setRepeatMode(next);
-    try {
-      await invoke("settings_set", { key: "repeatMode", value: next === "one" ? "1" : next === "all" ? "2" : "0" });
-    } catch (error) {
-      setNotice(`Repeat preference could not be saved: ${errorMessage(error)}`);
-    }
-  };
-
-  const setSetting = async (key: string, value: boolean) => {
-    const previous = settings[key];
-    setSettings((current) => ({ ...current, [key]: value }));
-    try {
-      await invoke("settings_set", { key, value: String(value) });
-    } catch (error) {
-      setSettings((current) => ({ ...current, [key]: previous }));
-      setNotice(`Setting could not be saved: ${errorMessage(error)}`);
-    }
-  };
-
-  const setAudioQualitySetting = async (value: AudioQuality) => {
-    const previous = audioQuality;
-    setAudioQuality(value);
-    try {
-      await invoke("settings_set", { key: "audioQuality", value });
-    } catch (error) {
-      setAudioQuality(previous);
-      setNotice(`Audio quality could not be saved: ${errorMessage(error)}`);
-    }
-  };
-
-  const arrangeQueueForSettings = (
-    items: YtItem[],
-    currentIndex: number,
-    originalQueueSize: number,
-    shuffleActive = shuffleEnabled,
-  ) =>
-    arrangeQueue(items, currentIndex, originalQueueSize, {
-      shuffle: shuffleActive,
-      playlistFirst: !!settings.shufflePlaylistFirst,
-    });
-
-  const maybeAutoDownloadOnLike = (item: YtItem, liked: boolean) => {
-    if (settings.autoDownloadOnLike !== true || !liked || !item.videoId || item.localPath) return;
-    void invoke("download_start", { item, audioQuality }).catch(() => undefined);
-  };
-
   // Syncs a like/unlike to YouTube Music when a Google session is active. Returns whether the sync succeeded -
   // being signed out counts as success (there is nothing to sync), only an attempted sync that actually failed
   // is worth surfacing to the user.
@@ -1445,22 +663,6 @@ function App() {
     } catch {
       return false;
     }
-  };
-
-  const shuffleQueueAfterCurrent = (items: YtItem[], currentId: string | null) =>
-    shuffleEnabled ? shuffleAfterCurrent(items, currentId) : items;
-
-  const toggleSelectedItem = (item: YtItem) => {
-    setSelectedItems((current) =>
-      current.some((value) => value.id === item.id)
-        ? current.filter((value) => value.id !== item.id)
-        : [...current, item],
-    );
-  };
-
-  const closeSelection = () => {
-    setSelectedItems([]);
-    setSelectionMode(false);
   };
 
   const playSelectedItems = async (shuffle: boolean) => {
@@ -1525,55 +727,12 @@ function App() {
   };
 
   const downloadSelectedItems = () => {
-    const downloadable = selectedItems.filter((item) => item.videoId && !item.localPath);
-    downloadable.forEach((item) => void invoke("download_start", { item }).catch(() => undefined));
-    setNotice(
-      downloadable.length > 0
-        ? `Started offline download for ${downloadable.length} selected item${downloadable.length === 1 ? "" : "s"}.`
-        : "No selected item has a remote source video.",
-    );
+    downloadItems(selectedItems);
     closeSelection();
   };
 
   const removeSelectedDownloads = async () => {
-    try {
-      for (const item of selectedItems) await invoke("download_remove", { songId: item.id });
-      setNotice(
-        `Removed offline download for ${selectedItems.length} selected item${selectedItems.length === 1 ? "" : "s"}.`,
-      );
-      closeSelection();
-    } catch (error) {
-      setNotice(`Selected offline download removal failed: ${errorMessage(error)}`);
-    }
-  };
-
-  const moveLyricsProvider = async (provider: string, direction: -1 | 1) => {
-    const enabled = (value: string) =>
-      value === "YouTube" || value === "YouTubeSubtitle" || settings[lyricProviderSettingKeys[value] ?? ""] === true;
-    if (!enabled(provider)) return;
-    const enabledOrder = lyricsProviderOrder.filter(enabled);
-    const index = enabledOrder.indexOf(provider);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= enabledOrder.length) return;
-    [enabledOrder[index], enabledOrder[nextIndex]] = [enabledOrder[nextIndex], enabledOrder[index]];
-    const nextOrder = [...enabledOrder, ...lyricsProviderOrder.filter((value) => !enabled(value))];
-    const previous = lyricsProviderOrder;
-    setLyricsProviderOrder(nextOrder);
-    try {
-      await invoke("settings_set", { key: "lyricsProviderOrder", value: nextOrder.join(",") });
-    } catch (error) {
-      setLyricsProviderOrder(previous);
-      setNotice(`Lyrics provider order could not be saved: ${errorMessage(error)}`);
-    }
-  };
-
-  const hideItem = (item: YtItem) => {
-    const hideVideo =
-      settings.hideVideoSongs &&
-      item.kind === "song" &&
-      !!item.musicVideoType &&
-      item.musicVideoType !== "MUSIC_VIDEO_TYPE_ATV";
-    return (settings.hideExplicit && item.explicit === true) || hideVideo;
+    if (await removeDownloads(selectedItems)) closeSelection();
   };
 
   const loadLibrary = async (
@@ -1722,95 +881,10 @@ function App() {
     }
   };
 
-  const loadLocalPlaylists = async () => {
-    try {
-      setLocalPlaylists(await invoke<(YtItem & { songCount?: number; savedAt?: number })[]>("library_playlists"));
-    } catch (error) {
-      setNotice(`Playlists could not be loaded: ${errorMessage(error)}`);
-    }
-  };
-
-  const syncSavedPlaylists = async () => {
-    if (!sessionStatus.authenticated || settings.ytmSync !== true) {
-      await loadLocalPlaylists();
-      return;
-    }
-    try {
-      const result = await invoke<{ playlists: number }>("sync_youtube_library", { mode: "playlists" });
-      await loadLocalPlaylists();
-      setNotice(`YouTube Music playlist sync finished: ${result.playlists} playlists.`);
-    } catch (error) {
-      setNotice(`YouTube Music playlist sync failed: ${errorMessage(error)}`);
-      await loadLocalPlaylists();
-    }
-  };
-
   const reloadCurrentLibrary = async () => {
     if (libraryMode === "playlists") return syncSavedPlaylists();
     if (libraryMode === "podcasts") return loadPodcastItems(podcastFilter);
     return loadLibrary(libraryMode);
-  };
-
-  const openCreatePlaylistDialog = () => {
-    setPlaylistPickerItems(null);
-    setNewPlaylistTitle("");
-    setCreateSyncedPlaylist(false);
-    setCreatePlaylistOpen(true);
-  };
-
-  const createLocalPlaylist = async () => {
-    const title = newPlaylistTitle.trim();
-    if (!title) return;
-    try {
-      if (createSyncedPlaylist) {
-        await invoke("ytm_create_playlist", { title });
-      } else {
-        await invoke("library_create_playlist", { title });
-      }
-      await loadLocalPlaylists();
-      setCreatePlaylistOpen(false);
-      setNewPlaylistTitle("");
-      setNotice(
-        createSyncedPlaylist ? `Created YouTube Music playlist “${title}”.` : `Created local playlist “${title}”.`,
-      );
-    } catch (error) {
-      setNotice(`Playlist could not be created: ${errorMessage(error)}`);
-    }
-  };
-
-  const addToSelectedPlaylist = async (playlistId: string) => {
-    const items = playlistPickerItems ?? [];
-    if (items.length === 0) return;
-    try {
-      let addedCount = 0;
-      let skippedCount = 0;
-      if (playlistId.startsWith("LOCAL_")) {
-        for (const item of items) {
-          const added = await invoke<boolean>("library_add_to_playlist", { playlistId, item });
-          if (added) addedCount += 1;
-          else skippedCount += 1;
-        }
-      } else {
-        for (const item of items) {
-          if (!item.videoId) {
-            setNotice(`“${item.title}” has no source videoId required for a playlist add.`);
-            return;
-          }
-          await invoke("ytm_add_to_playlist", { playlistId, videoId: item.videoId });
-          addedCount += 1;
-        }
-      }
-      setNotice(
-        skippedCount > 0
-          ? `Added ${addedCount} item${addedCount === 1 ? "" : "s"}; skipped ${skippedCount} already in the playlist.`
-          : `Added ${addedCount} selected item${addedCount === 1 ? "" : "s"} to the playlist.`,
-      );
-      setPlaylistPickerItems(null);
-      setSelectedItems([]);
-      setSelectionMode(false);
-    } catch (error) {
-      setNotice(`Could not add selected items to playlist: ${errorMessage(error)}`);
-    }
   };
 
   const openLocalPlaylist = async (item: YtItem) => {
@@ -1869,52 +943,12 @@ function App() {
     settings.ytmSync,
     spotifyStatus.authenticated,
   ]);
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    void listen<SessionStatus>("account-status", (event) => {
-      setSessionStatus(event.payload);
-      setNotice("Google / YouTube Music account connected and validated.");
-    }).then((stop) => {
-      unlisten = stop;
-    });
-    let stopSpotify: (() => void) | undefined;
-    void listen<SpotifySessionStatus>("spotify-status", (event) => {
-      setSpotifyStatus(event.payload);
-      setNotice("Spotify account connected and token validated.");
-    }).then((stop) => {
-      stopSpotify = stop;
-    });
-    let stopAccountError: (() => void) | undefined;
-    void listen<string>("account-status-error", (event) => {
-      setNotice(`Google account validation failed: ${event.payload}`);
-    }).then((stop) => {
-      stopAccountError = stop;
-    });
-    let stopSpotifyError: (() => void) | undefined;
-    void listen<string>("spotify-status-error", (event) => {
-      setNotice(`Spotify account validation failed: ${event.payload}`);
-    }).then((stop) => {
-      stopSpotifyError = stop;
-    });
-    let stopDownload: (() => void) | undefined;
-    void listen<DownloadInfo>("download-state", (event) => {
-      setMenuDownload((current) => (current?.songId === event.payload.songId ? event.payload : current));
-    }).then((stop) => {
-      stopDownload = stop;
-    });
-    return () => {
-      unlisten?.();
-      stopSpotify?.();
-      stopAccountError?.();
-      stopSpotifyError?.();
-      stopDownload?.();
-    };
-  }, []);
-  useEffect(() => {
+  const loadStartupAccounts = useEffectEvent(() => {
     void loadSessionStatus(true);
     void loadSpotifyStatus();
     void loadSettings();
-  }, []);
+  });
+  useEffect(() => loadStartupAccounts(), []);
   useEffect(() => {
     if (accountAuthStateRef.current === null) {
       accountAuthStateRef.current = sessionStatus.authenticated;
@@ -1925,15 +959,15 @@ function App() {
       if (active === "home") void loadHome();
     }
   }, [active, sessionStatus.authenticated]);
-  useEffect(() => {
-    void loadSpotifyProfile();
-  }, [spotifyStatus.authenticated]);
-  useEffect(() => {
+  const refreshSpotifyProfile = useEffectEvent(() => void loadSpotifyProfile());
+  useEffect(() => refreshSpotifyProfile(), [spotifyStatus.authenticated]);
+  const refreshOpenedSettings = useEffectEvent(() => {
     if (settingsOpen) {
       void loadSettings();
       void loadSessionStatus();
     }
-  }, [settingsOpen]);
+  });
+  useEffect(() => refreshOpenedSettings(), [settingsOpen]);
 
   const runSearch = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -2037,93 +1071,6 @@ function App() {
     }
   };
 
-  const beginSpotifyAdd = async (item: YtItem) => {
-    if (!spotifyStatus.authenticated || !item.videoId) {
-      setNotice("Spotify playlist actions require a connected Spotify account and a source video.");
-      return;
-    }
-    setMenuItem(null);
-    setSpotifyAddItem(item);
-    setSpotifyAddState({ status: "loading", data: { match: null, playlists: [] } });
-    try {
-      const artist = item.artists.map((value) => value.name).join(", ") || item.subtitle || "";
-      const match = await invoke<SpotifyTrackMatch | null>("spotify_resolve_youtube", {
-        youtubeId: item.videoId,
-        title: item.title,
-        artist,
-        durationSec: item.duration ?? -1,
-      });
-      if (!match) {
-        setSpotifyAddState({
-          status: "error",
-          data: { match: null, playlists: [] },
-          error: "This YouTube song could not be matched to a Spotify track.",
-        });
-        return;
-      }
-      const playlists = await invoke<SpotifyPlaylistItem[]>("spotify_playlists");
-      setSpotifyAddState({ status: "ready", data: { match, playlists } });
-    } catch (error) {
-      setSpotifyAddState({ status: "error", data: { match: null, playlists: [] }, error: errorMessage(error) });
-    }
-  };
-
-  const addToSpotifyPlaylist = async (playlist: SpotifyPlaylistItem) => {
-    const match = spotifyAddState?.status === "ready" ? spotifyAddState.data.match : null;
-    if (!match) return;
-    try {
-      await invoke("spotify_add_to_playlist", { playlistId: playlist.id, trackUri: match.uri });
-      setSpotifyAddItem(null);
-      setSpotifyAddState(null);
-      setNotice(`Added “${match.name}” to Spotify playlist “${playlist.name}”.`);
-    } catch (error) {
-      setNotice(`Spotify playlist add failed: ${errorMessage(error)}`);
-    }
-  };
-
-  useEffect(() => {
-    const parsed = parseYouTubeUrl(youtubeMatchUrl);
-    if (!youtubeMatchItem || parsed?.kind !== "video") {
-      setYoutubeMatchPreview(null);
-      return;
-    }
-    let activeRequest = true;
-    setYoutubeMatchPreview({ status: "loading", data: null });
-    void invoke<YtItem | null>("ytm_refetch", { videoId: parsed.id })
-      .then((item) => {
-        if (!activeRequest) return;
-        setYoutubeMatchPreview(
-          item ? { status: "ready", data: item } : { status: "error", data: null, error: "Video not found" },
-        );
-      })
-      .catch((error) => {
-        if (activeRequest) setYoutubeMatchPreview({ status: "error", data: null, error: errorMessage(error) });
-      });
-    return () => {
-      activeRequest = false;
-    };
-  }, [youtubeMatchItem?.item.id, youtubeMatchUrl]);
-
-  const confirmYoutubeVersion = async () => {
-    const match = youtubeMatchItem?.match;
-    const preview = youtubeMatchPreview?.status === "ready" ? youtubeMatchPreview.data : null;
-    if (!match || !preview?.videoId) return;
-    try {
-      const artist = preview.artists.map((value) => value.name).join(", ") || preview.subtitle || "";
-      await invoke("spotify_override_youtube", {
-        spotifyId: match.id,
-        youtubeId: preview.videoId,
-        title: preview.title,
-        artist,
-      });
-      setYoutubeMatchItem(null);
-      setYoutubeMatchPreview(null);
-      setNotice(`Changed the YouTube version for “${match.name}”.`);
-    } catch (error) {
-      setNotice(`YouTube version change failed: ${errorMessage(error)}`);
-    }
-  };
-
   const togglePlayerFavorite = async () => {
     if (!player) return;
     const current = playerItemState ?? {
@@ -2168,16 +1115,13 @@ function App() {
     if (!player) return;
     setPlayerMenuOpen(true);
     setMenuItem(player.item);
-    setMenuDownload(null);
+    showMenuDownload(null);
     setQueueOpen(false);
     try {
       const state = await invoke<LibraryItemState>("library_item_state", { id: player.item.id });
       setPlayerItemState(state);
       setMenuState(state);
-      if (player.item.videoId)
-        void invoke<DownloadInfo | null>("download_info", { songId: player.item.id })
-          .then(setMenuDownload)
-          .catch(() => setMenuDownload(null));
+      if (player.item.videoId) showMenuDownload(player.item.id);
     } catch {
       const state = { liked: false, youtubeLiked: false, inLibrary: false, uploaded: false, pinned: false };
       setPlayerItemState(state);
@@ -2204,65 +1148,7 @@ function App() {
     return () => {
       activeRequest = false;
     };
-  }, [player?.item.id]);
-
-  const requestLyrics = async (item: YtItem, provider = "auto", forceRefresh = false) => {
-    const artist = item.artists.map((value) => value.name).join(", ") || item.subtitle || "";
-    setLyricsAutoScrollEnabled(true);
-    setLyricsProviderLoading(true);
-    setLyrics({
-      status: "loading",
-      data: {
-        provider: provider === "auto" ? "" : provider,
-        text: "",
-        synced: false,
-        matchedTitle: item.title,
-        matchedArtist: artist,
-        lines: [],
-      },
-    });
-    try {
-      const command =
-        provider === "auto" ? (forceRefresh ? "fetch_lyrics_fresh" : "fetch_lyrics") : "fetch_lyrics_from_provider";
-      const args = {
-        title: item.title,
-        artist,
-        duration: item.duration ?? -1,
-        album: item.albumTitle ?? null,
-        id: item.videoId ?? item.id,
-        ...(provider === "auto" ? {} : { provider }),
-      };
-      const data = await invoke<LyricsPayload>(command, args);
-      setLyricsProviderSelection(data.provider);
-      setLyrics({ status: "ready", data });
-    } catch (error) {
-      setLyrics({
-        status: "error",
-        data: {
-          provider: provider === "auto" ? "Automatic" : provider,
-          text: "",
-          synced: false,
-          matchedTitle: item.title,
-          matchedArtist: artist,
-          lines: [],
-        },
-        error: errorMessage(error),
-      });
-    } finally {
-      setLyricsProviderLoading(false);
-    }
-  };
-
-  const openLyrics = async (item: YtItem) => {
-    setLyricsItem(item);
-    setLyricsProviderSelection("auto");
-    await requestLyrics(item);
-  };
-
-  const changeLyricsProvider = async (provider: string) => {
-    setLyricsProviderSelection(provider);
-    if (lyricsItem) await requestLyrics(lyricsItem, provider, provider === "auto");
-  };
+  }, [player?.item.id, setPlayerItemState]);
 
   const isLocalLibraryMenuContext = (item: YtItem) =>
     Boolean(item.localPath) ||
@@ -2315,42 +1201,10 @@ function App() {
       );
     if (action === "share") return shareItem(item);
     if (action === "copy_link") return copyLink(item);
-    if (action === "download") {
-      if (!item.videoId || item.localPath) {
-        setNotice("Offline download requires a remote source video.");
-        return;
-      }
-      setMenuDownload({
-        songId: item.id,
-        path: "",
-        bytes: 0,
-        totalBytes: null,
-        state: "downloading",
-        lyricsCached: false,
-      });
-      setNotice(`Downloading “${item.title}” for offline playback…`);
-      void invoke("download_start", { item, audioQuality })
-        .then(() => setNotice(`Offline download ready for “${item.title}”.`))
-        .catch((error) => setNotice(`Offline download failed: ${errorMessage(error)}`));
-      return;
-    }
-    if (action === "download_cancel") {
-      try {
-        await invoke("download_cancel", { songId: item.id });
-        setNotice(`Cancelling offline download for “${item.title}”…`);
-      } catch (error) {
-        setNotice(`Could not cancel download: ${errorMessage(error)}`);
-      }
-      return;
-    }
+    if (action === "download") return startDownload(item);
+    if (action === "download_cancel") return cancelDownload(item);
     if (action === "download_remove") {
-      try {
-        await invoke("download_remove", { songId: item.id });
-        setMenuDownload(null);
-        setNotice(`Removed offline download for “${item.title}”.`);
-      } catch (error) {
-        setNotice(`Could not remove offline download: ${errorMessage(error)}`);
-      }
+      await removeDownload(item);
       return;
     }
     if (action === "cache_remove") {
@@ -2689,36 +1543,6 @@ function App() {
       void playItem(removed.items[removed.index], removed.items, removed.index, null, autoMixEnabledRef.current);
   };
 
-  const moveQueueItem = (from: number, to: number) => {
-    const moved = moveItem(queueItems, queueIndex, from, to);
-    if (!moved) return;
-    setQueueItems(moved.items);
-    setQueueIndex(moved.index);
-  };
-
-  const flushPlaytime = async () => {
-    const session = playtimeRef.current;
-    if (!session || session.pendingMs <= 0 || session.flushing) return;
-    const amount = Math.round(session.pendingMs);
-    session.pendingMs = 0;
-    session.flushing = true;
-    try {
-      await invoke("history_record_playtime", { historyId: session.historyId, playTimeMs: amount });
-    } catch {
-      session.pendingMs += amount;
-    } finally {
-      session.flushing = false;
-    }
-    if (session.pendingMs >= 15000) void flushPlaytime();
-  };
-  const recordPlaytime = (position: number) => {
-    const session = playtimeRef.current;
-    if (!session || !Number.isFinite(position)) return;
-    const delta = position - session.lastPosition;
-    if (session.playing && delta >= 0 && delta <= 3) session.pendingMs += delta * 1000;
-    session.lastPosition = position;
-    if (session.pendingMs >= 15000) void flushPlaytime();
-  };
   const beginPlaytime = async (item: YtItem) => {
     if (settings.pauseListenHistory === true) return;
     await flushPlaytime();
@@ -2894,60 +1718,6 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playbackEffectKey(player)]);
 
-  // Stream URLs from ytm_player expire (expiresInSeconds) - a song paused longer than that, or one whose
-  // queue neighbor sits paused for a long time, hits a dead URL when playback resumes. onError below tries
-  // this before falling back to a generic error, so a stale-but-otherwise-fine song quietly gets a fresh URL
-  // and resumes at the same position instead of a confusing failure (previously, expiresInSeconds was parsed
-  // by the backend but never read anywhere on the frontend). Guarded by elapsed-time-vs-expiry so it only
-  // fires for the case it targets - a genuinely broken stream errors immediately, well inside its expiry
-  // window, and falls through to the existing error handling unchanged.
-  const streamRecoveryRef = useRef<{ session: unknown; attempts: number }>({ session: null, attempts: 0 });
-  const recoverStream = async (): Promise<boolean> => {
-    if (!player?.item.videoId) return false;
-    const session = player.session;
-    if (streamRecoveryRef.current.session !== session) streamRecoveryRef.current = { session, attempts: 0 };
-    const elapsedSeconds = (Date.now() - streamResolvedAtRef.current) / 1000;
-    const reason = recoveryReason(streamRecoveryRef.current.attempts, elapsedSeconds, player.payload.expiresInSeconds);
-    if (!reason) return false;
-    streamRecoveryRef.current.attempts += 1;
-    const resumeAt = audioRef.current?.currentTime ?? playbackSeconds;
-    const wasPlaying = audioRef.current ? !audioRef.current.paused || audioRef.current.autoplay || isPlaying : false;
-    const item = player.item;
-    const failedUrl = player.payload.streamUrl;
-    const localSource = isLocalStream(failedUrl);
-    setNotice(recoveryNotice(reason, streamRecoveryRef.current.attempts, localSource));
-    try {
-      if (reason === "rejected" || localSource)
-        await invoke("ytm_report_stream_failure", { videoId: item.videoId, streamUrl: failedUrl }).catch(
-          () => undefined,
-        );
-      const payload = await invoke<PlayerPayload>("ytm_player", streamRequest(item, audioQuality));
-      // The user may have started another track while the fresh URL was resolving (last click wins).
-      if (playbackSessionRef.current !== session) return false;
-      streamResolvedAtRef.current = Date.now();
-      setPlayer((current) => withRefreshedPayload(current, session, payload));
-      if (audioRef.current) {
-        audioRef.current.src = mediaSrc(payload.streamUrl) ?? payload.streamUrl;
-        audioRef.current.currentTime = resumeAt;
-        if (wasPlaying)
-          void audioRef.current
-            .play()
-            .then(() => setIsPlaying(true))
-            .catch(() => setIsPlaying(false));
-      }
-      return true;
-    } catch (error) {
-      if (playbackSessionRef.current === session) setNotice(String(error));
-      return false;
-    }
-  };
-
-  useEffect(() => {
-    if (!audioRef.current) return;
-    audioRef.current.playbackRate = playbackSpeed;
-    (audioRef.current as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = settings.varispeed !== true;
-  }, [playbackSpeed, settings.varispeed]);
-
   useEffect(() => {
     if (settings.persistentQueue !== true) {
       persistentQueueLoadedRef.current = false;
@@ -2992,7 +1762,14 @@ function App() {
     } catch {
       localStorage.removeItem("meld:persistentQueue");
     }
-  }, [settings.persistentQueue]);
+  }, [
+    settings.persistentQueue,
+    setNotice,
+    setQueueContinuation,
+    setQueueContinuationKind,
+    setQueueIndex,
+    setQueueItems,
+  ]);
 
   useEffect(() => {
     if (settings.persistentQueue !== true) {
@@ -3047,62 +1824,9 @@ function App() {
     player,
     playbackSeconds,
     isPlaying,
+    setNotice,
+    audioRef,
   ]);
-
-  const togglePlayback = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (audio.paused) {
-      void audio
-        .play()
-        .then(() => setIsPlaying(true))
-        .catch((error) => setNotice(`Audio playback failed: ${errorMessage(error)}`));
-    } else {
-      audio.pause();
-      setIsPlaying(false);
-    }
-  };
-
-  const seekPlayback = (value: number) => {
-    if (!audioRef.current || !Number.isFinite(value)) return;
-    audioRef.current.currentTime = value;
-    setPlaybackSeconds(value);
-  };
-
-  const seekByPlayerGesture = (direction: -1 | 1) => {
-    const now = performance.now();
-    const previous = seekGestureRef.current;
-    const multiplier =
-      settings.seekExtraSeconds === true && now - previous.timestamp < 1000 ? previous.multiplier + 1 : 1;
-    seekGestureRef.current = { timestamp: now, multiplier };
-    const seconds = 5 * multiplier;
-    seekPlayback(
-      Math.min(durationSeconds || Number.MAX_SAFE_INTEGER, Math.max(0, playbackSeconds + direction * seconds)),
-    );
-  };
-
-  const adjustVolumeByWheel = (event: { deltaY: number; preventDefault: () => void }) => {
-    event.preventDefault();
-    const next = Math.min(1, Math.max(0, Number((volume + (event.deltaY < 0 ? 0.05 : -0.05)).toFixed(2))));
-    updateVolume(next);
-  };
-  const updateVolume = (value: number) => {
-    const audio = audioRef.current;
-    if (audio && settings.pauseOnMute === true && value === 0 && !audio.paused) {
-      wasPlayingBeforeMuteRef.current = true;
-      audio.pause();
-      setIsPlaying(false);
-    } else if (audio && settings.pauseOnMute === true && value > 0 && wasPlayingBeforeMuteRef.current && audio.paused) {
-      wasPlayingBeforeMuteRef.current = false;
-      void audio
-        .play()
-        .then(() => setIsPlaying(true))
-        .catch((error) => setNotice(`Audio playback failed: ${errorMessage(error)}`));
-    }
-    setVolume(value);
-    if (audio) audio.volume = value;
-    void invoke("settings_set", { key: "playerVolume", value: String(value) }).catch(() => undefined);
-  };
 
   useEffect(() => {
     const mediaSession = navigator.mediaSession;
@@ -3181,188 +1905,117 @@ function App() {
     queueContinuation,
     queueIndex,
     queueItems.length,
+    setNotice,
+    seekPlayback,
+    audioRef,
   ]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const typing =
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.tagName === "SELECT" ||
-        target?.isContentEditable;
-      if (typing && !(event.key === "Escape")) return;
-      if (event.key === "Escape") {
-        if (settingsOpen) {
-          setSettingsOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (editItem) {
-          setEditItem(null);
-          event.preventDefault();
-          return;
-        }
-        if (spotifyAddItem) {
-          setSpotifyAddItem(null);
-          event.preventDefault();
-          return;
-        }
-        if (spotifyLikedOpen) {
-          setSpotifyLikedOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (spotifyOpenPlaylist) {
-          setSpotifyOpenPlaylist(null);
-          event.preventDefault();
-          return;
-        }
-        if (youtubeMatchItem) {
-          setYoutubeMatchItem(null);
-          event.preventDefault();
-          return;
-        }
-        if (sleepTimerOpen) {
-          setSleepTimerOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (artistPickerItem) {
-          setArtistPickerItem(null);
-          event.preventDefault();
-          return;
-        }
-        if (playlistPickerItems) {
-          setPlaylistPickerItems(null);
-          event.preventDefault();
-          return;
-        }
-        if (createPlaylistOpen) {
-          setCreatePlaylistOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (logoutDialogOpen) {
-          setLogoutDialogOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (lyrics || detail || playlist || menuItem || queueOpen || playerExpanded || infoItem) {
-          closeTransientLayers();
-          event.preventDefault();
-        }
+  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    const typing =
+      target?.tagName === "INPUT" ||
+      target?.tagName === "TEXTAREA" ||
+      target?.tagName === "SELECT" ||
+      target?.isContentEditable;
+    if (typing && !(event.key === "Escape")) return;
+    if (event.key === "Escape") {
+      if (settingsOpen) {
+        setSettingsOpen(false);
+        event.preventDefault();
         return;
       }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+      if (editItem) {
+        setEditItem(null);
         event.preventDefault();
-        document.querySelector<HTMLInputElement>(".search-form input")?.focus();
         return;
       }
-      if (event.altKey && event.key === "ArrowLeft") {
+      if (spotifyAddItem) {
+        setSpotifyAddItem(null);
         event.preventDefault();
-        goBack();
         return;
       }
-      if (event.altKey && event.key === "ArrowRight") {
+      if (spotifyLikedOpen) {
+        setSpotifyLikedOpen(false);
         event.preventDefault();
-        navigateForward();
         return;
       }
-      if (!player) return;
-      if (event.code === "Space") {
+      if (spotifyOpenPlaylist) {
+        setSpotifyOpenPlaylist(null);
         event.preventDefault();
-        togglePlayback();
         return;
       }
-      if (event.key === "ArrowLeft") {
+      if (youtubeMatchItem) {
+        setYoutubeMatchItem(null);
         event.preventDefault();
-        seekPlayback(Math.max(0, playbackSeconds - (event.shiftKey ? 10 : 5)));
         return;
       }
-      if (event.key === "ArrowRight") {
+      if (sleepTimerOpen) {
+        setSleepTimerOpen(false);
         event.preventDefault();
-        seekPlayback(Math.min(durationSeconds || Number.MAX_SAFE_INTEGER, playbackSeconds + (event.shiftKey ? 10 : 5)));
+        return;
       }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    active,
-    artistPickerItem,
-    backStack,
-    createPlaylistOpen,
-    detail,
-    durationSeconds,
-    editItem,
-    forwardStack,
-    infoItem,
-    logoutDialogOpen,
-    lyrics,
-    menuItem,
-    navigateBack,
-    navigateForward,
-    navigateTo,
-    playbackSeconds,
-    player,
-    playerExpanded,
-    playlist,
-    playlistPickerItems,
-    queueOpen,
-    settingsOpen,
-    sleepTimerOpen,
-    spotifyAddItem,
-    spotifyLikedOpen,
-    spotifyOpenPlaylist,
-    youtubeMatchItem,
-  ]);
-
-  const formatTime = (seconds: number) => {
-    const safe = Math.max(0, Math.floor(seconds));
-    return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
-  };
-
-  const loadAutomixItems = async (current: YtItem, existing: YtItem[]) => {
-    if (
-      settings.autoLoadMore === false ||
-      !settings.similarContent ||
-      (settings.disableLoadMoreWhenRepeatAll && repeatMode === "all") ||
-      !current.videoId ||
-      automixLoadingRef.current
-    )
-      return [];
-    automixLoadingRef.current = true;
-    try {
-      const page = await invoke<QueuePage>("ytm_next", {
-        videoId: current.videoId,
-        playlistId: current.playPlaylistId ?? current.playlistId ?? `RDAMVM${current.videoId}`,
-        setVideoId: current.setVideoId ?? null,
-        index: null,
-        params: current.params ?? null,
-        continuation: null,
-      });
-      let additions = page.items.filter(
-        (value) => value.videoId && value.id !== current.id && !existing.some((item) => item.id === value.id),
-      );
-      if (additions.length === 0 && page.relatedBrowseId) {
-        additions = (await invoke<YtItem[]>("ytm_related", { browseId: page.relatedBrowseId })).filter(
-          (value) => value.videoId && value.id !== current.id && !existing.some((item) => item.id === value.id),
-        );
+      if (artistPickerItem) {
+        setArtistPickerItem(null);
+        event.preventDefault();
+        return;
       }
-      if (shuffleEnabled && additions.length > 1) {
-        additions = [...additions];
-        for (let index = additions.length - 1; index > 0; index -= 1) {
-          const swapIndex = Math.floor(Math.random() * (index + 1));
-          [additions[index], additions[swapIndex]] = [additions[swapIndex], additions[index]];
-        }
+      if (playlistPickerItems) {
+        setPlaylistPickerItems(null);
+        event.preventDefault();
+        return;
       }
-      return additions;
-    } catch {
-      return [];
-    } finally {
-      automixLoadingRef.current = false;
+      if (createPlaylistOpen) {
+        setCreatePlaylistOpen(false);
+        event.preventDefault();
+        return;
+      }
+      if (logoutDialogOpen) {
+        setLogoutDialogOpen(false);
+        event.preventDefault();
+        return;
+      }
+      if (lyrics || detail || playlist || menuItem || queueOpen || playerExpanded || infoItem) {
+        closeTransientLayers();
+        event.preventDefault();
+      }
+      return;
     }
-  };
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      document.querySelector<HTMLInputElement>(".search-form input")?.focus();
+      return;
+    }
+    if (event.altKey && event.key === "ArrowLeft") {
+      event.preventDefault();
+      goBack();
+      return;
+    }
+    if (event.altKey && event.key === "ArrowRight") {
+      event.preventDefault();
+      navigateForward();
+      return;
+    }
+    if (!player) return;
+    if (event.code === "Space") {
+      event.preventDefault();
+      togglePlayback();
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      seekPlayback(Math.max(0, playbackSeconds - (event.shiftKey ? 10 : 5)));
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      seekPlayback(Math.min(durationSeconds || Number.MAX_SAFE_INTEGER, playbackSeconds + (event.shiftKey ? 10 : 5)));
+    }
+  });
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => onKeyDown(event);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
 
   const playQueueIndex = async (index: number) => {
     let items = queueItems;
@@ -3677,75 +2330,28 @@ function App() {
     };
   }, [detail?.status, detail?.data.kind, detail?.data.browseId]);
 
-  const activeLyricIndex = useMemo(() => {
-    if (!lyrics || lyrics.status !== "ready" || !lyrics.data.synced || lyrics.data.lines.length === 0) return -1;
-    const position = playbackSeconds * 1000;
-    const nextIndex = lyrics.data.lines.findIndex((line) => line.timeMs > position);
-    return nextIndex < 0 ? lyrics.data.lines.length - 1 : Math.max(0, nextIndex - 1);
-  }, [lyrics, playbackSeconds]);
-
-  useEffect(() => {
-    if (activeLyricIndex < 0 || !lyricsAutoScrollEnabled) return;
-    const line = activeLyricRef.current;
-    const container = lyricsContainerRef.current;
-    if (!line || !container) return;
-    const align = () => {
-      const lineRect = line.getBoundingClientRect();
-      const containerRect = container.getBoundingClientRect();
-      const lineCenter = lineRect.top - containerRect.top + lineRect.height / 2;
-      const targetTop = container.scrollTop + lineCenter - container.clientHeight / 2;
-      const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-      container.scrollTo({ top: Math.min(maxTop, Math.max(0, targetTop)), behavior: "smooth" });
-    };
-    const frame = requestAnimationFrame(align);
-    return () => cancelAnimationFrame(frame);
-  }, [activeLyricIndex, playerExpanded, lyricsAutoScrollEnabled, lyrics?.status]);
+  const { activeLyricIndex } = useLyricsFollow({
+    activeLyricRef,
+    lyrics,
+    lyricsAutoScrollEnabled,
+    lyricsContainerRef,
+    playbackSeconds,
+    playerExpanded,
+  });
 
   const visibleTitle = useMemo(() => navigation.find((item) => item.key === active)?.label ?? "Home", [active]);
   const libraryQuery = librarySearch.trim().toLowerCase();
-  const playlistQuery = playlistSearch.trim().toLowerCase();
   const matchesLibraryQuery = (title: string) =>
     libraryMode === "playlists"
       ? !playlistQuery || title.toLowerCase().includes(playlistQuery)
       : !libraryQuery || title.toLowerCase().includes(libraryQuery);
-  const matchesPlaylistQuery = (title: string) => !playlistQuery || title.toLowerCase().includes(playlistQuery);
-  const hasVisiblePlaylistAutoEntries =
-    (settings.show_liked_playlist !== false && matchesPlaylistQuery("Liked Songs")) ||
-    (settings.show_downloaded_playlist !== false && matchesPlaylistQuery("Downloaded")) ||
-    (settings.show_top_playlist !== false && matchesPlaylistQuery("Top Songs")) ||
-    (settings.show_uploaded_playlist !== false && matchesPlaylistQuery("Uploaded"));
-  const visiblePlaylists = useMemo(() => {
-    const values = localPlaylists.filter((item) => matchesPlaylistQuery(item.title));
-    if (playlistSort === "name") {
-      const sorted = [...values].sort((left, right) => left.title.localeCompare(right.title));
-      return playlistSortDescending ? sorted.reverse() : sorted;
-    }
-    if (playlistSort === "count") {
-      const sorted = [...values].sort((left, right) => (left.songCount ?? 0) - (right.songCount ?? 0));
-      return playlistSortDescending ? sorted.reverse() : sorted;
-    }
-    return playlistSortDescending ? values : [...values].reverse();
-  }, [localPlaylists, playlistQuery, playlistSort, playlistSortDescending]);
-  const visiblePlaylistPicker = useMemo(() => {
-    const query = playlistPickerSearch.trim().toLowerCase();
-    const values = localPlaylists.filter((item) => !query || item.title.toLowerCase().includes(query));
-    if (playlistPickerSort === "name") {
-      const sorted = [...values].sort((left, right) => left.title.localeCompare(right.title));
-      return playlistPickerSortDescending ? sorted.reverse() : sorted;
-    }
-    if (playlistPickerSort === "count") {
-      const sorted = [...values].sort((left, right) => (left.songCount ?? 0) - (right.songCount ?? 0));
-      return playlistPickerSortDescending ? sorted.reverse() : sorted;
-    }
-    return playlistPickerSortDescending ? values : [...values].reverse();
-  }, [localPlaylists, playlistPickerSearch, playlistPickerSort, playlistPickerSortDescending]);
   const visibleLocalHistory = useMemo(() => {
     const queryText = historyQuery.trim().toLowerCase();
     if (history.status !== "ready") return [];
     return history.data.filter(
       (item) => !hideItem(item) && (!queryText || `${item.title} ${item.subtitle}`.toLowerCase().includes(queryText)),
     );
-  }, [history.data, history.status, historyQuery, settings.hideExplicit, settings.hideVideoSongs]);
+  }, [hideItem, history.data, history.status, historyQuery]);
   const statsQueueItems = useMemo(
     () => (stats.status === "ready" ? stats.data.rows.map((row) => row.item) : []),
     [stats.data.rows, stats.status],
@@ -3781,8 +2387,7 @@ function App() {
     libraryQuery,
     librarySort,
     librarySortDescending,
-    settings.hideExplicit,
-    settings.hideVideoSongs,
+    hideItem,
   ]);
 
   return (
@@ -3959,1489 +2564,143 @@ function App() {
         )}
 
         <div className="page-scroll">
-          {active === "home" && home.status === "loading" && (
-            <div className="boot-screen">
-              <div className="brand-mark">M</div>
-              <h2>Loading Meld</h2>
-              <p>Connecting to YouTube Music…</p>
-              <div className="spinner" />
-            </div>
-          )}
-          {active === "home" && home.status !== "loading" && (
-            <>
-              <section className="content-section">
-                <div className="section-heading">
-                  <div>
-                    <p className="eyebrow">Discover</p>
-                    <h2>Explore YouTube Music</h2>
-                    <p>Open the live source discovery pages without leaving Meld Desktop.</p>
-                  </div>
-                </div>
-                <div className="library-filter-chips" role="navigation" aria-label="Discover">
-                  <button
-                    className="library-tab"
-                    onClick={() =>
-                      void openItem({
-                        id: "FEmusic_explore",
-                        kind: "browse",
-                        title: "Explore",
-                        subtitle: "YouTube Music discovery",
-                        artists: [],
-                        browseId: "FEmusic_explore",
-                      })
-                    }
-                  >
-                    Explore
-                  </button>
-                  <button
-                    className="library-tab"
-                    onClick={() =>
-                      void openItem({
-                        id: "FEmusic_charts",
-                        kind: "browse",
-                        title: "Charts",
-                        subtitle: "YouTube Music charts",
-                        artists: [],
-                        browseId: "FEmusic_charts",
-                        params: "ggMGCgQIgAQ%3D",
-                      })
-                    }
-                  >
-                    Charts
-                  </button>
-                  <button
-                    className="library-tab"
-                    onClick={() =>
-                      void openItem({
-                        id: "FEmusic_moods_and_genres",
-                        kind: "browse",
-                        title: "Moods & genres",
-                        subtitle: "YouTube Music moods and genres",
-                        artists: [],
-                        browseId: "FEmusic_moods_and_genres",
-                      })
-                    }
-                  >
-                    Moods & genres
-                  </button>
-                  <button
-                    className="library-tab"
-                    onClick={() =>
-                      void openItem({
-                        id: "FEmusic_new_releases_albums",
-                        kind: "browse",
-                        title: "New releases",
-                        subtitle: "YouTube Music new releases",
-                        artists: [],
-                        browseId: "FEmusic_new_releases_albums",
-                      })
-                    }
-                  >
-                    New releases
-                  </button>
-                </div>
-              </section>
-              {speedDial.length > 0 && (
-                <section className="content-section">
-                  <div className="section-heading">
-                    <div>
-                      <p className="eyebrow">Pinned</p>
-                      <h2>Speed Dial</h2>
-                    </div>
-                  </div>
-                  <div className="card-row">
-                    {speedDial.map((item) => (
-                      <ItemCard
-                        key={`speed-${item.kind}-${item.id}`}
-                        item={item}
-                        onOpen={openItem}
-                        onMenu={(value) => void openMenu(value)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-              {home.status === "error" && (
-                <div className="state-panel error">
-                  <h2>Home unavailable</h2>
-                  <p>{home.error}</p>
-                  <button className="primary-button" onClick={() => void loadHome()}>
-                    Retry
-                  </button>
-                </div>
-              )}
-              {home.status === "ready" && home.data.sections.length === 0 && (
-                <div className="state-panel">
-                  <h2>No Home sections</h2>
-                  <p>YouTube Music returned no typed sections for the current anonymous session.</p>
-                  <button className="primary-button" onClick={() => void loadHome()}>
-                    Retry
-                  </button>
-                </div>
-              )}
-              {home.status === "ready" &&
-                home.data.sections.map((section) => (
-                  <Section
-                    key={section.title}
-                    section={section}
-                    onOpen={openItem}
-                    shouldHide={hideItem}
-                    onMenu={(item) => void openMenu(item)}
-                  />
-                ))}
-              {home.status === "ready" && home.data.continuation && (
-                <button
-                  className="primary-button home-more"
-                  disabled={homeMoreLoading}
-                  onClick={() => void loadHomeMore()}
-                >
-                  {homeMoreLoading ? "Loading more Home…" : "Load more Home"}
-                </button>
-              )}
-            </>
+          {active === "home" && (
+            <HomeScreen
+              hideItem={hideItem}
+              home={home}
+              homeMoreLoading={homeMoreLoading}
+              loadHome={loadHome}
+              loadHomeMore={loadHomeMore}
+              openItem={openItem}
+              openMenu={openMenu}
+              speedDial={speedDial}
+            />
           )}
 
           {active === "search_input" && (
-            <div className="search-page">
-              <div className="search-intro">
-                <p className="eyebrow">Online search</p>
-                <h2>{submittedQuery ? `Results for “${submittedQuery}”` : "Search YouTube Music"}</h2>
-                <p>Results remain typed as Meld YTItems: songs, albums, playlists, artists, podcasts and episodes.</p>
-                <button
-                  className="secondary-button"
-                  onClick={() => (selectionMode ? closeSelection() : setSelectionMode(true))}
-                >
-                  {selectionMode ? `Done${selectedItems.length > 0 ? ` · ${selectedItems.length}` : ""}` : "Select"}
-                </button>
-              </div>
-              {search.status === "idle" && (
-                <div className="state-panel">
-                  <p>Enter a query above to search.</p>
-                </div>
-              )}
-              {search.status === "loading" && (
-                <div className="state-panel">
-                  <div className="spinner" />
-                  <p>Searching YouTube Music…</p>
-                </div>
-              )}
-              {search.status === "error" && (
-                <div className="state-panel error">
-                  <h2>Search unavailable</h2>
-                  <p>{search.error}</p>
-                </div>
-              )}
-              {search.status === "ready" && (
-                <div className="result-list">
-                  {search.data.items
-                    .filter((item) => !hideItem(item))
-                    .map((item) => (
-                      <div className="result-row" key={`${item.kind}-${item.id}`}>
-                        {selectionMode && (
-                          <input
-                            className="selection-checkbox"
-                            type="checkbox"
-                            checked={selectedItems.some((value) => value.id === item.id)}
-                            onChange={() => toggleSelectedItem(item)}
-                            aria-label={`Select ${item.title}`}
-                          />
-                        )}
-                        <ItemCard item={item} onOpen={openItem} />
-                        {item.kind === "song" && (
-                          <InlineLikeButton
-                            item={item}
-                            autoDownloadOnLike={settings.autoDownloadOnLike === true}
-                            audioQuality={audioQuality}
-                          />
-                        )}
-                        <div className="row-actions">
-                          <button className="row-action" onClick={() => void openItem(item)}>
-                            {item.kind === "song" ? "Play in Meld" : "Open"}
-                          </button>
-                          {item.kind === "song" && (
-                            <button className="row-action" onClick={() => void openLyrics(item)}>
-                              Lyrics
-                            </button>
-                          )}
-                          <button
-                            className="row-action menu-trigger"
-                            onClick={() => void openMenu(item)}
-                            title={`More options for ${item.title}`}
-                          >
-                            ⋮
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              )}
-              {search.data.continuation && (
-                <button
-                  className="primary-button playlist-more"
-                  disabled={searchMoreLoading}
-                  onClick={() => void loadSearchMore()}
-                >
-                  {searchMoreLoading ? "Loading more results…" : "Load more results"}
-                </button>
-              )}
-            </div>
+            <SearchScreen
+              audioQuality={audioQuality}
+              closeSelection={closeSelection}
+              hideItem={hideItem}
+              loadSearchMore={loadSearchMore}
+              openItem={openItem}
+              openLyrics={openLyrics}
+              openMenu={openMenu}
+              search={search}
+              searchMoreLoading={searchMoreLoading}
+              selectedItems={selectedItems}
+              selectionMode={selectionMode}
+              setSelectionMode={setSelectionMode}
+              settings={settings}
+              submittedQuery={submittedQuery}
+              toggleSelectedItem={toggleSelectedItem}
+            />
           )}
 
           {active === "history" && (
-            <div className="history-page">
-              <div className="search-intro">
-                <p className="eyebrow">Playback history</p>
-                <h2>History</h2>
-                <p>
-                  {historySource === "remote"
-                    ? "Your YouTube Music history, grouped the same way as Meld."
-                    : "Tracks opened in Meld are kept locally on this device."}
-                </p>
-                <div className="history-toolbar">
-                  <div className="history-tabs" role="tablist" aria-label="History source">
-                    <button
-                      role="tab"
-                      aria-selected={historySource === "local"}
-                      className={historySource === "local" ? "library-tab active" : "library-tab"}
-                      onClick={() => setHistorySource("local")}
-                    >
-                      Local
-                    </button>
-                    {sessionStatus.authenticated && (
-                      <button
-                        role="tab"
-                        aria-selected={historySource === "remote"}
-                        className={historySource === "remote" ? "library-tab active" : "library-tab"}
-                        onClick={() => setHistorySource("remote")}
-                      >
-                        Remote
-                      </button>
-                    )}
-                  </div>
-                  <label className="history-search">
-                    <span>Filter</span>
-                    <input
-                      value={historyQuery}
-                      onChange={(event) => setHistoryQuery(event.target.value)}
-                      placeholder="Search history"
-                      aria-label="Search history"
-                    />
-                  </label>
-                  {historySource === "local" && (
-                    <button
-                      className="secondary-button"
-                      onClick={async () => {
-                        try {
-                          await invoke("history_clear");
-                          await loadHistory();
-                          setNotice("Meld playback history cleared.");
-                        } catch (error) {
-                          setNotice(`History could not be cleared: ${errorMessage(error)}`);
-                        }
-                      }}
-                    >
-                      Clear local history
-                    </button>
-                  )}
-                  <button
-                    className="secondary-button"
-                    onClick={() => (selectionMode ? closeSelection() : setSelectionMode(true))}
-                  >
-                    {selectionMode ? `Done${selectedItems.length > 0 ? ` · ${selectedItems.length}` : ""}` : "Select"}
-                  </button>
-                </div>
-              </div>
-              {historySource === "local" && history.status === "loading" && (
-                <div className="state-panel">
-                  <div className="spinner" />
-                  <p>Loading local history…</p>
-                </div>
-              )}
-              {historySource === "local" && history.status === "error" && (
-                <div className="state-panel error">
-                  <h2>History unavailable</h2>
-                  <p>{history.error}</p>
-                  <button className="primary-button" onClick={() => void loadHistory()}>
-                    Retry
-                  </button>
-                </div>
-              )}
-              {historySource === "local" && history.status === "ready" && history.data.length === 0 && (
-                <div className="state-panel">
-                  <h2>No local history yet</h2>
-                  <p>Play a song from Home or Search and it will appear here.</p>
-                </div>
-              )}
-              {historySource === "local" && history.status === "ready" && history.data.length > 0 && (
-                <div className="result-list">
-                  {visibleLocalHistory.map((item, index) => (
-                    <div className="result-row" key={`${item.id}-${index}`}>
-                      {selectionMode && (
-                        <input
-                          className="selection-checkbox"
-                          type="checkbox"
-                          checked={selectedItems.some((value) => value.id === item.id)}
-                          onChange={() => toggleSelectedItem(item)}
-                          aria-label={`Select ${item.title}`}
-                        />
-                      )}
-                      <ItemCard item={item} onOpen={(value) => openItem(value, visibleLocalHistory, index)} />
-                      {item.kind === "song" && (
-                        <InlineLikeButton
-                          item={item}
-                          autoDownloadOnLike={settings.autoDownloadOnLike === true}
-                          audioQuality={audioQuality}
-                        />
-                      )}
-                      <div className="row-actions">
-                        <button className="row-action" onClick={() => void openItem(item, visibleLocalHistory, index)}>
-                          Play in Meld
-                        </button>
-                        {item.kind === "song" && (
-                          <button className="row-action" onClick={() => void openLyrics(item)}>
-                            Lyrics
-                          </button>
-                        )}
-                        <button
-                          className="row-action menu-trigger"
-                          onClick={() => void openMenu(item)}
-                          title={`More options for ${item.title}`}
-                        >
-                          ⋮
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {historySource === "remote" && remoteHistory.status === "loading" && (
-                <div className="state-panel">
-                  <div className="spinner" />
-                  <p>Loading YouTube Music history…</p>
-                </div>
-              )}
-              {historySource === "remote" && remoteHistory.status === "error" && (
-                <div className="state-panel error">
-                  <h2>Remote history unavailable</h2>
-                  <p>{remoteHistory.error}</p>
-                  <button className="primary-button" onClick={() => void loadRemoteHistory()}>
-                    Retry
-                  </button>
-                </div>
-              )}
-              {historySource === "remote" &&
-                remoteHistory.status === "ready" &&
-                remoteHistory.data.sections.length === 0 && (
-                  <div className="state-panel">
-                    <h2>No remote history</h2>
-                    <p>YouTube Music returned no history sections for this account.</p>
-                  </div>
-                )}
-              {historySource === "remote" &&
-                remoteHistory.status === "ready" &&
-                remoteHistory.data.sections.map((section) => {
-                  const queryText = historyQuery.trim().toLowerCase();
-                  const songs = section.songs.filter(
-                    (item) =>
-                      !hideItem(item) &&
-                      (!queryText || `${item.title} ${item.subtitle}`.toLowerCase().includes(queryText)),
-                  );
-                  return songs.length === 0 ? null : (
-                    <section className="history-section" key={section.title}>
-                      <div className="section-heading">
-                        <h3>{section.title}</h3>
-                      </div>
-                      <div className="result-list">
-                        {songs.map((item, index) => (
-                          <div className="result-row" key={`${section.title}-${item.id}-${index}`}>
-                            {selectionMode && (
-                              <input
-                                className="selection-checkbox"
-                                type="checkbox"
-                                checked={selectedItems.some((value) => value.id === item.id)}
-                                onChange={() => toggleSelectedItem(item)}
-                                aria-label={`Select ${item.title}`}
-                              />
-                            )}
-                            <ItemCard item={item} onOpen={(value) => openItem(value, songs, index)} />
-                            {item.kind === "song" && (
-                              <InlineLikeButton
-                                item={item}
-                                autoDownloadOnLike={settings.autoDownloadOnLike === true}
-                                audioQuality={audioQuality}
-                              />
-                            )}
-                            <div className="row-actions">
-                              <button className="row-action" onClick={() => void openItem(item, songs, index)}>
-                                Play in Meld
-                              </button>
-                              {item.kind === "song" && (
-                                <button className="row-action" onClick={() => void openLyrics(item)}>
-                                  Lyrics
-                                </button>
-                              )}
-                              <button
-                                className="row-action menu-trigger"
-                                onClick={() => void openMenu(item)}
-                                title={`More options for ${item.title}`}
-                              >
-                                ⋮
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  );
-                })}
-            </div>
+            <HistoryScreen
+              audioQuality={audioQuality}
+              closeSelection={closeSelection}
+              hideItem={hideItem}
+              history={history}
+              historyQuery={historyQuery}
+              historySource={historySource}
+              loadHistory={loadHistory}
+              loadRemoteHistory={loadRemoteHistory}
+              openItem={openItem}
+              openLyrics={openLyrics}
+              openMenu={openMenu}
+              remoteHistory={remoteHistory}
+              selectedItems={selectedItems}
+              selectionMode={selectionMode}
+              sessionStatus={sessionStatus}
+              setHistoryQuery={setHistoryQuery}
+              setHistorySource={setHistorySource}
+              setNotice={setNotice}
+              setSelectionMode={setSelectionMode}
+              settings={settings}
+              toggleSelectedItem={toggleSelectedItem}
+              visibleLocalHistory={visibleLocalHistory}
+            />
           )}
 
           {active === "stats" && (
-            <div className="stats-page">
-              <div className="search-intro">
-                <p className="eyebrow">Listening statistics</p>
-                <h2>Stats</h2>
-                <p>Most-played songs and listening time from Meld playback history on this device.</p>
-                <div className="history-tabs" role="tablist" aria-label="Stats period">
-                  {(["all", "day", "week", "month", "year"] as const).map((period) => (
-                    <button
-                      key={period}
-                      role="tab"
-                      aria-selected={statsPeriod === period}
-                      className={statsPeriod === period ? "library-tab active" : "library-tab"}
-                      onClick={() => setStatsPeriod(period)}
-                    >
-                      {period === "all"
-                        ? "All time"
-                        : period === "day"
-                          ? "24 hours"
-                          : period[0].toUpperCase() + period.slice(1)}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  className="secondary-button"
-                  onClick={() => setRecapOpen(true)}
-                  disabled={stats.status !== "ready" || stats.data.totalPlays === 0}
-                >
-                  Local recap
-                </button>
-              </div>
-              {stats.status === "loading" && (
-                <div className="state-panel">
-                  <div className="spinner" />
-                  <p>Loading listening statistics…</p>
-                </div>
-              )}
-              {stats.status === "error" && (
-                <div className="state-panel error">
-                  <h2>Stats unavailable</h2>
-                  <p>{stats.error}</p>
-                  <button className="primary-button" onClick={() => void loadStats()}>
-                    Retry
-                  </button>
-                </div>
-              )}
-              {stats.status === "ready" && (
-                <>
-                  <div className="stats-summary-grid">
-                    <div className="stats-summary-card">
-                      <strong>{stats.data.totalPlays}</strong>
-                      <span>Plays</span>
-                    </div>
-                    <div className="stats-summary-card">
-                      <strong>{stats.data.totalMinutes}</strong>
-                      <span>Minutes listened</span>
-                    </div>
-                    <div className="stats-summary-card">
-                      <strong>{stats.data.uniqueSongs}</strong>
-                      <span>Unique songs</span>
-                    </div>
-                  </div>
-                  {(stats.data.artists.length > 0 || stats.data.albums.length > 0) && (
-                    <div className="stats-breakdown-grid">
-                      {stats.data.artists.length > 0 && (
-                        <section className="stats-breakdown">
-                          <h3>Top artists</h3>
-                          {stats.data.artists.slice(0, 10).map((artist, index) => (
-                            <button
-                              className="stats-breakdown-row"
-                              key={`artist-${artist.id}`}
-                              onClick={() =>
-                                void openItem({
-                                  id: artist.id,
-                                  kind: "artist",
-                                  title: artist.title,
-                                  subtitle: artist.subtitle,
-                                  thumbnail: artist.thumbnail,
-                                  artists: [],
-                                  browseId: artist.id,
-                                })
-                              }
-                            >
-                              <span>{index + 1}</span>
-                              <strong>{artist.title}</strong>
-                              <small>{artist.plays} plays</small>
-                            </button>
-                          ))}
-                        </section>
-                      )}
-                      {stats.data.albums.length > 0 && (
-                        <section className="stats-breakdown">
-                          <h3>Top albums</h3>
-                          {stats.data.albums.slice(0, 10).map((album, index) => (
-                            <button
-                              className="stats-breakdown-row"
-                              key={`album-${album.id}`}
-                              onClick={() =>
-                                void openItem({
-                                  id: album.id,
-                                  kind: "album",
-                                  title: album.title,
-                                  subtitle: album.subtitle,
-                                  thumbnail: album.thumbnail,
-                                  artists: [],
-                                  browseId: album.id,
-                                })
-                              }
-                            >
-                              <span>{index + 1}</span>
-                              <strong>{album.title}</strong>
-                              <small>{album.plays} plays</small>
-                            </button>
-                          ))}
-                        </section>
-                      )}
-                    </div>
-                  )}
-                  {stats.data.rows.length === 0 ? (
-                    <div className="state-panel">
-                      <h2>No listening history yet</h2>
-                      <p>Play a song from Home or Search and its statistics will appear here.</p>
-                    </div>
-                  ) : (
-                    <div className="result-list stats-list">
-                      {stats.data.rows.map((row, index) => (
-                        <div className="result-row stats-row" key={`${row.item.id}-${index}`}>
-                          <span className="stats-rank">{index + 1}</span>
-                          <ItemCard item={row.item} onOpen={(value) => openItem(value, statsQueueItems, index)} />
-                          <span
-                            className="stats-metrics"
-                            title="New plays use measured playback time; older history rows may use track-duration estimates."
-                          >
-                            {row.plays} play{row.plays === 1 ? "" : "s"} · {row.minutes} min listened
-                          </span>
-                          <div className="row-actions">
-                            <button
-                              className="row-action"
-                              onClick={() => void openItem(row.item, statsQueueItems, index)}
-                            >
-                              Play in Meld
-                            </button>
-                            <button
-                              className="row-action menu-trigger"
-                              onClick={() => void openMenu(row.item)}
-                              title={`More options for ${row.item.title}`}
-                              aria-label={`More options for ${row.item.title}`}
-                            >
-                              ⋮
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+            <StatsScreen
+              loadStats={loadStats}
+              openItem={openItem}
+              openMenu={openMenu}
+              setRecapOpen={setRecapOpen}
+              setStatsPeriod={setStatsPeriod}
+              stats={stats}
+              statsPeriod={statsPeriod}
+              statsQueueItems={statsQueueItems}
+            />
           )}
 
           {active === "library" && (
-            <div className="library-page">
-              <div className="search-intro">
-                <p className="eyebrow">On-device storage</p>
-                <h2>
-                  {libraryMode === "mix"
-                    ? "Library"
-                    : libraryMode === "cache"
-                      ? "Cache"
-                      : ["songs", "liked", "uploaded", "downloads", "top"].includes(libraryMode)
-                        ? libraryMode === "top"
-                          ? "Top Songs"
-                          : "Songs"
-                        : libraryMode === "playlists"
-                          ? "Playlists"
-                          : libraryMode === "albums"
-                            ? "Albums"
-                            : libraryMode === "artists"
-                              ? "Artists"
-                              : libraryMode === "podcasts"
-                                ? "Podcasts"
-                                : "Local Files"}
-                </h2>
-                <p>
-                  {libraryMode === "top"
-                    ? `Most-played songs from Meld history (${topPeriod === "all" ? "all time" : topPeriod}).`
-                    : libraryMode === "cache"
-                      ? "Songs cached during Meld playback, separate from explicit offline downloads."
-                      : ["songs", "liked", "uploaded", "downloads"].includes(libraryMode)
-                        ? "Songs are filtered by Liked, Library, Uploaded, or Downloaded exactly like Meld’s Songs screen."
-                        : libraryMode === "playlists"
-                          ? "Local playlists and YouTube Music playlists saved by the connected account."
-                          : libraryMode === "albums"
-                            ? "Albums represented by saved songs and their live source metadata."
-                            : libraryMode === "artists"
-                              ? "Artists represented by saved songs and their live source metadata."
-                              : libraryMode === "podcasts"
-                                ? "Podcast episodes and channels from your authenticated YouTube Music library."
-                                : "Items saved to the native SQLite library on this device."}
-                </p>
-                {!["songs", "liked", "uploaded", "downloads", "top", "podcasts"].includes(libraryMode) && (
-                  <div className="library-tabs" role="tablist" aria-label="Library filter">
-                    <button
-                      className={libraryMode === "mix" ? "library-tab active" : "library-tab"}
-                      aria-selected={libraryMode === "mix"}
-                      onClick={() => setLibraryMode("mix")}
-                    >
-                      Library
-                    </button>
-                    <button
-                      className={libraryMode === "playlists" ? "library-tab active" : "library-tab"}
-                      onClick={() => setLibraryMode(libraryMode === "playlists" ? "mix" : "playlists")}
-                    >
-                      Playlists
-                    </button>
-                    <button
-                      className={
-                        ["songs", "liked", "uploaded", "downloads", "top"].includes(libraryMode)
-                          ? "library-tab active"
-                          : "library-tab"
-                      }
-                      onClick={() =>
-                        ["songs", "liked", "uploaded", "downloads", "top"].includes(libraryMode)
-                          ? setLibraryMode("mix")
-                          : chooseLibrarySongFilter(librarySongFilter)
-                      }
-                    >
-                      Songs
-                    </button>
-                    <button
-                      className={libraryMode === "albums" ? "library-tab active" : "library-tab"}
-                      onClick={() => setLibraryMode(libraryMode === "albums" ? "mix" : "albums")}
-                    >
-                      Albums
-                    </button>
-                    <button
-                      className={libraryMode === "artists" ? "library-tab active" : "library-tab"}
-                      onClick={() => setLibraryMode(libraryMode === "artists" ? "mix" : "artists")}
-                    >
-                      Artists
-                    </button>
-                    <button
-                      className={libraryMode === "podcasts" ? "library-tab active" : "library-tab"}
-                      onClick={() => setLibraryMode(libraryMode === "podcasts" ? "mix" : "podcasts")}
-                    >
-                      Podcasts
-                    </button>
-                    <button
-                      className={libraryMode === "local" ? "library-tab active" : "library-tab"}
-                      onClick={() => setLibraryMode(libraryMode === "local" ? "mix" : "local")}
-                    >
-                      Local files
-                    </button>
-                    {libraryMode === "local" && (
-                      <button className="primary-button local-import-button" onClick={() => void importLocalFiles()}>
-                        Import audio files
-                      </button>
-                    )}
-                    {libraryMode === "playlists" && (
-                      <button className="primary-button" onClick={openCreatePlaylistDialog}>
-                        Create playlist
-                      </button>
-                    )}
-                  </div>
-                )}
-                {libraryMode === "mix" && (
-                  <div className="library-mix-toolbar">
-                    <label className="library-search">
-                      <span>Search</span>
-                      <input
-                        value={librarySearch}
-                        onChange={(event) => setLibrarySearch(event.target.value)}
-                        placeholder="Search your library"
-                        aria-label="Search your library"
-                      />
-                    </label>
-                    <span className="library-result-count">{filteredLibraryData.length} items</span>
-                    <select
-                      className="library-sort"
-                      value={libraryMixSort}
-                      onChange={(event) => setLibraryMixSort(event.target.value as "created" | "name")}
-                      aria-label="Sort library"
-                    >
-                      <option value="created">Recently added</option>
-                      <option value="name">Name</option>
-                    </select>
-                    <button
-                      className="secondary-button"
-                      onClick={() => setLibraryMixSortDescending((value) => !value)}
-                      title="Reverse sort order"
-                    >
-                      {libraryMixSortDescending ? "Descending" : "Ascending"}
-                    </button>
-                    <button
-                      className="secondary-button"
-                      onClick={() => setLibraryView((value) => (value === "grid" ? "list" : "grid"))}
-                      title={libraryView === "grid" ? "Switch to list view" : "Switch to grid view"}
-                      aria-label={libraryView === "grid" ? "Switch to list view" : "Switch to grid view"}
-                    >
-                      {libraryView === "grid" ? "List" : "Grid"}
-                    </button>
-                  </div>
-                )}
-                {["songs", "liked", "uploaded", "downloads"].includes(libraryMode) && (
-                  <div className="library-song-toolbar">
-                    <button
-                      className="library-tab active library-root-chip"
-                      onClick={() => setLibraryMode("mix")}
-                      title="Return to Library"
-                      aria-label="Return to Library"
-                    >
-                      Songs ×
-                    </button>
-                    <div className="library-filter-chips" role="tablist" aria-label="Song filter">
-                      <button
-                        className={librarySongFilter === "liked" ? "library-tab active" : "library-tab"}
-                        onClick={() => chooseLibrarySongFilter("liked")}
-                      >
-                        Liked
-                      </button>
-                      <button
-                        className={librarySongFilter === "library" ? "library-tab active" : "library-tab"}
-                        onClick={() => chooseLibrarySongFilter("library")}
-                      >
-                        Library
-                      </button>
-                      <button
-                        className={librarySongFilter === "uploaded" ? "library-tab active" : "library-tab"}
-                        onClick={() => chooseLibrarySongFilter("uploaded")}
-                      >
-                        Uploaded
-                      </button>
-                      <button
-                        className={librarySongFilter === "downloaded" ? "library-tab active" : "library-tab"}
-                        onClick={() => chooseLibrarySongFilter("downloaded")}
-                      >
-                        Downloaded
-                      </button>
-                    </div>
-                    <label className="library-search">
-                      <span>Search</span>
-                      <input
-                        value={librarySearch}
-                        onChange={(event) => setLibrarySearch(event.target.value)}
-                        placeholder="Search your songs"
-                        aria-label="Search library songs"
-                      />
-                    </label>
-                    <select
-                      className="library-sort"
-                      value={librarySort}
-                      onChange={(event) => setLibrarySort(event.target.value as LibrarySort)}
-                      aria-label="Sort library songs"
-                    >
-                      <option value="created">Recently added</option>
-                      <option value="name">Name</option>
-                      <option value="artist">Artist</option>
-                      <option value="playtime">Play time</option>
-                    </select>
-                    <button
-                      className="secondary-button"
-                      onClick={() => setLibrarySortDescending((value) => !value)}
-                      title="Reverse sort order"
-                    >
-                      {librarySortDescending ? "Descending" : "Ascending"}
-                    </button>
-                    <button
-                      className="secondary-button"
-                      onClick={() => (selectionMode ? closeSelection() : setSelectionMode(true))}
-                    >
-                      {selectionMode ? `Done${selectedItems.length > 0 ? ` · ${selectedItems.length}` : ""}` : "Select"}
-                    </button>
-                    {filteredLibraryData.length > 0 && (
-                      <button
-                        className="primary-button"
-                        onClick={() => void shuffleLibrary()}
-                        title="Shuffle all visible songs"
-                      >
-                        Shuffle
-                      </button>
-                    )}
-                  </div>
-                )}
-                {libraryMode === "top" && (
-                  <div className="library-song-toolbar">
-                    <button
-                      className="library-tab active library-root-chip"
-                      onClick={() => setLibraryMode("mix")}
-                      title="Return to Library"
-                      aria-label="Return to Library"
-                    >
-                      Top Songs ×
-                    </button>
-                    <div className="library-filter-chips" role="tablist" aria-label="Top songs period">
-                      <button
-                        className={topPeriod === "all" ? "library-tab active" : "library-tab"}
-                        onClick={() => setTopPeriod("all")}
-                      >
-                        All time
-                      </button>
-                      <button
-                        className={topPeriod === "day" ? "library-tab active" : "library-tab"}
-                        onClick={() => setTopPeriod("day")}
-                      >
-                        24 hours
-                      </button>
-                      <button
-                        className={topPeriod === "week" ? "library-tab active" : "library-tab"}
-                        onClick={() => setTopPeriod("week")}
-                      >
-                        Week
-                      </button>
-                      <button
-                        className={topPeriod === "month" ? "library-tab active" : "library-tab"}
-                        onClick={() => setTopPeriod("month")}
-                      >
-                        Month
-                      </button>
-                      <button
-                        className={topPeriod === "year" ? "library-tab active" : "library-tab"}
-                        onClick={() => setTopPeriod("year")}
-                      >
-                        Year
-                      </button>
-                    </div>
-                    <button
-                      className="secondary-button"
-                      onClick={() => (selectionMode ? closeSelection() : setSelectionMode(true))}
-                    >
-                      {selectionMode ? `Done${selectedItems.length > 0 ? ` · ${selectedItems.length}` : ""}` : "Select"}
-                    </button>
-                    {filteredLibraryData.length > 0 && (
-                      <button className="primary-button" onClick={() => void shuffleLibrary()}>
-                        Shuffle
-                      </button>
-                    )}
-                  </div>
-                )}
-                {libraryMode === "podcasts" && (
-                  <div className="library-tabs podcast-filter-tabs">
-                    <button
-                      className="library-tab active library-root-chip"
-                      onClick={() => setLibraryMode("mix")}
-                      title="Return to Library"
-                      aria-label="Return to Library"
-                    >
-                      Podcasts ×
-                    </button>
-                    <button
-                      className={podcastFilter === "episodes" ? "library-tab active" : "library-tab"}
-                      onClick={() => setPodcastFilter("episodes")}
-                    >
-                      Episodes
-                    </button>
-                    <button
-                      className={podcastFilter === "channels" ? "library-tab active" : "library-tab"}
-                      onClick={() => setPodcastFilter("channels")}
-                    >
-                      Channels
-                    </button>
-                    <button
-                      className={podcastFilter === "downloaded" ? "library-tab active" : "library-tab"}
-                      onClick={() => setPodcastFilter("downloaded")}
-                    >
-                      Downloaded
-                    </button>
-                    <button
-                      className="secondary-button"
-                      onClick={() => void refreshSavedPodcasts()}
-                      disabled={podcastRefreshing}
-                    >
-                      {podcastRefreshing ? "Refreshing…" : "Refresh saved"}
-                    </button>
-                  </div>
-                )}
-                {libraryMode === "podcasts" && podcastFilter === "episodes" && (
-                  <div className="podcast-auto-playlists">
-                    <button
-                      className="playlist-list-row auto-podcast-row"
-                      onClick={() =>
-                        void openItem({
-                          id: "RDPN",
-                          kind: "playlist",
-                          title: "New Episodes",
-                          subtitle: "Auto playlist",
-                          artists: [],
-                          browseId: "RDPN",
-                          playlistId: "RDPN",
-                        })
-                      }
-                    >
-                      <span className="library-auto-icon">◷</span>
-                      <span>
-                        <strong>New Episodes</strong>
-                        <small>Recently added podcast episodes</small>
-                      </span>
-                      <span aria-hidden="true">›</span>
-                    </button>
-                    <button
-                      className="playlist-list-row auto-podcast-row"
-                      onClick={() =>
-                        void openItem({
-                          id: "SE",
-                          kind: "playlist",
-                          title: "Episodes for Later",
-                          subtitle: "Auto playlist",
-                          artists: [],
-                          browseId: "SE",
-                          playlistId: "SE",
-                        })
-                      }
-                    >
-                      <span className="library-auto-icon">▤</span>
-                      <span>
-                        <strong>Episodes for Later</strong>
-                        <small>Saved podcast episodes</small>
-                      </span>
-                      <span aria-hidden="true">›</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-              {libraryMode === "cache" && (
-                <div className="library-song-toolbar">
-                  <button
-                    className="library-tab active library-root-chip"
-                    onClick={() => setLibraryMode("mix")}
-                    title="Return to Library"
-                    aria-label="Return to Library"
-                  >
-                    Cache ×
-                  </button>
-                  <label className="library-search">
-                    <span>Search</span>
-                    <input
-                      value={librarySearch}
-                      onChange={(event) => setLibrarySearch(event.target.value)}
-                      placeholder="Search cached songs"
-                      aria-label="Search cached songs"
-                    />
-                  </label>
-                  <select
-                    className="library-sort"
-                    value={librarySort}
-                    onChange={(event) => setLibrarySort(event.target.value as LibrarySort)}
-                    aria-label="Sort cached songs"
-                  >
-                    <option value="created">Recently cached</option>
-                    <option value="name">Name</option>
-                    <option value="artist">Artist</option>
-                    <option value="playtime">Play time</option>
-                  </select>
-                  <button
-                    className="secondary-button"
-                    onClick={() => setLibrarySortDescending((value) => !value)}
-                    title="Reverse cached songs order"
-                  >
-                    {librarySortDescending ? "Descending" : "Ascending"}
-                  </button>
-                  {filteredLibraryData.length > 0 && (
-                    <button className="primary-button" onClick={() => void shuffleLibrary()}>
-                      Shuffle
-                    </button>
-                  )}
-                </div>
-              )}
-              {libraryMode === "mix" && library.status === "ready" && libraryView === "grid" && (
-                <div className="library-mix-grid">
-                  {settings.show_cached_playlist !== false && matchesLibraryQuery("Cached") && (
-                    <button className="playlist-tile auto-playlist-tile" onClick={() => setLibraryMode("cache")}>
-                      <div className="item-art-wrap">
-                        <div className="item-art empty-art">◌</div>
-                      </div>
-                      <strong>Cached</strong>
-                      <span>Songs cached during playback</span>
-                    </button>
-                  )}
-                  {settings.show_liked_playlist !== false && matchesLibraryQuery("Liked Songs") && (
-                    <button
-                      className="playlist-tile auto-playlist-tile"
-                      onClick={() => chooseLibrarySongFilter("liked")}
-                    >
-                      <div className="item-art-wrap">
-                        <div className="item-art empty-art">♥</div>
-                      </div>
-                      <strong>Liked Songs</strong>
-                      <span>Meld’s single liked-songs playlist</span>
-                    </button>
-                  )}
-                  {settings.show_downloaded_playlist !== false && matchesLibraryQuery("Downloaded") && (
-                    <button
-                      className="playlist-tile auto-playlist-tile"
-                      onClick={() => chooseLibrarySongFilter("downloaded")}
-                    >
-                      <div className="item-art-wrap">
-                        <div className="item-art empty-art">↓</div>
-                      </div>
-                      <strong>Downloaded</strong>
-                      <span>Downloaded songs</span>
-                    </button>
-                  )}
-                  {settings.show_top_playlist !== false && matchesLibraryQuery("Top Songs") && (
-                    <button className="playlist-tile auto-playlist-tile" onClick={() => chooseLibrarySongFilter("top")}>
-                      <div className="item-art-wrap">
-                        <div className="item-art empty-art">★</div>
-                      </div>
-                      <strong>Top Songs</strong>
-                      <span>Most played in Meld</span>
-                    </button>
-                  )}
-                  {settings.show_uploaded_playlist !== false && matchesLibraryQuery("Uploaded") && (
-                    <button
-                      className="playlist-tile auto-playlist-tile"
-                      onClick={() => chooseLibrarySongFilter("uploaded")}
-                    >
-                      <div className="item-art-wrap">
-                        <div className="item-art empty-art">↑</div>
-                      </div>
-                      <strong>Uploaded</strong>
-                      <span>YouTube Music uploads</span>
-                    </button>
-                  )}
-                  {filteredLibraryData.map((item) => (
-                    <div className="library-mix-card" key={`mix-${item.kind}-${item.id}`}>
-                      <ItemCard item={item} onOpen={openItem} onMenu={(value) => void openMenu(value)} />
-                      <span className="library-mix-kind">{item.kind}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {libraryMode === "mix" && library.status === "ready" && libraryView === "list" && (
-                <div className="result-list library-mix-list">
-                  {settings.show_cached_playlist !== false && matchesLibraryQuery("Cached") && (
-                    <button className="library-auto-row" onClick={() => setLibraryMode("cache")}>
-                      <span className="library-auto-icon">◌</span>
-                      <span>
-                        <strong>Cached</strong>
-                        <small>Songs cached during playback</small>
-                      </span>
-                    </button>
-                  )}
-                  {settings.show_liked_playlist !== false && matchesLibraryQuery("Liked Songs") && (
-                    <button className="library-auto-row" onClick={() => chooseLibrarySongFilter("liked")}>
-                      <span className="library-auto-icon">♥</span>
-                      <span>
-                        <strong>Liked Songs</strong>
-                        <small>Meld’s single liked-songs playlist</small>
-                      </span>
-                    </button>
-                  )}
-                  {settings.show_downloaded_playlist !== false && matchesLibraryQuery("Downloaded") && (
-                    <button className="library-auto-row" onClick={() => chooseLibrarySongFilter("downloaded")}>
-                      <span className="library-auto-icon">↓</span>
-                      <span>
-                        <strong>Downloaded</strong>
-                        <small>Downloaded songs for offline listening</small>
-                      </span>
-                    </button>
-                  )}
-                  {settings.show_top_playlist !== false && matchesLibraryQuery("Top Songs") && (
-                    <button className="library-auto-row" onClick={() => chooseLibrarySongFilter("top")}>
-                      <span className="library-auto-icon">★</span>
-                      <span>
-                        <strong>Top Songs</strong>
-                        <small>Most played in Meld history</small>
-                      </span>
-                    </button>
-                  )}
-                  {settings.show_uploaded_playlist !== false && matchesLibraryQuery("Uploaded") && (
-                    <button className="library-auto-row" onClick={() => chooseLibrarySongFilter("uploaded")}>
-                      <span className="library-auto-icon">↑</span>
-                      <span>
-                        <strong>Uploaded</strong>
-                        <small>YouTube Music uploads</small>
-                      </span>
-                    </button>
-                  )}
-                  {filteredLibraryData.map((item) => (
-                    <div className="result-row" key={`mix-list-${item.kind}-${item.id}`}>
-                      <ItemCard item={item} onOpen={openItem} />
-                      {item.kind === "song" && (
-                        <InlineLikeButton
-                          item={item}
-                          autoDownloadOnLike={settings.autoDownloadOnLike === true}
-                          audioQuality={audioQuality}
-                        />
-                      )}
-                      <div className="row-actions">
-                        <button className="row-action" onClick={() => void openItem(item)}>
-                          {item.kind === "song" ? "Play in Meld" : "Open"}
-                        </button>
-                        <button
-                          className="row-action menu-trigger"
-                          onClick={() => void openMenu(item)}
-                          title={`More options for ${item.title}`}
-                          aria-label={`More options for ${item.title}`}
-                        >
-                          ⋮
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {libraryMode === "mix" &&
-                library.status === "ready" &&
-                librarySearch.trim() &&
-                filteredLibraryData.length === 0 &&
-                !(
-                  (settings.show_cached_playlist !== false && matchesLibraryQuery("Cached")) ||
-                  (settings.show_liked_playlist !== false && matchesLibraryQuery("Liked Songs")) ||
-                  (settings.show_downloaded_playlist !== false && matchesLibraryQuery("Downloaded")) ||
-                  (settings.show_top_playlist !== false && matchesLibraryQuery("Top Songs")) ||
-                  (settings.show_uploaded_playlist !== false && matchesLibraryQuery("Uploaded"))
-                ) && (
-                  <div className="state-panel">
-                    <h2>No matching library items</h2>
-                    <p>Try a different search or clear the filter.</p>
-                  </div>
-                )}
-              {libraryMode === "playlists" ? (
-                <>
-                  <div className="library-playlists-toolbar">
-                    <label className="library-search">
-                      <span>Search</span>
-                      <input
-                        value={playlistSearch}
-                        onChange={(event) => setPlaylistSearch(event.target.value)}
-                        placeholder="Search playlists"
-                        aria-label="Search playlists"
-                      />
-                    </label>
-                    <span className="library-result-count">{visiblePlaylists.length} playlists</span>
-                    <select
-                      className="library-sort"
-                      value={playlistSort}
-                      onChange={(event) => setPlaylistSort(event.target.value as PlaylistSort)}
-                      aria-label="Sort playlists"
-                    >
-                      <option value="created">Recently added</option>
-                      <option value="name">Name</option>
-                      <option value="count">Song count</option>
-                    </select>
-                    <button
-                      className="secondary-button"
-                      onClick={() => setPlaylistSortDescending((value) => !value)}
-                      title="Reverse playlist sort order"
-                    >
-                      {playlistSortDescending ? "Descending" : "Ascending"}
-                    </button>
-                    <button
-                      className="secondary-button"
-                      onClick={() => setPlaylistView((value) => (value === "grid" ? "list" : "grid"))}
-                      title={playlistView === "grid" ? "Switch to list view" : "Switch to grid view"}
-                      aria-label={playlistView === "grid" ? "Switch to list view" : "Switch to grid view"}
-                    >
-                      {playlistView === "grid" ? "List" : "Grid"}
-                    </button>
-                  </div>
-                  <div className={playlistView === "grid" ? "playlist-grid" : "library-playlists-list"}>
-                    {settings.show_cached_playlist !== false && matchesLibraryQuery("Cached") && (
-                      <button className="playlist-tile auto-playlist-tile" onClick={() => setLibraryMode("cache")}>
-                        <div className="item-art-wrap">
-                          <div className="item-art empty-art">◌</div>
-                        </div>
-                        <strong>Cached</strong>
-                        <span>Songs cached during playback</span>
-                      </button>
-                    )}
-                    {settings.show_liked_playlist !== false && matchesLibraryQuery("Liked Songs") && (
-                      <button
-                        className="playlist-tile auto-playlist-tile"
-                        onClick={() => chooseLibrarySongFilter("liked")}
-                      >
-                        <div className="item-art-wrap">
-                          <div className="item-art empty-art">♥</div>
-                        </div>
-                        <strong>Liked Songs</strong>
-                        <span>Meld’s single liked-songs playlist</span>
-                      </button>
-                    )}
-                    {settings.show_downloaded_playlist !== false && matchesLibraryQuery("Downloaded") && (
-                      <button
-                        className="playlist-tile auto-playlist-tile"
-                        onClick={() => chooseLibrarySongFilter("downloaded")}
-                      >
-                        <div className="item-art-wrap">
-                          <div className="item-art empty-art">↓</div>
-                        </div>
-                        <strong>Downloaded</strong>
-                        <span>Downloaded songs for offline listening</span>
-                      </button>
-                    )}
-                    {settings.show_top_playlist !== false && matchesLibraryQuery("Top Songs") && (
-                      <button
-                        className="playlist-tile auto-playlist-tile"
-                        onClick={() => chooseLibrarySongFilter("top")}
-                      >
-                        <div className="item-art-wrap">
-                          <div className="item-art empty-art">★</div>
-                        </div>
-                        <strong>Top Songs</strong>
-                        <span>Most played songs from Meld history</span>
-                      </button>
-                    )}
-                    {settings.show_uploaded_playlist !== false && matchesLibraryQuery("Uploaded") && (
-                      <button
-                        className="playlist-tile auto-playlist-tile"
-                        onClick={() => chooseLibrarySongFilter("uploaded")}
-                      >
-                        <div className="item-art-wrap">
-                          <div className="item-art empty-art">↑</div>
-                        </div>
-                        <strong>Uploaded</strong>
-                        <span>YouTube Music uploaded songs</span>
-                      </button>
-                    )}
-                    {visiblePlaylists.length === 0 && !hasVisiblePlaylistAutoEntries ? (
-                      <div className="state-panel">
-                        <h2>{playlistQuery ? "No matching playlists" : "No playlists"}</h2>
-                        <p>
-                          {playlistQuery
-                            ? "Try a different search or clear the filter."
-                            : "Create a playlist, then use Add to playlist from a song’s three-dot menu."}
-                        </p>
-                      </div>
-                    ) : (
-                      visiblePlaylists.map((item) => (
-                        <button
-                          className={playlistView === "grid" ? "playlist-tile" : "playlist-list-row"}
-                          key={item.id}
-                          onClick={() => void openLocalPlaylist(item)}
-                        >
-                          <div className="item-art-wrap">
-                            <div className="item-art empty-art">P</div>
-                          </div>
-                          <strong>{item.title}</strong>
-                          <span>
-                            {item.songCount === undefined
-                              ? item.subtitle
-                              : `${item.songCount} song${item.songCount === 1 ? "" : "s"}${item.subtitle ? ` · ${item.subtitle}` : ""}`}
-                          </span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                  {spotifyStatus.authenticated && (
-                    <SpotifyLibraryBlock
-                      node={spotifyLibrary}
-                      liked={spotifyLikedTracks}
-                      folderStack={spotifyFolderStack}
-                      onOpenFolder={(folder) => void openSpotifyFolder(folder)}
-                      onOpenPlaylist={(spotifyPlaylist) => void openSpotifyPlaylist(spotifyPlaylist)}
-                      onOpenLiked={openSpotifyLiked}
-                      onBack={() => {
-                        const next = spotifyFolderStack.slice(0, -1);
-                        setSpotifyFolderStack(next);
-                        void loadSpotifyLibrary(next[next.length - 1]?.uri ?? null);
-                      }}
-                      onRetry={() =>
-                        void loadSpotifyLibrary(spotifyFolderStack[spotifyFolderStack.length - 1]?.uri ?? null)
-                      }
-                    />
-                  )}
-                </>
-              ) : (
-                library.status === "loading" && (
-                  <div className="state-panel">
-                    <div className="spinner" />
-                    <p>Loading your library…</p>
-                  </div>
-                )
-              )}
-              {library.status === "error" && (
-                <div className="state-panel error">
-                  <h2>Library unavailable</h2>
-                  <p>{library.error}</p>
-                  <button className="primary-button" onClick={() => void reloadCurrentLibrary()}>
-                    Retry
-                  </button>
-                </div>
-              )}
-              {librarySyncing && (
-                <div className="state-panel">
-                  <div className="spinner" />
-                  <p>
-                    Syncing YouTube Music{" "}
-                    {libraryMode === "liked"
-                      ? "liked songs"
-                      : libraryMode === "uploaded"
-                        ? "uploaded songs"
-                        : "library songs"}
-                    …
-                  </p>
-                </div>
-              )}
-              {!librarySyncing &&
-                !(["mix", "playlists", "albums", "artists", "podcasts"] as string[]).includes(libraryMode) &&
-                library.status === "ready" &&
-                library.data.length === 0 && (
-                  <div className="state-panel">
-                    <h2>
-                      {libraryMode === "local"
-                        ? "No local audio files imported"
-                        : libraryMode === "liked"
-                          ? "No liked songs cached"
-                          : libraryMode === "songs"
-                            ? "No library songs cached"
-                            : libraryMode === "uploaded"
-                              ? "No uploaded songs cached"
-                              : libraryMode === "top"
-                                ? "No listening history yet"
-                                : "No offline downloads"}
-                    </h2>
-                    <p>
-                      {libraryMode === "local"
-                        ? "Use Import audio files to choose real files from this Windows device."
-                        : libraryMode === "downloads"
-                          ? "Use Download for offline listening from a remote song’s More actions menu."
-                          : "Use a real typed item and its connected action to populate this view."}
-                    </p>
-                  </div>
-                )}
-              {!librarySyncing &&
-                !(["mix", "playlists", "albums", "artists", "podcasts"] as string[]).includes(libraryMode) &&
-                library.status === "ready" &&
-                library.data.length > 0 &&
-                filteredLibraryData.length === 0 && (
-                  <div className="state-panel">
-                    <h2>No matching songs</h2>
-                    <p>Try a different search or filter.</p>
-                  </div>
-                )}
-              {!librarySyncing &&
-                !(["mix", "playlists", "albums", "artists", "podcasts"] as string[]).includes(libraryMode) &&
-                library.status === "ready" &&
-                filteredLibraryData.length > 0 && (
-                  <div className="result-list">
-                    {filteredLibraryData.map((item) => (
-                      <div className="result-row" key={`${item.kind}-${item.id}`}>
-                        {selectionMode && (
-                          <input
-                            className="selection-checkbox"
-                            type="checkbox"
-                            checked={selectedItems.some((value) => value.id === item.id)}
-                            onChange={() => toggleSelectedItem(item)}
-                            aria-label={`Select ${item.title}`}
-                          />
-                        )}
-                        <ItemCard item={item} onOpen={openItem} />
-                        {item.kind === "song" && (
-                          <InlineLikeButton
-                            item={item}
-                            autoDownloadOnLike={settings.autoDownloadOnLike === true}
-                            audioQuality={audioQuality}
-                          />
-                        )}
-                        <div className="row-actions">
-                          <button className="row-action" onClick={() => void openItem(item)}>
-                            {item.kind === "song" ? "Play in Meld" : "Open"}
-                          </button>
-                          {item.kind === "song" && (
-                            <button className="row-action" onClick={() => void openLyrics(item)}>
-                              Lyrics
-                            </button>
-                          )}
-                          <button
-                            className="row-action menu-trigger"
-                            onClick={() => void openMenu(item)}
-                            title={`More options for ${item.title}`}
-                          >
-                            ⋮
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              {!librarySyncing &&
-                (libraryMode === "albums" || libraryMode === "artists") &&
-                library.status === "ready" && (
-                  <div className="result-list catalog-list">
-                    {library.data.length === 0 ? (
-                      <div className="state-panel">
-                        <h2>No {libraryMode} in your library</h2>
-                        <p>Save songs with source album or artist metadata to populate this view.</p>
-                      </div>
-                    ) : (
-                      library.data.map((item) => (
-                        <div className="result-row catalog-row" key={`${item.kind}-${item.id}`}>
-                          <ItemCard item={item} onOpen={openItem} />
-                          <div className="row-actions">
-                            <button className="row-action" onClick={() => void openItem(item)}>
-                              Open {libraryMode === "albums" ? "album" : "artist"}
-                            </button>
-                            <button
-                              className="row-action menu-trigger"
-                              onClick={() => void openMenu(item)}
-                              title={`More options for ${item.title}`}
-                            >
-                              ⋮
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              {!librarySyncing && libraryMode === "podcasts" && library.status === "ready" && (
-                <div className="result-list catalog-list">
-                  {library.data.length === 0 ? (
-                    <div className="state-panel">
-                      <h2>
-                        {podcastFilter === "downloaded"
-                          ? "No downloaded podcast episodes"
-                          : `No podcast ${podcastFilter} found`}
-                      </h2>
-                      <p>
-                        {podcastFilter === "downloaded"
-                          ? "Download a podcast episode from its More actions menu to make it available offline."
-                          : "YouTube Music returned no items for this account."}
-                      </p>
-                    </div>
-                  ) : (
-                    library.data.map((item) => (
-                      <div className="result-row catalog-row" key={`${item.kind}-${item.id}`}>
-                        <ItemCard item={item} onOpen={openItem} />
-                        <div className="row-actions">
-                          <button className="row-action" onClick={() => void openItem(item)}>
-                            Open
-                          </button>
-                          <button
-                            className="row-action menu-trigger"
-                            onClick={() => void openMenu(item)}
-                            title={`More options for ${item.title}`}
-                          >
-                            ⋮
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
+            <LibraryScreen
+              audioQuality={audioQuality}
+              chooseLibrarySongFilter={chooseLibrarySongFilter}
+              closeSelection={closeSelection}
+              filteredLibraryData={filteredLibraryData}
+              hasVisiblePlaylistAutoEntries={hasVisiblePlaylistAutoEntries}
+              importLocalFiles={importLocalFiles}
+              library={library}
+              libraryMixSort={libraryMixSort}
+              libraryMixSortDescending={libraryMixSortDescending}
+              libraryMode={libraryMode}
+              librarySearch={librarySearch}
+              librarySongFilter={librarySongFilter}
+              librarySort={librarySort}
+              librarySortDescending={librarySortDescending}
+              librarySyncing={librarySyncing}
+              libraryView={libraryView}
+              loadSpotifyLibrary={loadSpotifyLibrary}
+              matchesLibraryQuery={matchesLibraryQuery}
+              openCreatePlaylistDialog={openCreatePlaylistDialog}
+              openItem={openItem}
+              openLocalPlaylist={openLocalPlaylist}
+              openLyrics={openLyrics}
+              openMenu={openMenu}
+              openSpotifyFolder={openSpotifyFolder}
+              openSpotifyLiked={openSpotifyLiked}
+              openSpotifyPlaylist={openSpotifyPlaylist}
+              playlistQuery={playlistQuery}
+              playlistSearch={playlistSearch}
+              playlistSort={playlistSort}
+              playlistSortDescending={playlistSortDescending}
+              playlistView={playlistView}
+              podcastFilter={podcastFilter}
+              podcastRefreshing={podcastRefreshing}
+              refreshSavedPodcasts={refreshSavedPodcasts}
+              reloadCurrentLibrary={reloadCurrentLibrary}
+              selectedItems={selectedItems}
+              selectionMode={selectionMode}
+              setLibraryMixSort={setLibraryMixSort}
+              setLibraryMixSortDescending={setLibraryMixSortDescending}
+              setLibraryMode={setLibraryMode}
+              setLibrarySearch={setLibrarySearch}
+              setLibrarySort={setLibrarySort}
+              setLibrarySortDescending={setLibrarySortDescending}
+              setLibraryView={setLibraryView}
+              setPlaylistSearch={setPlaylistSearch}
+              setPlaylistSort={setPlaylistSort}
+              setPlaylistSortDescending={setPlaylistSortDescending}
+              setPlaylistView={setPlaylistView}
+              setPodcastFilter={setPodcastFilter}
+              setSelectionMode={setSelectionMode}
+              setSpotifyFolderStack={setSpotifyFolderStack}
+              settings={settings}
+              setTopPeriod={setTopPeriod}
+              shuffleLibrary={shuffleLibrary}
+              spotifyFolderStack={spotifyFolderStack}
+              spotifyLibrary={spotifyLibrary}
+              spotifyLikedTracks={spotifyLikedTracks}
+              spotifyStatus={spotifyStatus}
+              toggleSelectedItem={toggleSelectedItem}
+              topPeriod={topPeriod}
+              visiblePlaylists={visiblePlaylists}
+            />
           )}
         </div>
       </main>
@@ -5596,220 +2855,38 @@ function App() {
           </div>
         </div>
       )}
-      {spotifyLikedOpen && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setSpotifyLikedOpen(false)}>
-          <div className="detail-panel spotify-playlist-panel" onClick={(event) => event.stopPropagation()}>
-            <button
-              className="close-button"
-              title="Close"
-              aria-label="Close"
-              onClick={() => setSpotifyLikedOpen(false)}
-            >
-              ×
-            </button>
-            <p className="eyebrow">Spotify library</p>
-            <h2>Liked Songs</h2>
-            {spotifyLikedTracks.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading Spotify liked songs…</p>
-              </div>
-            )}
-            {spotifyLikedTracks.status === "error" && (
-              <div className="state-panel error">
-                <h2>Spotify liked songs unavailable</h2>
-                <p>{spotifyLikedTracks.error}</p>
-                <button className="primary-button" onClick={() => void loadSpotifyLikedTracks()}>
-                  Retry
-                </button>
-              </div>
-            )}
-            {spotifyLikedTracks.status === "ready" && spotifyLikedTracks.data.tracks.length === 0 && (
-              <div className="state-panel">
-                <h2>No liked songs returned</h2>
-                <p>Spotify returned an empty liked-songs library.</p>
-              </div>
-            )}
-            {spotifyLikedTracks.status === "ready" && spotifyLikedTracks.data.tracks.length > 0 && (
-              <div className="spotify-track-list">
-                {spotifyLikedTracks.data.tracks.map((track) => (
-                  <div className="spotify-track-row" key={track.id}>
-                    <div className="spotify-track-copy">
-                      <strong>{track.name}</strong>
-                      <span>
-                        {track.artist}
-                        {track.album ? ` · ${track.album}` : ""}
-                      </span>
-                    </div>
-                    <button className="row-action" onClick={() => void playSpotifyTrack(track)}>
-                      Find & play
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-      {spotifyOpenPlaylist && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setSpotifyOpenPlaylist(null)}>
-          <div className="detail-panel spotify-playlist-panel" onClick={(event) => event.stopPropagation()}>
-            <button
-              className="close-button"
-              title="Close"
-              aria-label="Close"
-              onClick={() => setSpotifyOpenPlaylist(null)}
-            >
-              ×
-            </button>
-            <p className="eyebrow">Spotify playlist</p>
-            <h2>{spotifyOpenPlaylist.name}</h2>
-            <div className="spotify-detail-toolbar">
-              <input
-                value={spotifyDetailQuery}
-                onChange={(event) => setSpotifyDetailQuery(event.target.value)}
-                placeholder="Search tracks"
-                aria-label="Search Spotify playlist tracks"
-              />
-              <select
-                value={spotifyDetailSort}
-                onChange={(event) =>
-                  setSpotifyDetailSort(event.target.value as "original" | "name" | "artist" | "duration")
-                }
-                aria-label="Sort Spotify playlist tracks"
-              >
-                <option value="original">Original order</option>
-                <option value="name">Name</option>
-                <option value="artist">Artist</option>
-                <option value="duration">Duration</option>
-              </select>
-              <button
-                className="row-action"
-                onClick={() => setSpotifyDetailSortDescending((value) => !value)}
-                title="Reverse sort order"
-              >
-                {spotifyDetailSortDescending ? "Descending" : "Ascending"}
-              </button>
-              <button
-                className="row-action"
-                onClick={() => setSpotifyReorderUnlocked((value) => !value)}
-                title="Unlock playlist reorder"
-              >
-                {spotifyReorderUnlocked ? "Lock order" : "Unlock order"}
-              </button>
-            </div>
-            {spotifyPlaylistTracks.status === "ready" && spotifyPlaylistTracks.data.tracks.length > 0 && (
-              <button
-                className="secondary-button spotify-download-button"
-                onClick={() => void downloadSpotifyPlaylist()}
-              >
-                Download playlist
-              </button>
-            )}
-            {spotifyOpenPlaylist.owner &&
-              spotifyProfile?.displayName &&
-              spotifyOpenPlaylist.owner === spotifyProfile.displayName && (
-                <div className="spotify-rename-row">
-                  <input
-                    value={spotifyRenameName}
-                    onChange={(event) => setSpotifyRenameName(event.target.value)}
-                    aria-label="Spotify playlist name"
-                  />
-                  <button
-                    className="row-action"
-                    disabled={!spotifyRenameName.trim() || spotifyRenameName.trim() === spotifyOpenPlaylist.name}
-                    onClick={() => void renameSpotifyPlaylist()}
-                  >
-                    Rename
-                  </button>
-                </div>
-              )}
-            {spotifyPlaylistTracks.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading Spotify tracks…</p>
-              </div>
-            )}
-            {spotifyPlaylistTracks.status === "error" && (
-              <div className="state-panel error">
-                <h2>Spotify playlist unavailable</h2>
-                <p>{spotifyPlaylistTracks.error}</p>
-                <button className="primary-button" onClick={() => void openSpotifyPlaylist(spotifyOpenPlaylist)}>
-                  Retry
-                </button>
-              </div>
-            )}
-            {spotifyPlaylistTracks.status === "ready" && visibleSpotifyPlaylistTracks.length === 0 && (
-              <div className="state-panel">
-                <h2>No tracks returned</h2>
-                <p>Spotify returned an empty playlist.</p>
-              </div>
-            )}
-            {spotifyPlaylistTracks.status === "ready" && visibleSpotifyPlaylistTracks.length > 0 && (
-              <div className="spotify-track-list">
-                {visibleSpotifyPlaylistTracks.map((track) => (
-                  <div className="spotify-track-row" key={track.id}>
-                    <div className="spotify-track-copy">
-                      <strong>{track.name}</strong>
-                      <span>
-                        {track.artist}
-                        {track.album ? ` · ${track.album}` : ""}
-                      </span>
-                    </div>
-                    <div className="spotify-track-actions">
-                      <button className="row-action" onClick={() => void playSpotifyTrack(track)}>
-                        Find & play
-                      </button>
-                      {spotifyReorderUnlocked &&
-                        !spotifyDetailQuery.trim() &&
-                        spotifyDetailSort === "original" &&
-                        !spotifyDetailSortDescending &&
-                        track.uid && (
-                          <>
-                            <button
-                              className="row-action"
-                              disabled={visibleSpotifyPlaylistTracks.indexOf(track) === 0}
-                              onClick={() => void moveSpotifyTrack(track, "up")}
-                              title="Move up"
-                              aria-label={`Move ${track.name} up`}
-                            >
-                              ↑
-                            </button>
-                            <button
-                              className="row-action"
-                              disabled={
-                                visibleSpotifyPlaylistTracks.indexOf(track) === visibleSpotifyPlaylistTracks.length - 1
-                              }
-                              onClick={() => void moveSpotifyTrack(track, "down")}
-                              title="Move down"
-                              aria-label={`Move ${track.name} down`}
-                            >
-                              ↓
-                            </button>
-                          </>
-                        )}
-                      {track.uid && (
-                        <button className="row-action danger-action" onClick={() => void removeSpotifyTrack(track)}>
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {spotifyPlaylistTracks.data.tracks.length < spotifyPlaylistTracks.data.totalCount && (
-              <button
-                className="secondary-button"
-                onClick={() => void loadMoreSpotifyPlaylistTracks()}
-                disabled={spotifyPlaylistLoadingMore}
-              >
-                {spotifyPlaylistLoadingMore ? "Loading…" : "Load more"}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      <SpotifyLikedScreen
+        loadSpotifyLikedTracks={loadSpotifyLikedTracks}
+        playSpotifyTrack={playSpotifyTrack}
+        setSpotifyLikedOpen={setSpotifyLikedOpen}
+        spotifyLikedOpen={spotifyLikedOpen}
+        spotifyLikedTracks={spotifyLikedTracks}
+      />
+      <SpotifyPlaylistScreen
+        downloadSpotifyPlaylist={downloadSpotifyPlaylist}
+        loadMoreSpotifyPlaylistTracks={loadMoreSpotifyPlaylistTracks}
+        moveSpotifyTrack={moveSpotifyTrack}
+        openSpotifyPlaylist={openSpotifyPlaylist}
+        playSpotifyTrack={playSpotifyTrack}
+        removeSpotifyTrack={removeSpotifyTrack}
+        renameSpotifyPlaylist={renameSpotifyPlaylist}
+        setSpotifyDetailQuery={setSpotifyDetailQuery}
+        setSpotifyDetailSort={setSpotifyDetailSort}
+        setSpotifyDetailSortDescending={setSpotifyDetailSortDescending}
+        setSpotifyOpenPlaylist={setSpotifyOpenPlaylist}
+        setSpotifyRenameName={setSpotifyRenameName}
+        setSpotifyReorderUnlocked={setSpotifyReorderUnlocked}
+        spotifyDetailQuery={spotifyDetailQuery}
+        spotifyDetailSort={spotifyDetailSort}
+        spotifyDetailSortDescending={spotifyDetailSortDescending}
+        spotifyOpenPlaylist={spotifyOpenPlaylist}
+        spotifyPlaylistLoadingMore={spotifyPlaylistLoadingMore}
+        spotifyPlaylistTracks={spotifyPlaylistTracks}
+        spotifyProfile={spotifyProfile}
+        spotifyRenameName={spotifyRenameName}
+        spotifyReorderUnlocked={spotifyReorderUnlocked}
+        visibleSpotifyPlaylistTracks={visibleSpotifyPlaylistTracks}
+      />
       {youtubeMatchItem && (
         <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setYoutubeMatchItem(null)}>
           <div className="detail-panel picker-panel" onClick={(event) => event.stopPropagation()}>
@@ -6434,616 +3511,28 @@ function App() {
           </div>
         </div>
       )}
-      {settingsOpen && (
-        <div className="detail-overlay settings-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel settings-panel">
-            <button
-              className="close-button"
-              title={settingsPage === "main" ? "Close" : "Back to settings"}
-              aria-label={settingsPage === "main" ? "Close" : "Back to settings"}
-              onClick={() => (settingsPage === "main" ? setSettingsOpen(false) : setSettingsPage("main"))}
-            >
-              {settingsPage === "main" ? "×" : "‹"}
-            </button>
-            <p className="eyebrow">Meld Desktop</p>
-            <h2>
-              {settingsPage === "main"
-                ? "Settings"
-                : settingsPage === "player"
-                  ? "Player and audio"
-                  : settingsPage === "content"
-                    ? "Content"
-                    : settingsPage === "privacy"
-                      ? "Privacy"
-                      : settingsPage === "storage"
-                        ? "Storage and data"
-                        : settingsPage === "integrations"
-                          ? "Integrations"
-                          : settingsPage === "appearance"
-                            ? "Appearance"
-                            : "About"}
-            </h2>
-            {!settingsLoading && settingsPage === "main" && (
-              <div className="settings-hub">
-                <button className="settings-nav-card" onClick={() => setSettingsPage("appearance")}>
-                  <strong>Appearance</strong>
-                  <small>Theme and player presentation</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("player")}>
-                  <strong>Player and audio</strong>
-                  <small>Queue, automix, and playback behavior</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("content")}>
-                  <strong>Content</strong>
-                  <small>Library sync, explicit content, and lyrics providers</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("privacy")}>
-                  <strong>Privacy</strong>
-                  <small>Listen/search history controls</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("storage")}>
-                  <strong>Storage and data</strong>
-                  <small>Local library and offline data</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("integrations")}>
-                  <strong>Integrations</strong>
-                  <small>Google and Spotify accounts</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("about")}>
-                  <strong>About</strong>
-                  <small>Version and project information</small>
-                </button>
-              </div>
-            )}
-            {settingsPage === "appearance" && (
-              <div className="settings-group">
-                <h3>Appearance</h3>
-                <p className="muted-copy">
-                  Meld’s source appearance screen contains Android-specific theme, palette, and density controls.
-                  Desktop keeps one native dark shell here until those controls have a real Windows renderer
-                  implementation; no inert switches are shown.
-                </p>
-              </div>
-            )}
-            {settingsPage === "storage" && (
-              <div className="settings-group">
-                <h3>Storage and data</h3>
-                <p className="muted-copy">
-                  Offline downloads and the SQLite library are managed by their real download, playlist, logout, and
-                  clear-data actions. Desktop playback cache is separate and appears in the Cached playlist; its size
-                  limit is below.
-                </p>
-                <div className="storage-actions">
-                  <button
-                    className="secondary-button"
-                    onClick={async () => {
-                      try {
-                        const path = await invoke<string>("backup_create");
-                        setNotice(`Meld Desktop backup created at ${path}.`);
-                      } catch (error) {
-                        if (!String(error).toLowerCase().includes("cancelled"))
-                          setNotice(`Backup could not be created: ${errorMessage(error)}`);
-                      }
-                    }}
-                  >
-                    Create backup
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={async () => {
-                      try {
-                        const path = await invoke<string>("backup_restore");
-                        setNotice(`Backup restored from ${path}. Restart Meld Desktop to reload the restored library.`);
-                      } catch (error) {
-                        if (!String(error).toLowerCase().includes("cancelled"))
-                          setNotice(`Backup could not be restored: ${errorMessage(error)}`);
-                      }
-                    }}
-                  >
-                    Restore backup
-                  </button>
-                </div>
-                <p className="muted-copy">
-                  Backups contain the Desktop SQLite library and non-sensitive settings only. Downloaded/player-cache
-                  media files and imported external media are not embedded. Google/YouTube Music and Spotify sessions
-                  are excluded and must be connected again after restore.
-                </p>
-              </div>
-            )}
-            {settingsPage === "storage" && <PlaybackCachePanel onNotice={setNotice} />}
-            {settingsPage === "about" && (
-              <div className="settings-group">
-                <h3>About Meld Desktop</h3>
-                <p className="muted-copy">
-                  Native Tauri desktop adaptation of the live Meld/Metrolist source contracts. Source-dependent features
-                  remain tracked in the audit rather than being presented as complete.
-                </p>
-              </div>
-            )}
-            {settingsPage === "about" && <UpdatePanel />}
-            {settingsLoading ? (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading saved settings…</p>
-              </div>
-            ) : (
-              <>
-                {settingsPage === "content" && (
-                  <div className="settings-group">
-                    <h3>Content</h3>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Hide explicit content</strong>
-                        <small>Hide items whose live metadata marks them explicit.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.hideExplicit}
-                        onChange={(event) => void setSetting("hideExplicit", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Hide video songs</strong>
-                        <small>Hide songs whose live source metadata marks them as video-only.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.hideVideoSongs}
-                        onChange={(event) => void setSetting("hideVideoSongs", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable Better Lyrics</strong>
-                        <small>Use the source TTML lyrics provider first when enabled.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enableBetterLyrics !== false}
-                        onChange={(event) => void setSetting("enableBetterLyrics", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable Paxsenix</strong>
-                        <small>Use the source Apple Music lyrics fallback after Better Lyrics when enabled.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enablePaxsenix !== false}
-                        onChange={(event) => void setSetting("enablePaxsenix", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable LRCLIB</strong>
-                        <small>Use the source LRCLIB matching fallback when enabled.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enableLrclib !== false}
-                        onChange={(event) => void setSetting("enableLrclib", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable KuGou</strong>
-                        <small>Use the source KuGou LRC fallback after LRCLIB when enabled.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enableKugou !== false}
-                        onChange={(event) => void setSetting("enableKugou", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable LyricsPlus</strong>
-                        <small>Use the source LyricsPlus mirror fallback after KuGou when enabled.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enableLyricsPlus === true}
-                        onChange={(event) => void setSetting("enableLyricsPlus", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable Musixmatch</strong>
-                        <small>Use the source opt-in Musixmatch guest-token fallback when available.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enableMusixmatch === true}
-                        onChange={(event) => void setSetting("enableMusixmatch", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Sync YouTube Music library</strong>
-                        <small>
-                          When enabled, Liked Songs, Library, and Uploaded filters use the authenticated source sync
-                          path.
-                        </small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        disabled={!sessionStatus.authenticated}
-                        checked={settings.ytmSync !== false}
-                        onChange={(event) => void setSetting("ytmSync", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Use login for browse</strong>
-                        <small>
-                          Use the connected YouTube Music session for Home, search, details, playlists, and related
-                          browse requests, matching Meld’s Account setting.
-                        </small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        disabled={!sessionStatus.authenticated}
-                        checked={settings.useLoginForBrowse !== false}
-                        onChange={(event) => void setSetting("useLoginForBrowse", event.target.checked)}
-                      />
-                    </label>
-                  </div>
-                )}
-                {settingsPage === "privacy" && (
-                  <div className="settings-group">
-                    <h3>Privacy</h3>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Pause listen history</strong>
-                        <small>Do not add locally played items to Meld’s listening history.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.pauseListenHistory === true}
-                        onChange={(event) => void setSetting("pauseListenHistory", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Pause search history</strong>
-                        <small>Do not save submitted searches to Meld’s recent-search list.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.pauseSearchHistory === true}
-                        onChange={(event) => void setSetting("pauseSearchHistory", event.target.checked)}
-                      />
-                    </label>
-                    <button
-                      className="secondary-button"
-                      onClick={async () => {
-                        try {
-                          await invoke("search_history_clear");
-                          await loadSearchHistory();
-                          setNotice("Meld search history cleared.");
-                        } catch (error) {
-                          setNotice(`Search history could not be cleared: ${errorMessage(error)}`);
-                        }
-                      }}
-                    >
-                      Clear search history
-                    </button>
-                  </div>
-                )}
-                {settingsPage === "content" && (
-                  <div className="settings-group">
-                    <h3>Lyrics provider order</h3>
-                    <p className="muted-copy">
-                      Enabled providers are tried in this order. Disabled providers remain after them, matching Meld’s
-                      provider registry.
-                    </p>
-                    <div className="lyrics-provider-order">
-                      {lyricsProviderOrder.map((provider, index) => {
-                        const enabled =
-                          provider === "YouTube" ||
-                          provider === "YouTubeSubtitle" ||
-                          settings[lyricProviderSettingKeys[provider] ?? ""] === true;
-                        return (
-                          <div
-                            className={enabled ? "provider-order-row" : "provider-order-row disabled"}
-                            key={provider}
-                          >
-                            <span>
-                              <strong>{provider === "YouTubeSubtitle" ? "YouTube Subtitle" : provider}</strong>
-                              <small>{enabled ? `Priority ${index + 1}` : "Disabled"}</small>
-                            </span>
-                            {enabled && (
-                              <span className="provider-order-buttons">
-                                <button
-                                  className="secondary-button"
-                                  disabled={index === 0}
-                                  onClick={() => void moveLyricsProvider(provider, -1)}
-                                  title={`Move ${provider} up`}
-                                >
-                                  ↑
-                                </button>
-                                <button
-                                  className="secondary-button"
-                                  disabled={index === lyricsProviderOrder.length - 1}
-                                  onClick={() => void moveLyricsProvider(provider, 1)}
-                                  title={`Move ${provider} down`}
-                                >
-                                  ↓
-                                </button>
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                {settingsPage === "player" && (
-                  <div className="settings-group">
-                    <h3>Player and queue</h3>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Audio quality</strong>
-                        <small>
-                          Auto currently uses the highest direct original format on Desktop because native Windows
-                          metered-network detection is not wired; High selects the highest direct original format, while
-                          Low selects the lowest. Streams that need YouTube's signature step are handled locally when no
-                          direct stream is available.
-                        </small>
-                      </span>
-                      <select
-                        value={audioQuality}
-                        onChange={(event) => void setAudioQualitySetting(event.target.value as AudioQuality)}
-                      >
-                        <option value="auto">Auto</option>
-                        <option value="high">High</option>
-                        <option value="low">Low</option>
-                      </select>
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Varispeed</strong>
-                        <small>When enabled, playback speed follows pitch like Meld’s varispeed mode.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.varispeed === true}
-                        onChange={(event) => void setSetting("varispeed", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Incremental seek skip</strong>
-                        <small>
-                          Repeated double-clicks on the player artwork increase the 5-second seek step, matching Meld.
-                        </small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.seekExtraSeconds === true}
-                        onChange={(event) => void setSetting("seekExtraSeconds", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Pause on mute</strong>
-                        <small>Pause playback when volume reaches zero and resume when volume is raised again.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.pauseOnMute === true}
-                        onChange={(event) => void setSetting("pauseOnMute", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Persistent queue</strong>
-                        <small>Restore the current Meld queue after restarting the desktop app.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.persistentQueue === true}
-                        onChange={(event) => void setSetting("persistentQueue", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Load more automatically</strong>
-                        <small>Use Meld’s queue continuation and automix loading when available.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.autoLoadMore !== false}
-                        onChange={(event) => void setSetting("autoLoadMore", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Similar content / automix</strong>
-                        <small>Fetch related source songs when the current queue ends.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.similarContent !== false}
-                        onChange={(event) => void setSetting("similarContent", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Disable load more on Repeat all</strong>
-                        <small>Keep Repeat all from appending automix content, matching Meld’s source option.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.disableLoadMoreWhenRepeatAll === true}
-                        onChange={(event) => void setSetting("disableLoadMoreWhenRepeatAll", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Auto-download on like</strong>
-                        <small>When enabled, liking a remote song starts Meld’s native offline cache download.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.autoDownloadOnLike === true}
-                        onChange={(event) => void setSetting("autoDownloadOnLike", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Skip failed song automatically</strong>
-                        <small>Move to the next queue item when native playback reports an error.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.autoSkipNextOnError === true}
-                        onChange={(event) => void setSetting("autoSkipNextOnError", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Remember shuffle and repeat</strong>
-                        <small>Persist the source shuffle/repeat preferences across launches.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.rememberShuffleAndRepeat !== false}
-                        onChange={(event) => void setSetting("rememberShuffleAndRepeat", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Shuffle playlist first</strong>
-                        <small>Source queue preference for starting playlist playback in shuffled order.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.shufflePlaylistFirst === true}
-                        onChange={(event) => void setSetting("shufflePlaylistFirst", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Prevent duplicate queue tracks</strong>
-                        <small>Do not add another copy of an item already present in the queue.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.preventDuplicateTracksInQueue === true}
-                        onChange={(event) => void setSetting("preventDuplicateTracksInQueue", event.target.checked)}
-                      />
-                    </label>
-                  </div>
-                )}
-                {settingsPage === "appearance" && (
-                  <div className="settings-group">
-                    <h3>Auto playlists</h3>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Show Liked Songs playlist</strong>
-                        <small>Show Meld’s single liked-songs playlist in My Playlists.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.show_liked_playlist !== false}
-                        onChange={(event) => void setSetting("show_liked_playlist", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Show Cached playlist</strong>
-                        <small>
-                          Show songs cached during playback. This is separate from Meld’s explicit Downloaded playlist.
-                        </small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.show_cached_playlist !== false}
-                        onChange={(event) => void setSetting("show_cached_playlist", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Show Downloaded playlist</strong>
-                        <small>Show songs downloaded for offline listening.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.show_downloaded_playlist !== false}
-                        onChange={(event) => void setSetting("show_downloaded_playlist", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Show Uploaded playlist</strong>
-                        <small>Show the YouTube Music uploaded-songs playlist after account sync.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.show_uploaded_playlist !== false}
-                        onChange={(event) => void setSetting("show_uploaded_playlist", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Show Top Songs playlist</strong>
-                        <small>Show the source-style most-played playlist built from Meld listening history.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.show_top_playlist !== false}
-                        onChange={(event) => void setSetting("show_top_playlist", event.target.checked)}
-                      />
-                    </label>
-                  </div>
-                )}
-                {settingsPage === "integrations" && (
-                  <div className="settings-group">
-                    <h3>Accounts</h3>
-                    <div className="setting-status">
-                      <strong>Google / YouTube Music</strong>
-                      <span>
-                        {sessionStatus.authenticated
-                          ? `Connected${sessionStatus.accountEmail ? ` as ${sessionStatus.accountEmail}` : ""}. Authenticated library actions can use the saved session.`
-                          : "Connect inside Meld Desktop to sync liked songs, account playlists, and library actions."}
-                      </span>
-                      {sessionStatus.authenticated ? (
-                        <button className="secondary-button" onClick={() => void logoutGoogle()}>
-                          Disconnect account
-                        </button>
-                      ) : (
-                        <button className="secondary-button" onClick={() => void connectGoogle()}>
-                          Connect Google
-                        </button>
-                      )}
-                    </div>
-                    <div className="setting-status">
-                      <strong>Spotify</strong>
-                      <span>
-                        {spotifyStatus.authenticated
-                          ? `Connected${spotifyProfile?.displayName ? ` as ${spotifyProfile.displayName}` : ""}. Spotify profileAttributes validated with the live GraphQL operation.`
-                          : "Connect inside Meld Desktop; the token is validated before the session is saved."}
-                      </span>
-                      {spotifyStatus.authenticated ? (
-                        <button className="secondary-button" onClick={() => void logoutSpotify()}>
-                          Disconnect Spotify
-                        </button>
-                      ) : (
-                        <button className="secondary-button" onClick={() => void connectSpotify()}>
-                          Connect Spotify
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <SettingsScreen
+        audioQuality={audioQuality}
+        connectGoogle={connectGoogle}
+        connectSpotify={connectSpotify}
+        loadSearchHistory={loadSearchHistory}
+        logoutGoogle={logoutGoogle}
+        logoutSpotify={logoutSpotify}
+        lyricsProviderOrder={lyricsProviderOrder}
+        moveLyricsProvider={moveLyricsProvider}
+        sessionStatus={sessionStatus}
+        setAudioQualitySetting={setAudioQualitySetting}
+        setNotice={setNotice}
+        setSetting={setSetting}
+        setSettingsOpen={setSettingsOpen}
+        setSettingsPage={setSettingsPage}
+        settings={settings}
+        settingsLoading={settingsLoading}
+        settingsOpen={settingsOpen}
+        settingsPage={settingsPage}
+        spotifyProfile={spotifyProfile}
+        spotifyStatus={spotifyStatus}
+      />
       {infoItem && (
         <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setInfoItem(null)}>
           <div className="detail-panel info-panel" onClick={(event) => event.stopPropagation()}>
@@ -7072,824 +3561,154 @@ function App() {
           </div>
         </div>
       )}
-      {detail && (
-        <div className="detail-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel">
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setDetail(null)}>
-              ×
-            </button>
-            {detail.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading {detail.data.kind}…</p>
-              </div>
-            )}
-            {detail.status === "error" && (
-              <div className="state-panel error">
-                <h2>{detail.data.kind} unavailable</h2>
-                <p>{detail.error}</p>
-              </div>
-            )}
-            {detail.status === "ready" && (
-              <>
-                <div className="playlist-header">
-                  {mediaSrc(detail.data.thumbnail) && <img src={mediaSrc(detail.data.thumbnail) as string} alt="" />}
-                  <div>
-                    <p className="eyebrow">{detail.data.kind}</p>
-                    <h2>{detail.data.title || "Untitled"}</h2>
-                    <p>{detail.data.subtitle}</p>
-                  </div>
-                  <div className="detail-header-actions">
-                    {detail.data.kind === "artist" && (
-                      <button
-                        className={detailArtistSubscribed ? "secondary-button active-control" : "secondary-button"}
-                        onClick={() => void toggleDetailArtistSubscription()}
-                      >
-                        {detailArtistSubscribed ? "Following" : "Follow"}
-                      </button>
-                    )}
-                    {detail.data.kind === "podcast" && (
-                      <button
-                        className="secondary-button"
-                        onClick={() => void refreshPodcastDetail()}
-                        disabled={detailRefreshing}
-                      >
-                        {detailRefreshing ? "Refreshing…" : "Refresh"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="playlist-songs">
-                  {detail.data.items.length === 0 ? (
-                    <div className="state-panel">
-                      <p>This browse response contained no typed items.</p>
-                    </div>
-                  ) : (
-                    detail.data.items.map((item, itemIndex) => (
-                      <div className="song-row-wrap" key={`${item.kind}-${item.id}-${itemIndex}`}>
-                        <button className="song-row" onClick={() => void openDetailItem(item)}>
-                          {mediaSrc(item.thumbnail) && <img src={mediaSrc(item.thumbnail) as string} alt="" />}
-                          <span className="song-copy">
-                            <strong>{item.title}</strong>
-                            <small>{item.subtitle}</small>
-                          </span>
-                          <span className="song-kind">{item.kind}</span>
-                        </button>
-                        {item.kind === "song" && (
-                          <InlineLikeButton
-                            item={item}
-                            autoDownloadOnLike={settings.autoDownloadOnLike === true}
-                            audioQuality={audioQuality}
-                          />
-                        )}
-                        <button
-                          className="song-row-menu"
-                          onClick={() => void openMenu(item)}
-                          title={`More options for ${item.title}`}
-                          aria-label={`More options for ${item.title}`}
-                        >
-                          ⋮
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-                {detail.data.continuation && (
-                  <button
-                    className="primary-button playlist-more"
-                    disabled={detailMoreLoading}
-                    onClick={() => void loadDetailMore()}
-                  >
-                    {detailMoreLoading ? "Loading more…" : "Load more"}
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-      {playlist && (
-        <div className="detail-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel">
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setPlaylist(null)}>
-              ×
-            </button>
-            {playlist.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading playlist songs…</p>
-              </div>
-            )}
-            {playlist.status === "error" && (
-              <div className="state-panel error">
-                <h2>Playlist unavailable</h2>
-                <p>{playlist.error}</p>
-              </div>
-            )}
-            {playlist.status === "ready" && (
-              <>
-                <div className="playlist-header">
-                  {mediaSrc(playlist.data.playlist.thumbnail) && (
-                    <img src={mediaSrc(playlist.data.playlist.thumbnail) as string} alt="" />
-                  )}
-                  <div>
-                    <p className="eyebrow">Playlist</p>
-                    <h2>{playlist.data.playlist.title}</h2>
-                    <p>{playlist.data.playlist.subtitle}</p>
-                  </div>
-                </div>
-                <div className="playlist-songs">
-                  {playlist.data.songs.length === 0 ? (
-                    <div className="state-panel">
-                      <p>YouTube Music returned no playlist songs.</p>
-                    </div>
-                  ) : (
-                    playlist.data.songs.map((song, index) => (
-                      <div className="song-row-wrap" key={`${song.id}-${index}`}>
-                        {selectionMode && (
-                          <input
-                            className="selection-checkbox"
-                            type="checkbox"
-                            checked={selectedItems.some((value) => value.id === song.id)}
-                            onChange={() => toggleSelectedItem(song)}
-                            aria-label={`Select ${song.title}`}
-                          />
-                        )}
-                        <button
-                          className="song-row"
-                          onClick={() =>
-                            void playItem(
-                              song,
-                              playlist.data.songs,
-                              index,
-                              playlist.data.continuation ?? null,
-                              false,
-                              "playlist",
-                            )
-                          }
-                        >
-                          <span className="song-index">{index + 1}</span>
-                          {mediaSrc(song.thumbnail) && <img src={mediaSrc(song.thumbnail) as string} alt="" />}
-                          <span className="song-copy">
-                            <strong>{song.title}</strong>
-                            <small>{song.subtitle}</small>
-                          </span>
-                          <span className="song-kind">{song.kind}</span>
-                        </button>
-                        {song.kind === "song" && (
-                          <InlineLikeButton
-                            item={song}
-                            autoDownloadOnLike={settings.autoDownloadOnLike === true}
-                            audioQuality={audioQuality}
-                          />
-                        )}
-                        <button
-                          className="song-row-menu"
-                          onClick={() => void openMenu(song)}
-                          title={`More options for ${song.title}`}
-                          aria-label={`More options for ${song.title}`}
-                        >
-                          ⋮
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-                {playlist.data.continuation && (
-                  <button className="primary-button playlist-more" onClick={() => void loadPlaylistMore()}>
-                    Load more songs
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-      {player && (
-        <div className="player-dock">
-          <button
-            className="transport-button"
-            disabled={queueIndex <= 0}
-            onClick={() => void playQueueIndex(queueIndex - 1)}
-            title="Previous"
-          >
-            ‹
-          </button>
-          <div className="dock-copy">
-            {mediaSrc(player.item.thumbnail) && <img src={mediaSrc(player.item.thumbnail) as string} alt="" />}
-            <div>
-              <strong>{player.payload.title || player.item.title}</strong>
-              <span>{player.payload.artist || player.item.subtitle}</span>
-            </div>
-          </div>
-          <div className="player-controls">
-            <button
-              className="transport-button play-button"
-              onClick={togglePlayback}
-              title={isPlaying ? "Pause" : "Play"}
-            >
-              {isPlaying ? "Ⅱ" : "▶"}
-            </button>
-            <span className="time-label">{formatTime(playbackSeconds)}</span>
-            <input
-              className="seek-slider"
-              type="range"
-              min="0"
-              max={Math.max(durationSeconds, 1)}
-              step="0.1"
-              value={Math.min(playbackSeconds, Math.max(durationSeconds, 1))}
-              onChange={(event) => seekPlayback(Number(event.currentTarget.value))}
-              aria-label="Seek"
-            />
-            <span className="time-label">{formatTime(durationSeconds)}</span>
-            <button
-              className="player-lyrics-button"
-              onClick={() => {
-                setPlayerExpanded(true);
-                setLyricsAutoScrollEnabled(true);
-                if (!lyrics) void openLyrics(player.item);
-              }}
-              title="Open synchronized lyrics"
-              aria-label="Open synchronized lyrics"
-            >
-              ♫
-            </button>
-            <button
-              className={playerItemState?.liked ? "player-action active-control" : "player-action"}
-              onClick={() => void togglePlayerFavorite()}
-              title={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}
-              aria-label={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}
-            >
-              {playerItemState?.liked ? "♥" : "♡"}
-            </button>
-            <button
-              className="player-action"
-              onClick={() => void shareItem(player.item)}
-              title="Share"
-              aria-label="Share"
-            >
-              ↗
-            </button>
-            <button
-              className="player-action"
-              onClick={() => void openPlayerMenu()}
-              title="More actions"
-              aria-label="More actions"
-            >
-              ⋮
-            </button>
-            <label className="volume-control" title="Volume · scroll to adjust" onWheel={adjustVolumeByWheel}>
-              <span>Vol</span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={volume}
-                onChange={(event) => updateVolume(Number(event.currentTarget.value))}
-                aria-label="Volume"
-              />
-            </label>
-          </div>{" "}
-          <audio
-            className="native-audio"
-            ref={audioRef}
-            preload="auto"
-            onLoadedMetadata={(event) =>
-              setDurationSeconds(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)
-            }
-            onTimeUpdate={(event) => {
-              setPlaybackSeconds(event.currentTarget.currentTime);
-              recordPlaytime(event.currentTarget.currentTime);
-            }}
-            onPlay={() => {
-              setIsPlaying(true);
-              if (playtimeRef.current) playtimeRef.current.playing = true;
-            }}
-            onPause={() => {
-              setIsPlaying(false);
-              if (playtimeRef.current) playtimeRef.current.playing = false;
-              void flushPlaytime();
-            }}
-            onEnded={async () => {
-              recordPlaytime(audioRef.current?.currentTime ?? playbackSeconds);
-              if (playtimeRef.current) playtimeRef.current.playing = false;
-              await flushPlaytime();
-              if (sleepTimerEndOfSong) {
-                clearSleepTimer();
-                setIsPlaying(false);
-                return;
-              }
-              if (repeatMode === "one") {
-                if (audioRef.current) {
-                  audioRef.current.currentTime = 0;
-                  void audioRef.current.play();
-                }
-                return;
-              }
-              setIsPlaying(false);
-              if (
-                queueIndex + 1 < queueItems.length ||
-                (queueContinuation &&
-                  settings.autoLoadMore !== false &&
-                  !(settings.disableLoadMoreWhenRepeatAll === true && repeatMode === "all"))
-              ) {
-                void playQueueIndex(queueIndex + 1);
-                return;
-              }
-              if (repeatMode === "all" && queueItems.length > 0) {
-                void playQueueIndex(0);
-                return;
-              }
-              if (!autoMixEnabledRef.current) return;
-              const current = player?.item;
-              if (!current?.videoId) return;
-              const existing = queueItems;
-              const additions = await loadAutomixItems(current, existing);
-              if (additions.length > 0) {
-                const nextItems = [...existing, ...additions];
-                setQueueItems(nextItems);
-                setQueueContinuation(null);
-                void playItem(additions[0], nextItems, existing.length, null, true);
-              }
-            }}
-            onError={async () => {
-              if (await recoverStream()) return;
-              setNotice(FINAL_STREAM_ERROR);
-              if (settings.autoSkipNextOnError && (queueIndex + 1 < queueItems.length || queueContinuation))
-                void playQueueIndex(queueIndex + 1);
-            }}
-          />
-          <div className="dock-transport-actions">
-            <button
-              className="transport-button"
-              disabled={queueIndex < 0 || (queueIndex + 1 >= queueItems.length && !queueContinuation)}
-              onClick={() => void playQueueIndex(queueIndex + 1)}
-              title="Next"
-            >
-              ›
-            </button>
-            <button
-              className={shuffleEnabled ? "queue-button active-control" : "queue-button"}
-              onClick={() => void toggleShuffle()}
-              title={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"}
-              aria-label={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"}
-              aria-pressed={shuffleEnabled}
-            >
-              ⤨
-            </button>
-            <button
-              className={repeatMode === "off" ? "queue-button" : "queue-button active-control"}
-              onClick={() => void cycleRepeat()}
-              title={`Repeat mode: ${repeatMode}`}
-              aria-label={`Repeat mode: ${repeatMode}`}
-            >
-              ↻
-            </button>
-            <button
-              className="queue-button"
-              onClick={() => setQueueOpen(true)}
-              title="Open queue"
-              aria-label="Open queue"
-            >
-              ☰
-            </button>
-            <button
-              className="player-expand"
-              onClick={() => {
-                setPlayerExpanded(true);
-                setLyricsAutoScrollEnabled(true);
-                if (!lyrics) void openLyrics(player.item);
-              }}
-              title="Open full player"
-              aria-label="Open full player"
-            >
-              ↗
-            </button>
-          </div>
-          <button
-            className="dock-close"
-            onClick={() => {
-              audioRef.current?.pause();
-              setPlayer(null);
-              setPlayerExpanded(false);
-              setIsPlaying(false);
-            }}
-            title="Close player"
-            aria-label="Close player"
-          >
-            ×
-          </button>
-        </div>
-      )}
-      {queueOpen && player && (
-        <div
-          className="detail-overlay queue-overlay"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setQueueOpen(false)}
-        >
-          <div className="queue-panel" onClick={(event) => event.stopPropagation()}>
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setQueueOpen(false)}>
-              ×
-            </button>
-            <div className="queue-heading">
-              <div>
-                <p className="eyebrow">Queue</p>
-                <h2>{queueItems.length > 0 ? `${queueItems.length} songs` : "Queue"}</h2>
-              </div>
-              {queueItems.length > 0 && (
-                <button className="secondary-button" onClick={clearQueue}>
-                  Clear queue
-                </button>
-              )}
-            </div>
-            <div className="queue-list">
-              {queueItems.length === 0 ? (
-                <div className="state-panel">
-                  <p>No songs are queued.</p>
-                </div>
-              ) : (
-                queueItems.map((item, index) => (
-                  <div
-                    key={`${item.id}-${index}`}
-                    className={index === queueIndex ? "queue-item active" : "queue-item"}
-                  >
-                    <button
-                      className="queue-item-play"
-                      onClick={() => {
-                        setQueueOpen(false);
-                        void playQueueIndex(index);
-                      }}
-                    >
-                      <span>{index + 1}</span>
-                      {mediaSrc(item.thumbnail) && <img src={mediaSrc(item.thumbnail) as string} alt="" />}
-                      <span>
-                        <strong>{item.title}</strong>
-                        <small>{item.subtitle}</small>
-                      </span>
-                    </button>
-                    <span className="queue-item-actions">
-                      <button
-                        className="queue-item-action"
-                        disabled={index === 0}
-                        onClick={() => moveQueueItem(index, index - 1)}
-                        title="Move up"
-                        aria-label={`Move ${item.title} up`}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        className="queue-item-action"
-                        disabled={index === queueItems.length - 1}
-                        onClick={() => moveQueueItem(index, index + 1)}
-                        title="Move down"
-                        aria-label={`Move ${item.title} down`}
-                      >
-                        ↓
-                      </button>
-                      <button
-                        className="queue-item-action"
-                        onClick={() => removeQueueItem(index)}
-                        title="Remove from queue"
-                        aria-label={`Remove ${item.title} from queue`}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-      {playerExpanded && player && (
-        <div
-          className="detail-overlay player-overlay"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => {
-            setPlayerExpanded(false);
-            setLyrics(null);
-          }}
-        >
-          <div className="full-player-panel" onClick={(event) => event.stopPropagation()}>
-            <button
-              className="close-button"
-              title="Close"
-              aria-label="Close"
-              onClick={() => {
-                setPlayerExpanded(false);
-                setLyrics(null);
-              }}
-            >
-              ×
-            </button>
-            <div
-              className="full-player-art"
-              onDoubleClick={(event) => {
-                const bounds = event.currentTarget.getBoundingClientRect();
-                seekByPlayerGesture(event.clientX < bounds.left + bounds.width / 2 ? -1 : 1);
-              }}
-              title="Double-click the left or right side to seek"
-            >
-              {mediaSrc(player.item.thumbnail) ? (
-                <img src={mediaSrc(player.item.thumbnail) as string} alt="" />
-              ) : (
-                <div className="item-art empty-art">M</div>
-              )}
-            </div>
-            <div className="full-player-meta">
-              <p className="eyebrow">Now playing in Meld</p>
-              <h2 className="full-player-title" title={player.payload.title || player.item.title}>
-                {player.payload.title || player.item.title}
-              </h2>
-              <p>{player.payload.artist || player.item.subtitle}</p>
-              <div className="full-player-action-row">
-                <div className="full-player-actions">
-                  <button
-                    className="player-action"
-                    onClick={() => void shareItem(player.item)}
-                    title="Share"
-                    aria-label="Share"
-                  >
-                    ↗
-                  </button>
-                  <button
-                    className={playerItemState?.liked ? "player-action active-control" : "player-action"}
-                    onClick={() => void togglePlayerFavorite()}
-                    title={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}
-                    aria-label={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}
-                  >
-                    {playerItemState?.liked ? "♥" : "♡"}
-                  </button>
-                  <button
-                    className="player-action"
-                    onClick={() => void openPlayerMenu()}
-                    title="More actions"
-                    aria-label="More actions"
-                  >
-                    ⋮
-                  </button>
-                </div>
-                <div className="full-player-controls">
-                  <button
-                    className="transport-button"
-                    disabled={queueIndex <= 0}
-                    onClick={() => void playQueueIndex(queueIndex - 1)}
-                    title="Previous"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    className="transport-button play-button"
-                    onClick={togglePlayback}
-                    title={isPlaying ? "Pause" : "Play"}
-                  >
-                    {isPlaying ? "Ⅱ" : "▶"}
-                  </button>
-                  <button
-                    className="transport-button"
-                    disabled={queueIndex < 0 || (queueIndex + 1 >= queueItems.length && !queueContinuation)}
-                    onClick={() => void playQueueIndex(queueIndex + 1)}
-                    title="Next"
-                  >
-                    ›
-                  </button>
-                  <button
-                    className={shuffleEnabled ? "queue-button active-control" : "queue-button"}
-                    onClick={() => void toggleShuffle()}
-                    title={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"}
-                    aria-label={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"}
-                    aria-pressed={shuffleEnabled}
-                  >
-                    ⤨
-                  </button>
-                  <button
-                    className={repeatMode === "off" ? "queue-button" : "queue-button active-control"}
-                    onClick={() => void cycleRepeat()}
-                    title={`Repeat mode: ${repeatMode}`}
-                    aria-label={`Repeat mode: ${repeatMode}`}
-                  >
-                    ↻
-                  </button>
-                  <button
-                    className="queue-button"
-                    onClick={() => setQueueOpen(true)}
-                    title="Open queue"
-                    aria-label="Open queue"
-                  >
-                    ☷
-                  </button>
-                </div>
-              </div>
-              <div className="full-player-progress">
-                <span>{formatTime(playbackSeconds)}</span>
-                <input
-                  className="seek-slider"
-                  type="range"
-                  min="0"
-                  max={Math.max(durationSeconds, 1)}
-                  step="0.1"
-                  value={Math.min(playbackSeconds, Math.max(durationSeconds, 1))}
-                  onChange={(event) => seekPlayback(Number(event.currentTarget.value))}
-                  aria-label="Seek"
-                />
-                <span>{formatTime(durationSeconds)}</span>
-              </div>
-              <label className="full-volume-control" title="Volume · scroll to adjust" onWheel={adjustVolumeByWheel}>
-                <span>Volume</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={volume}
-                  onChange={(event) => updateVolume(Number(event.currentTarget.value))}
-                  aria-label="Volume"
-                />
-              </label>
-            </div>
-            <div className="full-player-lyrics">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Lyrics</p>
-                  <h3>{lyrics?.status === "ready" ? lyrics.data.provider : "Meld lyric providers"}</h3>
-                  <label className="lyrics-provider-picker">
-                    <span>Provider</span>
-                    <select
-                      value={lyricsProviderSelection}
-                      onChange={(event) => void changeLyricsProvider(event.target.value)}
-                      disabled={lyricsProviderLoading}
-                      aria-label="Lyrics provider"
-                    >
-                      <option value="auto">Automatic · provider order</option>
-                      {lyricsProviderOrder.map((provider) => (
-                        <option key={provider} value={provider}>
-                          {provider}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div className="lyrics-navigation">
-                  <button
-                    className="topbar-button icon-button"
-                    onClick={goBack}
-                    disabled={!hasTransientLayer && backStack.length === 0}
-                    title="Back"
-                    aria-label="Back"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    className="topbar-button icon-button"
-                    onClick={navigateForward}
-                    disabled={forwardStack.length === 0}
-                    title="Forward"
-                    aria-label="Forward"
-                  >
-                    ›
-                  </button>
-                </div>
-                {lyrics?.status !== "ready" && (
-                  <button className="text-button" onClick={() => void openLyrics(player.item)}>
-                    Load lyrics
-                  </button>
-                )}
-              </div>
-              {lyrics?.status === "ready" && lyrics.data.synced && lyrics.data.lines.length > 0 ? (
-                <div
-                  ref={lyricsContainerRef}
-                  className="lyrics-lines"
-                  onWheel={() => setLyricsAutoScrollEnabled(false)}
-                  onTouchMove={() => setLyricsAutoScrollEnabled(false)}
-                  onPointerDown={() => setLyricsAutoScrollEnabled(false)}
-                  onKeyDown={() => setLyricsAutoScrollEnabled(false)}
-                >
-                  {lyrics.data.lines.map((line, index) => (
-                    <button
-                      ref={index === activeLyricIndex ? activeLyricRef : undefined}
-                      key={`${line.timeMs}-${index}`}
-                      className={index === activeLyricIndex ? "lyric-line active" : "lyric-line"}
-                      onClick={() => {
-                        setLyricsAutoScrollEnabled(true);
-                        if (audioRef.current) audioRef.current.currentTime = line.timeMs / 1000;
-                      }}
-                    >
-                      {line.text}
-                    </button>
-                  ))}
-                </div>
-              ) : lyrics?.status === "ready" ? (
-                <pre className="lyrics-text">{lyrics.data.text}</pre>
-              ) : (
-                <div className="state-panel">
-                  <p>Open lyrics to load the source provider chain.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-      {!playerExpanded && lyrics && (
-        <div className="detail-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel lyrics-panel">
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setLyrics(null)}>
-              ×
-            </button>
-            {lyrics.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading lyrics from Meld providers…</p>
-              </div>
-            )}
-            {lyrics.status === "error" && (
-              <div className="state-panel error">
-                <h2>Lyrics unavailable</h2>
-                <p>{lyrics.error}</p>
-              </div>
-            )}
-            {lyrics.status === "ready" && (
-              <>
-                <div className="section-heading">
-                  <div>
-                    <p className="eyebrow">
-                      {lyrics.data.provider}
-                      {lyrics.data.synced ? " · Synced" : " · Plain"}
-                    </p>
-                    <h2>{lyrics.data.matchedTitle}</h2>
-                    <p>{lyrics.data.matchedArtist}</p>
-                    <label className="lyrics-provider-picker">
-                      <span>Provider</span>
-                      <select
-                        value={lyricsProviderSelection}
-                        onChange={(event) => void changeLyricsProvider(event.target.value)}
-                        disabled={lyricsProviderLoading}
-                        aria-label="Lyrics provider"
-                      >
-                        <option value="auto">Automatic · provider order</option>
-                        {lyricsProviderOrder.map((provider) => (
-                          <option key={provider} value={provider}>
-                            {provider}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <div className="lyrics-navigation">
-                    <button
-                      className="topbar-button icon-button"
-                      onClick={goBack}
-                      disabled={!hasTransientLayer && backStack.length === 0}
-                      title="Back"
-                      aria-label="Back"
-                    >
-                      ‹
-                    </button>
-                    <button
-                      className="topbar-button icon-button"
-                      onClick={navigateForward}
-                      disabled={forwardStack.length === 0}
-                      title="Forward"
-                      aria-label="Forward"
-                    >
-                      ›
-                    </button>
-                  </div>
-                </div>
-                {lyrics.data.synced && lyrics.data.lines.length > 0 ? (
-                  <div
-                    ref={lyricsContainerRef}
-                    className="lyrics-lines"
-                    onWheel={() => setLyricsAutoScrollEnabled(false)}
-                    onTouchMove={() => setLyricsAutoScrollEnabled(false)}
-                    onPointerDown={() => setLyricsAutoScrollEnabled(false)}
-                    onKeyDown={() => setLyricsAutoScrollEnabled(false)}
-                  >
-                    {lyrics.data.lines.map((line, index) => (
-                      <button
-                        ref={index === activeLyricIndex ? activeLyricRef : undefined}
-                        key={`${line.timeMs}-${index}`}
-                        className={index === activeLyricIndex ? "lyric-line active" : "lyric-line"}
-                        onClick={() => {
-                          setLyricsAutoScrollEnabled(true);
-                          if (audioRef.current) audioRef.current.currentTime = line.timeMs / 1000;
-                        }}
-                      >
-                        {line.text}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <pre className="lyrics-text">{lyrics.data.text}</pre>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <DetailScreen
+        audioQuality={audioQuality}
+        detail={detail}
+        detailArtistSubscribed={detailArtistSubscribed}
+        detailMoreLoading={detailMoreLoading}
+        detailRefreshing={detailRefreshing}
+        loadDetailMore={loadDetailMore}
+        openDetailItem={openDetailItem}
+        openMenu={openMenu}
+        refreshPodcastDetail={refreshPodcastDetail}
+        setDetail={setDetail}
+        settings={settings}
+        toggleDetailArtistSubscription={toggleDetailArtistSubscription}
+      />
+      <PlaylistScreen
+        audioQuality={audioQuality}
+        loadPlaylistMore={loadPlaylistMore}
+        openMenu={openMenu}
+        playItem={playItem}
+        playlist={playlist}
+        selectedItems={selectedItems}
+        selectionMode={selectionMode}
+        setPlaylist={setPlaylist}
+        settings={settings}
+        toggleSelectedItem={toggleSelectedItem}
+      />
+      <PlayerBar
+        adjustVolumeByWheel={adjustVolumeByWheel}
+        audioRef={audioRef}
+        autoMixEnabledRef={autoMixEnabledRef}
+        clearSleepTimer={clearSleepTimer}
+        cycleRepeat={cycleRepeat}
+        durationSeconds={durationSeconds}
+        flushPlaytime={flushPlaytime}
+        formatTime={formatTime}
+        isPlaying={isPlaying}
+        loadAutomixItems={loadAutomixItems}
+        lyrics={lyrics}
+        openLyrics={openLyrics}
+        openPlayerMenu={openPlayerMenu}
+        playbackSeconds={playbackSeconds}
+        player={player}
+        playerItemState={playerItemState}
+        playItem={playItem}
+        playQueueIndex={playQueueIndex}
+        playtimeRef={playtimeRef}
+        queueContinuation={queueContinuation}
+        queueIndex={queueIndex}
+        queueItems={queueItems}
+        recordPlaytime={recordPlaytime}
+        recoverStream={recoverStream}
+        repeatMode={repeatMode}
+        seekPlayback={seekPlayback}
+        setDurationSeconds={setDurationSeconds}
+        setIsPlaying={setIsPlaying}
+        setLyricsAutoScrollEnabled={setLyricsAutoScrollEnabled}
+        setNotice={setNotice}
+        setPlaybackSeconds={setPlaybackSeconds}
+        setPlayer={setPlayer}
+        setPlayerExpanded={setPlayerExpanded}
+        setQueueContinuation={setQueueContinuation}
+        setQueueItems={setQueueItems}
+        setQueueOpen={setQueueOpen}
+        settings={settings}
+        shareItem={shareItem}
+        shuffleEnabled={shuffleEnabled}
+        sleepTimerEndOfSong={sleepTimerEndOfSong}
+        togglePlayback={togglePlayback}
+        togglePlayerFavorite={togglePlayerFavorite}
+        toggleShuffle={toggleShuffle}
+        updateVolume={updateVolume}
+        volume={volume}
+      />
+      <QueuePanel
+        clearQueue={clearQueue}
+        moveQueueItem={moveQueueItem}
+        player={player}
+        playQueueIndex={playQueueIndex}
+        queueIndex={queueIndex}
+        queueItems={queueItems}
+        queueOpen={queueOpen}
+        removeQueueItem={removeQueueItem}
+        setQueueOpen={setQueueOpen}
+      />
+      <ExpandedPlayer
+        activeLyricIndex={activeLyricIndex}
+        activeLyricRef={activeLyricRef}
+        adjustVolumeByWheel={adjustVolumeByWheel}
+        audioRef={audioRef}
+        backStack={backStack}
+        changeLyricsProvider={changeLyricsProvider}
+        cycleRepeat={cycleRepeat}
+        durationSeconds={durationSeconds}
+        formatTime={formatTime}
+        forwardStack={forwardStack}
+        goBack={goBack}
+        hasTransientLayer={hasTransientLayer}
+        isPlaying={isPlaying}
+        lyrics={lyrics}
+        lyricsContainerRef={lyricsContainerRef}
+        lyricsProviderLoading={lyricsProviderLoading}
+        lyricsProviderOrder={lyricsProviderOrder}
+        lyricsProviderSelection={lyricsProviderSelection}
+        navigateForward={navigateForward}
+        openLyrics={openLyrics}
+        openPlayerMenu={openPlayerMenu}
+        playbackSeconds={playbackSeconds}
+        player={player}
+        playerExpanded={playerExpanded}
+        playerItemState={playerItemState}
+        playQueueIndex={playQueueIndex}
+        queueContinuation={queueContinuation}
+        queueIndex={queueIndex}
+        queueItems={queueItems}
+        repeatMode={repeatMode}
+        seekByPlayerGesture={seekByPlayerGesture}
+        seekPlayback={seekPlayback}
+        setLyrics={setLyrics}
+        setLyricsAutoScrollEnabled={setLyricsAutoScrollEnabled}
+        setPlayerExpanded={setPlayerExpanded}
+        setQueueOpen={setQueueOpen}
+        shareItem={shareItem}
+        shuffleEnabled={shuffleEnabled}
+        togglePlayback={togglePlayback}
+        togglePlayerFavorite={togglePlayerFavorite}
+        toggleShuffle={toggleShuffle}
+        updateVolume={updateVolume}
+        volume={volume}
+      />
+      <LyricsPanel
+        activeLyricIndex={activeLyricIndex}
+        activeLyricRef={activeLyricRef}
+        audioRef={audioRef}
+        backStack={backStack}
+        changeLyricsProvider={changeLyricsProvider}
+        forwardStack={forwardStack}
+        goBack={goBack}
+        hasTransientLayer={hasTransientLayer}
+        lyrics={lyrics}
+        lyricsContainerRef={lyricsContainerRef}
+        lyricsProviderLoading={lyricsProviderLoading}
+        lyricsProviderOrder={lyricsProviderOrder}
+        lyricsProviderSelection={lyricsProviderSelection}
+        navigateForward={navigateForward}
+        playerExpanded={playerExpanded}
+        setLyrics={setLyrics}
+        setLyricsAutoScrollEnabled={setLyricsAutoScrollEnabled}
+      />
     </div>
   );
 }
