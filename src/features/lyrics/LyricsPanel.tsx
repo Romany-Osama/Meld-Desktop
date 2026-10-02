@@ -1,13 +1,14 @@
+import type { HistoryEntry } from "../../app/history";
 import { RefObject, Dispatch, SetStateAction } from "react";
-import { NavKey, LoadState, LyricsPayload } from "../../types";
+import { LoadState, LyricsPayload } from "../../types";
 
 export type LyricsPanelProps = {
   activeLyricIndex: number;
   activeLyricRef: RefObject<HTMLButtonElement | null>;
   audioRef: RefObject<HTMLAudioElement | null>;
-  backStack: NavKey[];
+  backStack: HistoryEntry[];
   changeLyricsProvider: (provider: string) => Promise<void>;
-  forwardStack: NavKey[];
+  forwardStack: HistoryEntry[];
   goBack: () => void;
   hasTransientLayer: boolean;
   lyrics: LoadState<LyricsPayload> | null;

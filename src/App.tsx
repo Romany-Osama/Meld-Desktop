@@ -61,6 +61,18 @@ import { usePlaylists } from "./features/playlist/usePlaylists";
 import { useQueue } from "./features/queue/useQueue";
 import { usePlayer } from "./features/player/usePlayer";
 import { useDownloads } from "./features/downloads/useDownloads";
+import { EMPTY_HISTORY, HistoryEntry, NavHistory, pushEntry, stepBack, stepForward } from "./app/history";
+import {
+  HistorySource,
+  LibraryMode,
+  librarySongFilterFor,
+  Route,
+  routeFromView,
+  routeKey,
+  routePath,
+  StatsPeriod,
+  topLevelOf,
+} from "./app/routes";
 
 function App() {
   const { notice, setNotice } = useNotice();
@@ -107,8 +119,10 @@ function App() {
   const { selectedItems, setSelectedItems, selectionMode, setSelectionMode, toggleSelectedItem, closeSelection } =
     useSelection();
   const [active, setActive] = useState<NavKey>("home");
-  const [backStack, setBackStack] = useState<NavKey[]>([]);
-  const [forwardStack, setForwardStack] = useState<NavKey[]>([]);
+  const [navHistory, setNavHistory] = useState<NavHistory>(EMPTY_HISTORY);
+  const pageScrollRef = useRef<HTMLDivElement>(null);
+  // Scroll offset to restore once the page shown by back/forward has rendered (U4-004).
+  const pendingScrollRef = useRef<number | null>(null);
   const [home, setHome] = useState<LoadState<HomePage>>({ status: "loading", data: { sections: [] } });
   const [homeMoreLoading, setHomeMoreLoading] = useState(false);
   const [speedDial, setSpeedDial] = useState<YtItem[]>([]);
@@ -125,9 +139,9 @@ function App() {
   const [library, setLibrary] = useState<LoadState<YtItem[]>>({ status: "idle", data: [] });
   const [libraryMixSongs, setLibraryMixSongs] = useState<YtItem[]>([]);
   const [history, setHistory] = useState<LoadState<YtItem[]>>({ status: "idle", data: [] });
-  const [historySource, setHistorySource] = useState<"local" | "remote">("local");
+  const [historySource, setHistorySource] = useState<HistorySource>("local");
   const [historyQuery, setHistoryQuery] = useState("");
-  const [statsPeriod, setStatsPeriod] = useState<"all" | "day" | "week" | "month" | "year">("all");
+  const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>("all");
   const [stats, setStats] = useState<LoadState<StatsPayload>>({
     status: "idle",
     data: { period: "all", totalPlays: 0, totalMinutes: 0, uniqueSongs: 0, rows: [], artists: [], albums: [] },
@@ -137,20 +151,7 @@ function App() {
     data: { sections: [] },
   });
   const [librarySyncing, setLibrarySyncing] = useState(false);
-  const [libraryMode, setLibraryMode] = useState<
-    | "mix"
-    | "local"
-    | "songs"
-    | "liked"
-    | "uploaded"
-    | "downloads"
-    | "cache"
-    | "top"
-    | "playlists"
-    | "albums"
-    | "artists"
-    | "podcasts"
-  >("mix");
+  const [libraryMode, setLibraryMode] = useState<LibraryMode>("mix");
   const [librarySongFilter, setLibrarySongFilter] = useState<LibrarySongFilter>("liked");
   const [librarySearch, setLibrarySearch] = useState("");
   const [librarySort, setLibrarySort] = useState<LibrarySort>("created");
@@ -190,6 +191,7 @@ function App() {
     hasVisiblePlaylistAutoEntries,
     visiblePlaylists,
     visiblePlaylistPicker,
+    localPlaylists,
   } = usePlaylists({ sessionStatus, setNotice, setSelectedItems, setSelectionMode, settings });
   const [topPeriod, setTopPeriod] = useState<"all" | "day" | "week" | "month" | "year">("all");
   const topSize = 50;
@@ -383,33 +385,45 @@ function App() {
     setInfoItem(null);
   };
 
+  /** The page being shown, as a history entry (route, selected tab, scroll offset). */
+  const currentEntry = (): HistoryEntry => ({
+    route: pageRoute,
+    tab: active,
+    scrollTop: pageScrollRef.current?.scrollTop ?? 0,
+  });
+
+  const pushHistory = () => {
+    pendingScrollRef.current = null;
+    setNavHistory((current) => pushEntry(current, currentEntry()));
+  };
+
   const navigateTo = (next: NavKey) => {
     if (next === active) {
       closeTransientLayers();
       return;
     }
-    setBackStack((current) => [...current, active]);
-    setForwardStack([]);
+    pushHistory();
     closeTransientLayers();
     setActive(next);
+  };
+
+  const restoreEntry = (entry: HistoryEntry) => {
+    pendingScrollRef.current = entry.scrollTop;
+    void showRoute(entry.route, entry.tab);
   };
 
   const navigateBack = () => {
-    const previous = backStack[backStack.length - 1];
-    if (!previous) return;
-    setBackStack((current) => current.slice(0, -1));
-    setForwardStack((current) => [active, ...current]);
-    closeTransientLayers();
-    setActive(previous);
+    const step = stepBack(navHistory, currentEntry());
+    if (!step) return;
+    setNavHistory(step.history);
+    restoreEntry(step.entry);
   };
 
   const navigateForward = () => {
-    const next = forwardStack[0];
-    if (!next) return;
-    setForwardStack((current) => current.slice(1));
-    setBackStack((current) => [...current, active]);
-    closeTransientLayers();
-    setActive(next);
+    const step = stepForward(navHistory, currentEntry());
+    if (!step) return;
+    setNavHistory(step.history);
+    restoreEntry(step.entry);
   };
 
   const goBack = () => {
@@ -974,8 +988,13 @@ function App() {
     const value = query.trim();
     if (!value) return;
     navigateTo("search_input");
+    await searchFor(value);
+  };
+
+  /** Loads search results for `value` on the search page; `record` adds it to the search history (typed searches). */
+  const searchFor = async (value: string, record = true) => {
     setSubmittedQuery(value);
-    if (settings.pauseSearchHistory !== true)
+    if (record && settings.pauseSearchHistory !== true)
       void invoke("search_history_add", { query: value })
         .then(() => loadSearchHistory())
         .catch(() => undefined);
@@ -2260,6 +2279,71 @@ function App() {
     }
     setNotice(`Meld could not open this ${item.kind}: the live item did not include a supported navigation endpoint.`);
   };
+  /** Shows `route` on top of `tab` without touching the history (back/forward and `openRoute` use it). */
+  const showRoute = async (route: Route, tab: NavKey) => {
+    closeTransientLayers();
+    setSpotifyOpenPlaylist(null);
+    setSpotifyLikedOpen(false);
+    setActive(topLevelOf(route, tab));
+    switch (route.name) {
+      case "home":
+        return;
+      case "search":
+        setQuery(route.query);
+        if (route.query) await searchFor(route.query, false);
+        else setSubmittedQuery("");
+        return;
+      case "library": {
+        const songFilter = librarySongFilterFor(route.mode);
+        if (songFilter) setLibrarySongFilter(songFilter);
+        setLibraryMode(route.mode);
+        return;
+      }
+      case "history":
+        setHistorySource(route.source);
+        return;
+      case "stats":
+        setStatsPeriod(route.period);
+        return;
+      case "settings":
+        setSettingsPage(route.page);
+        setSettingsOpen(true);
+        return;
+      case "album":
+      case "artist":
+      case "podcast":
+      case "browse":
+        await openItem({
+          id: route.browseId,
+          kind: route.name,
+          title: "",
+          subtitle: "",
+          artists: [],
+          browseId: route.browseId,
+          params: route.name === "browse" ? route.params : undefined,
+        });
+        return;
+      case "playlist": {
+        const known = localPlaylists.find((item) => item.id === route.playlistId);
+        await openLocalPlaylist(
+          known ?? { id: route.playlistId, kind: "playlist", title: "Playlist", subtitle: "", artists: [] },
+        );
+        return;
+      }
+      case "spotify-playlist": {
+        const known =
+          spotifyLibrary.status === "ready"
+            ? spotifyLibrary.data.playlists.find((item) => item.id === route.playlistId)
+            : undefined;
+        await openSpotifyPlaylist(known ?? { id: route.playlistId, name: "Spotify playlist" });
+        return;
+      }
+      case "spotify-liked":
+        openSpotifyLiked();
+        return;
+    }
+  };
+
   const refreshPodcastDetail = async () => {
     if (
       !detail ||
@@ -2390,6 +2474,31 @@ function App() {
     hideItem,
   ]);
 
+  // The page the user sees, as a typed route (U4-003). Settings is a modal on top of it, not a history entry.
+  const pageRoute = routeFromView({
+    active,
+    submittedQuery,
+    libraryMode,
+    historySource,
+    statsPeriod,
+    settingsPage: null,
+    detail: detail ? { kind: detail.data.kind, browseId: detail.data.browseId } : null,
+    playlistId: playlist ? (playlist.data.playlist.browseId ?? playlist.data.playlist.id) : null,
+    spotifyPlaylistId: spotifyOpenPlaylist?.id ?? null,
+    spotifyLikedOpen,
+  });
+  const currentRoute: Route = settingsOpen ? { name: "settings", page: settingsPage } : pageRoute;
+  const pageRouteKey = routeKey(pageRoute);
+
+  useEffect(() => {
+    const target = pendingScrollRef.current;
+    const element = pageScrollRef.current;
+    if (target === null || !element) return;
+    element.scrollTop = target;
+    // Pages that load their content keep the target until they are tall enough to reach it.
+    if (Math.abs(element.scrollTop - target) < 2) pendingScrollRef.current = null;
+  }, [pageRouteKey, home.status, search.status, library.status, history.status, detail?.status, playlist?.status]);
+
   return (
     <div className={settings.sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
       <aside className="sidebar">
@@ -2448,7 +2557,7 @@ function App() {
         )}
       </aside>
 
-      <main className="main-area">
+      <main className="main-area" data-route={routePath(currentRoute)}>
         <header className="topbar">
           <div className="topbar-title">
             <div>
@@ -2459,7 +2568,7 @@ function App() {
               <button
                 className="topbar-button icon-button"
                 onClick={goBack}
-                disabled={!hasTransientLayer && backStack.length === 0}
+                disabled={!hasTransientLayer && navHistory.back.length === 0}
                 title="Back"
                 aria-label="Back"
               >
@@ -2468,7 +2577,7 @@ function App() {
               <button
                 className="topbar-button icon-button"
                 onClick={navigateForward}
-                disabled={forwardStack.length === 0}
+                disabled={navHistory.forward.length === 0}
                 title="Forward"
                 aria-label="Forward"
               >
@@ -2563,7 +2672,7 @@ function App() {
           </div>
         )}
 
-        <div className="page-scroll">
+        <div className="page-scroll" ref={pageScrollRef}>
           {active === "home" && (
             <HomeScreen
               hideItem={hideItem}
@@ -3650,12 +3759,12 @@ function App() {
         activeLyricRef={activeLyricRef}
         adjustVolumeByWheel={adjustVolumeByWheel}
         audioRef={audioRef}
-        backStack={backStack}
+        backStack={navHistory.back}
         changeLyricsProvider={changeLyricsProvider}
         cycleRepeat={cycleRepeat}
         durationSeconds={durationSeconds}
         formatTime={formatTime}
-        forwardStack={forwardStack}
+        forwardStack={navHistory.forward}
         goBack={goBack}
         hasTransientLayer={hasTransientLayer}
         isPlaying={isPlaying}
@@ -3694,9 +3803,9 @@ function App() {
         activeLyricIndex={activeLyricIndex}
         activeLyricRef={activeLyricRef}
         audioRef={audioRef}
-        backStack={backStack}
+        backStack={navHistory.back}
         changeLyricsProvider={changeLyricsProvider}
-        forwardStack={forwardStack}
+        forwardStack={navHistory.forward}
         goBack={goBack}
         hasTransientLayer={hasTransientLayer}
         lyrics={lyrics}

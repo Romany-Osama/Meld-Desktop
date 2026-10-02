@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // U4-002: App.tsx composes the feature hooks in an order that works at runtime (no use-before-declaration),
 // and the start-up loads still go out.
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 // Minimal answers for the commands App sends while starting up; anything else answers null.
@@ -9,7 +9,24 @@ const responses: Record<string, unknown> = {
   settings_get: [],
   session_status: { authenticated: false },
   spotify_session_status: { authenticated: false },
-  ytm_home: { sections: [] },
+  ytm_home: {
+    sections: [
+      {
+        title: "Albums for you",
+        items: [
+          {
+            id: "MPREb_test",
+            kind: "album",
+            title: "Test Album",
+            subtitle: "Artist",
+            artists: [],
+            browseId: "MPREb_test",
+          },
+        ],
+      },
+    ],
+  },
+  ytm_detail: { kind: "album", title: "Test Album", subtitle: "Artist", items: [], browseId: "MPREb_test" },
   speed_dial_items: [],
   search_history_items: [],
   history_items: [],
@@ -39,4 +56,46 @@ it("mounts, renders the shell and starts the initial loads", async () => {
   const commands = new Set(invoke.mock.calls.map(([command]) => command));
   for (const command of ["settings_get", "session_status", "spotify_session_status", "ytm_home", "speed_dial_items"])
     expect(commands).toContain(command);
+});
+
+it("navigates with route-based back and forward history (U4-004)", async () => {
+  const { default: App } = await import("./App");
+  const { container } = await act(async () => render(<App />));
+  const route = () => container.querySelector("main")?.getAttribute("data-route");
+  const click = async (element: HTMLElement) => act(async () => void fireEvent.click(element));
+  const back = screen.getByRole("button", { name: "Back" });
+  const forward = screen.getByRole("button", { name: "Forward" });
+  expect(route()).toBe("/home");
+  expect(back).toHaveProperty("disabled", true);
+  await click(screen.getByRole("button", { name: /Library/ }));
+  expect(route()).toBe("/library/mix");
+  await click(screen.getByRole("button", { name: /History/ }));
+  expect(route()).toBe("/history/local");
+  await click(back);
+  expect(route()).toBe("/library/mix");
+  await click(back);
+  expect(route()).toBe("/home");
+  expect(back).toHaveProperty("disabled", true);
+  await click(forward);
+  expect(route()).toBe("/library/mix");
+  await click(forward);
+  expect(route()).toBe("/history/local");
+  expect(forward).toHaveProperty("disabled", true);
+});
+
+it("returns to a detail page that was open when the user navigated away (U4-004)", async () => {
+  const { default: App } = await import("./App");
+  const { container } = await act(async () => render(<App />));
+  const route = () => container.querySelector("main")?.getAttribute("data-route");
+  const click = async (element: HTMLElement) => act(async () => void fireEvent.click(element));
+  await click(screen.getByTitle("Open album"));
+  expect(route()).toBe("/album/MPREb_test");
+  await click(screen.getByRole("button", { name: /History/ }));
+  expect(route()).toBe("/history/local");
+  invoke.mockClear();
+  await click(screen.getByRole("button", { name: "Back" }));
+  expect(route()).toBe("/album/MPREb_test");
+  expect(invoke).toHaveBeenCalledWith("ytm_detail", { kind: "album", browseId: "MPREb_test" });
+  // The album was opened from Home, so Home is the selected destination again.
+  expect(screen.getByRole("button", { name: /Home/, current: "page" })).toBeTruthy();
 });
