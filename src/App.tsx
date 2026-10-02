@@ -70,6 +70,8 @@ import {
 import { Layer, LayerState, topmostLayer } from "./app/layers";
 import { LAST_ROUTE_KEY, parseLastRoute, serializeLastRoute } from "./app/lastRoute";
 import { parseLink } from "./app/links";
+import { canPerform, itemMenuEntries, MenuAction, MenuContext } from "./app/capabilities";
+import { ItemMenu } from "./features/menu/ItemMenu";
 import { captureScreenState, ScreenState, screenStateMatches } from "./app/screenState";
 import { useResourceCache } from "./data/useResource";
 import type { DetailRef, PodcastFilter, TopPeriod } from "./data/keys";
@@ -1091,40 +1093,56 @@ function App() {
     (active === "history" && historySource === "local") ||
     (playlist?.status === "ready" && playlist.data.playlist.id.startsWith("LOCAL_"));
 
-  const performMenuAction = async (
-    action:
-      | "open"
-      | "play"
-      | "share"
-      | "copy_link"
-      | "download"
-      | "download_cancel"
-      | "download_remove"
-      | "cache_remove"
-      | "album"
-      | "episode_save"
-      | "podcast_save"
-      | "queue"
-      | "play_next"
-      | "radio"
-      | "playlist"
-      | "remove_from_playlist"
-      | "remove_history"
-      | "pin"
-      | "unpin"
-      | "artist"
-      | "info"
-      | "edit"
-      | "refetch"
-      | "delete_uploaded"
-      | "change_youtube_version"
-      | "meld_like"
-      | "add_library"
-      | "remove_library",
-    item: YtItem,
-  ) => {
+  // What the open menu offers (U4-011). Null while no menu is open.
+  const menuContext: MenuContext | null = menuItem
+    ? {
+        surface: playerMenuOpen ? "player" : "item",
+        googleSignedIn: sessionStatus.authenticated,
+        spotifySignedIn: spotifyStatus.authenticated,
+        localContext: isLocalLibraryMenuContext(menuItem),
+        playbackCacheList: active === "library" && libraryMode === "cache",
+        openPlaylistId: playlist?.data.playlist.id ?? null,
+        state: menuState,
+        download: menuDownload,
+        spotifyMatch: menuSpotifyMatch !== null,
+        playbackSpeed,
+      }
+    : null;
+
+  /** Runs a menu entry. Entries that are not item actions (player settings, Spotify) are handled here. */
+  const runMenuAction = (action: MenuAction, item: YtItem) => {
+    switch (action) {
+      case "advanced_playback":
+        setMenuItem(null);
+        setPlayerMenuOpen(false);
+        setSpeedDialogOpen(true);
+        return;
+      case "sleep_timer":
+        setMenuItem(null);
+        setPlayerMenuOpen(false);
+        setSleepTimerMinutes(sleepTimerDefault);
+        setSleepTimerOpen(true);
+        return;
+      case "playback_report":
+        if (item.videoId) void copyPlaybackReport(item.videoId);
+        return;
+      case "spotify_add":
+        void beginSpotifyAdd(item);
+        return;
+      default:
+        void performMenuAction(action, item);
+    }
+  };
+
+  const performMenuAction = async (action: MenuAction, item: YtItem) => {
+    // A menu that went stale (sign-out, finished download) must not run an action it no longer offers.
+    if (!menuContext || !canPerform(action, item, menuContext)) {
+      setMenuItem(null);
+      setPlayerMenuOpen(false);
+      setNotice("That action is no longer available for this item.");
+      return;
+    }
     if (!action.startsWith("download")) setMenuItem(null);
-    if (action === "open") return openItem(item);
     if (action === "play")
       return playItem(
         item,
@@ -2862,250 +2880,16 @@ function App() {
           </div>
         </div>
       )}
-      {menuItem && (
-        <div
-          className="detail-overlay menu-overlay"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => {
+      {menuItem && menuContext && (
+        <ItemMenu
+          item={menuItem}
+          entries={itemMenuEntries(menuItem, menuContext)}
+          onAction={runMenuAction}
+          onClose={() => {
             setMenuItem(null);
             setPlayerMenuOpen(false);
           }}
-        >
-          <div className="menu-panel" onClick={(event) => event.stopPropagation()}>
-            <div className="menu-heading">
-              <strong>{menuItem.title}</strong>
-              <button
-                className="close-button"
-                title="Close"
-                aria-label="Close"
-                onClick={() => {
-                  setMenuItem(null);
-                  setPlayerMenuOpen(false);
-                }}
-              >
-                ×
-              </button>
-            </div>
-            {playerMenuOpen && (
-              <>
-                <button
-                  className="menu-option"
-                  onClick={() => {
-                    setMenuItem(null);
-                    setPlayerMenuOpen(false);
-                    setSpeedDialogOpen(true);
-                  }}
-                >
-                  Advanced playback · x{playbackSpeed.toFixed(2)}
-                </button>
-                <button
-                  className="menu-option"
-                  onClick={() => {
-                    setMenuItem(null);
-                    setPlayerMenuOpen(false);
-                    setSleepTimerMinutes(sleepTimerDefault);
-                    setSleepTimerOpen(true);
-                  }}
-                >
-                  Sleep timer
-                </button>
-              </>
-            )}
-            {!playerMenuOpen && (menuItem.kind === "song" || menuItem.kind === "episode") && (
-              <button className="menu-option" onClick={() => void performMenuAction("play", menuItem)}>
-                Play in Meld
-              </button>
-            )}
-            {menuItem.kind === "podcast" && (
-              <div className="menu-quick-actions">
-                <button className="menu-option" onClick={() => void performMenuAction("podcast_save", menuItem)}>
-                  {menuState.podcastSaved ? "Remove from library" : "Save to Podcasts"}
-                </button>
-                <button className="menu-option" onClick={() => void performMenuAction("share", menuItem)}>
-                  Share
-                </button>
-              </div>
-            )}
-            {(menuItem.kind === "song" || menuItem.kind === "episode") && (
-              <div className="menu-quick-actions">
-                {!playerMenuOpen && isLocalLibraryMenuContext(menuItem) && (
-                  <button className="menu-option" onClick={() => void performMenuAction("edit", menuItem)}>
-                    Edit
-                  </button>
-                )}
-                <button className="menu-option" onClick={() => void performMenuAction("playlist", menuItem)}>
-                  Add to playlist
-                </button>
-                {menuItem.videoId && !menuItem.localPath && (
-                  <button
-                    className="menu-option"
-                    onClick={() => void performMenuAction(playerMenuOpen ? "copy_link" : "share", menuItem)}
-                  >
-                    {playerMenuOpen ? "Copy link" : "Share"}
-                  </button>
-                )}
-                {playerMenuOpen && menuItem.videoId && !menuItem.localPath && (
-                  <button className="menu-option" onClick={() => void copyPlaybackReport(menuItem.videoId as string)}>
-                    Copy playback report
-                  </button>
-                )}
-                {menuItem.videoId && !menuItem.localPath && spotifyStatus.authenticated && (
-                  <button className="menu-option" onClick={() => void beginSpotifyAdd(menuItem)}>
-                    Add to Spotify playlist
-                  </button>
-                )}
-              </div>
-            )}
-            {menuItem.videoId && (
-              <>
-                {active === "library" && libraryMode === "cache" && (
-                  <button className="menu-option" onClick={() => void performMenuAction("cache_remove", menuItem)}>
-                    Remove playback cache
-                  </button>
-                )}
-                {menuDownload?.state === "downloading" ? (
-                  <button className="menu-option" onClick={() => void performMenuAction("download_cancel", menuItem)}>
-                    Cancel offline download
-                    {menuDownload.totalBytes
-                      ? ` · ${Math.round((menuDownload.bytes / menuDownload.totalBytes) * 100)}%`
-                      : ""}
-                  </button>
-                ) : menuDownload?.state === "completed" ? (
-                  <button className="menu-option" onClick={() => void performMenuAction("download_remove", menuItem)}>
-                    Remove offline download
-                  </button>
-                ) : !menuItem.localPath ? (
-                  <button className="menu-option" onClick={() => void performMenuAction("download", menuItem)}>
-                    {menuDownload?.state === "failed"
-                      ? "Retry offline download"
-                      : menuDownload?.state === "cancelled"
-                        ? "Resume offline download"
-                        : "Download for offline listening"}
-                  </button>
-                ) : null}
-                {menuDownload?.state === "completed" && (
-                  <span className="menu-note">
-                    Offline download ready{menuDownload.artworkPath ? " · artwork cached" : " · artwork unavailable"}
-                    {menuDownload.lyricsCached ? " · lyrics cached" : " · lyrics unavailable"}
-                  </span>
-                )}
-                {(menuDownload?.state === "failed" || menuDownload?.state === "cancelled") && menuDownload.error && (
-                  <span className="menu-note error-text">{menuDownload.error}</span>
-                )}
-              </>
-            )}
-            {!playerMenuOpen && (
-              <button
-                className="menu-option"
-                onClick={() => void performMenuAction(menuState.pinned ? "unpin" : "pin", menuItem)}
-              >
-                {menuState.pinned ? "Unpin from Speed Dial" : "Pin to Speed Dial"}
-              </button>
-            )}
-            {(menuItem.kind === "song" || menuItem.kind === "episode") && (
-              <>
-                {menuItem.kind === "song" && !menuItem.localPath && menuItem.artists.some((value) => value.id) && (
-                  <button className="menu-option" onClick={() => void performMenuAction("artist", menuItem)}>
-                    View artist{menuItem.artists.filter((value) => value.id).length > 1 ? "s" : ""}
-                  </button>
-                )}
-                {menuItem.kind === "song" && menuItem.albumId && (
-                  <button className="menu-option" onClick={() => void performMenuAction("album", menuItem)}>
-                    View album{menuItem.albumTitle ? ` · ${menuItem.albumTitle}` : ""}
-                  </button>
-                )}
-                <button className="menu-option" onClick={() => void performMenuAction("info", menuItem)}>
-                  Details
-                </button>
-                {!playerMenuOpen && menuItem.videoId && (
-                  <button className="menu-option" onClick={() => void performMenuAction("refetch", menuItem)}>
-                    Refetch metadata
-                  </button>
-                )}
-                {menuSpotifyMatch && (
-                  <button
-                    className="menu-option"
-                    onClick={() => void performMenuAction("change_youtube_version", menuItem)}
-                  >
-                    Change YouTube version
-                  </button>
-                )}
-                {!playerMenuOpen && menuState.uploaded && sessionStatus.authenticated && (
-                  <button className="menu-option" onClick={() => void performMenuAction("delete_uploaded", menuItem)}>
-                    Delete uploaded song
-                  </button>
-                )}
-                {!playerMenuOpen && playlist?.data.playlist.id?.startsWith("LOCAL_") && (
-                  <button
-                    className="menu-option"
-                    onClick={() => void performMenuAction("remove_from_playlist", menuItem)}
-                  >
-                    Remove from playlist
-                  </button>
-                )}
-                {menuItem.videoId && (
-                  <button className="menu-option" onClick={() => void performMenuAction("radio", menuItem)}>
-                    Start radio
-                  </button>
-                )}
-                {!playerMenuOpen && (menuItem.videoId || menuItem.localPath) && (
-                  <button className="menu-option" onClick={() => void performMenuAction("play_next", menuItem)}>
-                    Play next
-                  </button>
-                )}
-              </>
-            )}
-            {menuItem.kind === "song" && (
-              <>
-                {!playerMenuOpen && menuItem.historyRemoveToken && (
-                  <button className="menu-option" onClick={() => void performMenuAction("remove_history", menuItem)}>
-                    Remove from YouTube Music history
-                  </button>
-                )}
-                {!playerMenuOpen && isLocalLibraryMenuContext(menuItem) && (
-                  <button className="menu-option" onClick={() => void performMenuAction("meld_like", menuItem)}>
-                    {menuState.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}
-                  </button>
-                )}
-                {!menuItem.localPath && (
-                  <button
-                    className="menu-option"
-                    onClick={() =>
-                      void performMenuAction(menuState.inLibrary ? "remove_library" : "add_library", menuItem)
-                    }
-                  >
-                    {menuState.inLibrary ? "Remove from library" : "Add to library"}
-                  </button>
-                )}
-              </>
-            )}
-            {menuItem.kind === "episode" && (
-              <>
-                {!playerMenuOpen && (
-                  <button className="menu-option" onClick={() => void performMenuAction("episode_save", menuItem)}>
-                    {menuState.inLibrary ? "Remove from Saved Episodes" : "Save for later"}
-                  </button>
-                )}
-                {menuItem.albumId && (
-                  <>
-                    <button className="menu-option" onClick={() => void performMenuAction("album", menuItem)}>
-                      View podcast{menuItem.albumTitle ? ` · ${menuItem.albumTitle}` : ""}
-                    </button>
-                    <button className="menu-option" onClick={() => void performMenuAction("podcast_save", menuItem)}>
-                      {menuState.podcastSaved ? "Unsubscribe from podcast" : "Subscribe to podcast"}
-                    </button>
-                  </>
-                )}
-              </>
-            )}
-            {!playerMenuOpen && (
-              <button className="menu-option" onClick={() => void performMenuAction("queue", menuItem)}>
-                Add to queue
-              </button>
-            )}
-          </div>
-        </div>
+        />
       )}
       {speedDialogOpen && (
         <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setSpeedDialogOpen(false)}>

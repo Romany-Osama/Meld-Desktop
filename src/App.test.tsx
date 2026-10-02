@@ -38,6 +38,7 @@ const responses: Record<string, unknown> = {
   library_mix_songs: [],
   library_albums: [],
   library_artists: [],
+  library_item_state: { liked: false, youtubeLiked: false, inLibrary: false, uploaded: false, pinned: false },
 };
 // Per-test answers that take precedence over `responses` (for example a deferred, slow answer).
 const overrides: Record<string, (args: unknown) => Promise<unknown>> = {};
@@ -296,4 +297,17 @@ it("returns to the scroll position inside an album page (U4-010)", async () => {
   await click(screen.getByRole("button", { name: "Back" }));
   expect(route()).toBe("/album/MPREb_test");
   expect(container.querySelector<HTMLElement>("[data-screen-scroll]")?.scrollTop).toBe(420);
+});
+
+it("builds the item menu from the capability model (U4-011)", async () => {
+  const { default: App } = await import("./App");
+  await act(async () => render(<App />));
+  await act(async () => void fireEvent.click(screen.getByRole("button", { name: "More options for Test Album" })));
+  const menu = screen.getByRole("dialog");
+  const labels = [...menu.querySelectorAll(".menu-option")].map((button) => button.textContent);
+  // An album has no track actions; the model offers pinning and queueing only.
+  expect(labels).toEqual(["Pin to Speed Dial", "Add to queue"]);
+  invoke.mockClear();
+  await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Pin to Speed Dial" })));
+  expect(invoke).toHaveBeenCalledWith("speed_dial_toggle", expect.objectContaining({ pinned: true }));
 });

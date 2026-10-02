@@ -17,6 +17,7 @@ import {
 } from "../lib/ui-invariants.mjs";
 import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
 import {
+  checkCapabilities,
   checkFeatureModules,
   checkScreenSplit,
   checkServerState,
@@ -266,4 +267,16 @@ test("ui: server state lives in data hooks, not in App.tsx (U4-008)", () => {
       ? read(path).replace("function App() {", "function App() {\n  const [detail, setDetail] = useState(null);")
       : read(path);
   assert.deepEqual(checkServerState(stateful), ["App.tsx keeps detail in useState; it is server state"]);
+});
+
+test("ui: the item menu comes from the capability model (U4-011)", () => {
+  const read = (path) => (existsSync(path) ? readFileSync(path, "utf8") : null);
+  assert.deepEqual(checkCapabilities(read), []);
+  const scattered = (path) =>
+    path === "src/App.tsx"
+      ? read(path).replace("function App() {", 'function App() {\n  const x = () => performMenuAction("radio", item);')
+      : read(path);
+  assert.deepEqual(checkCapabilities(scattered), ["App.tsx calls performMenuAction with a literal action"]);
+  const missing = (path) => (path === "src/app/capabilities.ts" ? null : read(path));
+  assert.deepEqual(checkCapabilities(missing), ["src/app/capabilities.ts is missing"]);
 });
