@@ -1,0 +1,183 @@
+name: Release
+
+# Plan §7.3. Push a tag vX.Y.Z (created from main) to build and publish a release.
+on:
+  push:
+    tags: ["v*"]
+  # Dry run from main: builds every asset and uploads them as a workflow artifact without publishing.
+  workflow_dispatch:
+  # Changes to the release pipeline itself are exercised end to end (without publishing).
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/release-assets.mjs
+      - scripts/lib/release.mjs
+      - scripts/smoke/**
+      - packaging/**
+      - src-tauri/tauri.conf.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build release assets
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      PUBLISH: ${{ github.event_name == 'push' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+
+      - name: Verify tag matches version and is on main
+        run: |
+          if [ "$PUBLISH" = true ]; then TAG="$GITHUB_REF_NAME"; else TAG="v$(node -p 'require("./package.json").version')"; fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          node scripts/release-assets.mjs check-tag "$TAG"
+          if [ "$PUBLISH" = true ]; then
+            git fetch --no-tags origin main
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag $TAG is not on main"; exit 1; }
+          fi
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Dependency audits
+        run: |
+          npm audit --omit=dev --audit-level=high
+          cargo install cargo-audit --locked --quiet
+          (cd src-tauri && cargo audit)  # fails on vulnerabilities; warnings are reviewed in DECISIONS D-013
+
+      - name: Checks and tests
+        run: |
+          npm run check:versions
+          npm run check:security
+          npm run check:ui
+          npm run test:scripts
+          npm test
+          npm run typecheck
+          (cd src-tauri && cargo fmt --all -- --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked)
+
+      - name: Build NSIS installer and updater signature
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --ci
+
+      - name: Assemble release assets
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          out=release-assets; mkdir -p "$out"
+          nsis=src-tauri/target/release/bundle/nsis
+          setup="$out/Meld-Desktop-$VERSION-x64-setup.exe"
+          cp "$nsis/Meld Desktop_${VERSION}_x64-setup.exe" "$setup"
+          cp "$nsis/Meld Desktop_${VERSION}_x64-setup.exe.sig" "$setup.sig"
+
+          node scripts/release-assets.mjs metadata "$out"
+          node scripts/release-assets.mjs notes "$VERSION" notes.md
+
+          portable_dir="Meld-Desktop-$VERSION-x64-portable"
+          mkdir -p "$portable_dir/icons/taskbar"
+          cp src-tauri/target/release/meld-desktop.exe "$portable_dir/Meld Desktop.exe"
+          cp src-tauri/icons/taskbar/*.ico "$portable_dir/icons/taskbar/"
+          cp LICENSE NOTICE "$out/THIRD-PARTY-NOTICES.txt" "$portable_dir/"
+          cp packaging/README-portable.txt "$portable_dir/"
+          printf 'This file marks a portable copy of Meld Desktop. Updates are offered as a download link.\n' > "$portable_dir/portable.marker"
+          portable="$out/$portable_dir.zip"
+          pwsh -NoProfile -Command "Compress-Archive -Path '$portable_dir/*' -DestinationPath '$portable' -CompressionLevel Optimal"
+          npx tauri signer sign "$portable"
+
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG"
+          node scripts/release-assets.mjs latest "$VERSION" "$base" "$setup" "$setup.sig" "$portable" "$portable.sig" notes.md "$out/latest.json"
+          {
+            cat notes.md
+            printf '\n---\n\n**Downloads:** `%s` (installer, recommended) or `%s` (portable; needs the Microsoft Edge WebView2 Runtime, which Windows 10/11 normally include).\n\n' "$(basename "$setup")" "$(basename "$portable")"
+            printf 'The installer and executable are **not Authenticode-signed yet**, so Windows SmartScreen may show "Windows protected your PC" — choose *More info → Run anyway*. Verify downloads against `SHA256SUMS.txt`; updates are verified with the Meld Desktop update signing key before they are installed.\n'
+          } > release-notes.md
+          node scripts/release-assets.mjs sums "$out/SHA256SUMS.txt" "$out"/*
+          ls -la "$out"
+          echo "$TAG" > release-tag.txt
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: |
+            release-assets/
+            release-notes.md
+            release-tag.txt
+          retention-days: 14
+
+  smoke:
+    name: Windows smoke (upgrade from 0.1.8, portable, uninstall)
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem release-assets -Filter "*-x64-setup.exe").FullName
+          $portable = (Get-ChildItem release-assets -Filter "*-x64-portable.zip").FullName
+          ./scripts/smoke/windows-smoke.ps1 -Setup $setup -Portable $portable
+
+  publish:
+    name: Publish GitHub Release
+    needs: smoke
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release-assets/*
+      - name: Create and publish the release
+        run: |
+          set -euo pipefail
+          tag=$(cat release-tag.txt)
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "Meld Desktop ${tag#v}" --notes-file release-notes.md release-assets/*
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest

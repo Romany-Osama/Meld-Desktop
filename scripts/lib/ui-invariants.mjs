@@ -16,7 +16,7 @@ export function checkUiInvariants(appSource) {
 /** Commands registered in generate_handler![...] of lib.rs. */
 export function registeredCommands(libSource) {
   const match = libSource.match(/generate_handler!\[([^\]]*)\]/);
-  return match ? match[1].split(",").map((value) => value.trim()).filter(Boolean) : [];
+  return match ? match[1].split(",").map((value) => value.trim().split("::").pop()).filter(Boolean) : [];
 }
 
 /** Body of a top-level Rust function, from its signature to the next top-level item. */
