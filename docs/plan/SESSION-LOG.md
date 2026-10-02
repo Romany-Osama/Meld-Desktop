@@ -38,3 +38,23 @@
 - Branch protection review requirement (S5-097) needs a second maintainer.
 
 **Next task:** Phase 1 M1.1 — U4-001 (split `App.tsx` into route-level screens), with M1.4 test harness work (R6-075: ESLint, Prettier) alongside.
+
+## 2026-10-02 — Session 3 (0.2.0 playback/search hotfix → 0.3.0)
+
+**Done**
+- Root cause of "The native audio element could not read the resolved stream URL": the asset-protocol scope used `$APPDATA/Meld Desktop`, which in Tauri 2 resolves to the bundle-identifier folder, so every cached/downloaded file was blocked. Scope now `$DATA/Meld Desktop/...` plus runtime `allow_directory` for the media folders (D-014, PLAY-030).
+- Root cause of missing search results: YouTube Music now returns a `musicCardShelfRenderer` top result plus one `itemSectionRenderer` per result. Parser reads card, shelf and item sections; fixture test added (D-015).
+- Protected-stream path modelled on Meld Android: ciphered formats are kept and the signature and `n` challenges are solved by the vendored EJS 0.8.0 solver in a sandboxed QuickJS (memory, stack, deadline limits; SHA-256-pinned vendor files; player JS cached on disk) (D-016, PLAY-005, PLAY-006).
+- Client catalog with direct clients first, then JS-solved clients (WEB_REMIX, TV, embedded, creator); 5-minute per-video failure memory; failure taxonomy, redacted diagnostics, "Copy playback report"; frontend re-resolves an expired/failed stream up to twice and keeps the position (D-017, PLAY-009, PLAY-015, PLAY-032).
+- Live tests from CI-like network: WEB_REMIX solved URL returned HTTP 206; direct clients returned 206.
+- SBOM lists the vendored JS packages; NOTICE has a bundled third-party section.
+
+**Partial (not ticked)**
+- PLAY-002, PLAY-007, PLAY-013 (redirect-hop validation), PLAY-016, PLAY-033.
+
+**Blockers / owner actions**
+- TV clients answer "page needs to be reloaded" from datacenter IPs; behaviour from a home connection unverified.
+- Real-PC check of Liked Songs playback and sign-in after 0.3.0.
+- Authenticode certificate (D-010) still pending.
+
+**Next task:** PLAY-013 (validate every redirect hop), then Phase 1 M1.1 — U4-001.
