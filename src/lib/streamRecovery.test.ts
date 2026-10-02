@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { EXPIRY_SAFETY_MARGIN_SECONDS, MAX_STREAM_RECOVERIES, isLocalStream, isStreamNearExpiry, recoveryNotice, recoveryReason } from "./streamRecovery";
+import {
+  EXPIRY_SAFETY_MARGIN_SECONDS,
+  MAX_STREAM_RECOVERIES,
+  isLocalStream,
+  isStreamNearExpiry,
+  recoveryNotice,
+  recoveryReason,
+} from "./streamRecovery";
 
 describe("stream recovery", () => {
   it("re-resolves immediately on a fresh stream rejection instead of failing (PLAY-030)", () => {

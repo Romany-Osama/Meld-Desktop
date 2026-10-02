@@ -44,7 +44,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] TR-M13 (P0) Release naming/version history inconsistent — CHANGELOG corrected; D-008 open for tags
 - [x] TR-L2 (P0) CONTRIBUTING, SECURITY, issue/PR templates, code of conduct, support policy — SECURITY/CONTRIBUTING/CoC/templates
 - [x] TR-L3 (P0) Changelog missing on main — CHANGELOG.md
-- [ ] TR-L9 (P0) Normalize formatting/line endings; enforce Prettier/rustfmt in CI
+- [x] TR-L9 (P0) Normalize formatting/line endings; enforce Prettier/rustfmt in CI — checks.test.mjs tooling (lint/format/line-ending rules, CRLF detection); CI runs check:tooling, lint, format:check, cargo fmt (D-021)
 
 ## Phase 1 · M1.1 Frontend architecture split
 

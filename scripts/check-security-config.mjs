@@ -6,9 +6,15 @@ import { readdirSync, readFileSync } from "node:fs";
 import { checkBundleConfig, checkSecurityConfig, checkTrackedFiles } from "./lib/security-config.mjs";
 
 const tauriConf = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
-const capabilities = readdirSync("src-tauri/capabilities").filter((name) => name.endsWith(".json")).map((name) => JSON.parse(readFileSync(`src-tauri/capabilities/${name}`, "utf8")));
+const capabilities = readdirSync("src-tauri/capabilities")
+  .filter((name) => name.endsWith(".json"))
+  .map((name) => JSON.parse(readFileSync(`src-tauri/capabilities/${name}`, "utf8")));
 const tracked = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
-const problems = [...checkSecurityConfig(tauriConf, capabilities), ...checkBundleConfig(tauriConf), ...checkTrackedFiles(tracked)];
+const problems = [
+  ...checkSecurityConfig(tauriConf, capabilities),
+  ...checkBundleConfig(tauriConf),
+  ...checkTrackedFiles(tracked),
+];
 if (problems.length > 0) {
   for (const problem of problems) console.error(`security config: ${problem}`);
   process.exit(1);

@@ -22,27 +22,42 @@ export function checkSecurityConfig(tauriConf, capabilities = []) {
   if (csp === null || csp === undefined || (typeof csp === "string" && csp.trim() === "")) {
     problems.push("app.security.csp must be a real policy, never null/empty");
   } else {
-    const directives = parseCsp(typeof csp === "string" ? csp : Object.entries(csp).map(([key, value]) => `${key} ${Array.isArray(value) ? value.join(" ") : value}`).join("; "));
-    for (const required of ["default-src", "script-src", "object-src"]) if (!directives[required]) problems.push(`CSP is missing ${required}`);
+    const directives = parseCsp(
+      typeof csp === "string"
+        ? csp
+        : Object.entries(csp)
+            .map(([key, value]) => `${key} ${Array.isArray(value) ? value.join(" ") : value}`)
+            .join("; "),
+    );
+    for (const required of ["default-src", "script-src", "object-src"])
+      if (!directives[required]) problems.push(`CSP is missing ${required}`);
     for (const [name, values] of Object.entries(directives)) {
       if (name === "script-src" || name === "default-src") {
-        for (const bad of ["'unsafe-inline'", "'unsafe-eval'", "*", "http:", "https:"]) if (values.includes(bad)) problems.push(`CSP ${name} must not allow ${bad}`);
+        for (const bad of ["'unsafe-inline'", "'unsafe-eval'", "*", "http:", "https:"])
+          if (values.includes(bad)) problems.push(`CSP ${name} must not allow ${bad}`);
       }
     }
-    if (directives["object-src"] && directives["object-src"].join(" ") !== "'none'") problems.push("CSP object-src must be 'none'");
+    if (directives["object-src"] && directives["object-src"].join(" ") !== "'none'")
+      problems.push("CSP object-src must be 'none'");
   }
-  if (security.dangerousDisableAssetCspModification) problems.push("dangerousDisableAssetCspModification must not be set");
-  if (security.freezePrototype === false && security.freezePrototype !== undefined) { /* default; allowed */ }
+  if (security.dangerousDisableAssetCspModification)
+    problems.push("dangerousDisableAssetCspModification must not be set");
+  if (security.freezePrototype === false && security.freezePrototype !== undefined) {
+    /* default; allowed */
+  }
   const scope = security.assetProtocol?.scope;
-  const scopeList = Array.isArray(scope) ? scope : scope?.allow ?? [];
+  const scopeList = Array.isArray(scope) ? scope : (scope?.allow ?? []);
   if (security.assetProtocol?.enable) {
-    for (const entry of scopeList) if (!ALLOWED_ASSET_SCOPE.includes(entry)) problems.push(`asset protocol scope entry "${entry}" is broader than the Meld data folders`);
+    for (const entry of scopeList)
+      if (!ALLOWED_ASSET_SCOPE.includes(entry))
+        problems.push(`asset protocol scope entry "${entry}" is broader than the Meld data folders`);
   }
   for (const capability of capabilities) {
     if (capability.remote) problems.push(`capability "${capability.identifier}" grants IPC to remote URLs`);
     for (const permission of capability.permissions ?? []) {
       const id = typeof permission === "string" ? permission : permission.identifier;
-      if (/^(fs|shell):allow-(execute|spawn|write|remove)|^shell:/.test(id ?? "")) problems.push(`capability "${capability.identifier}" grants dangerous permission ${id}`);
+      if (/^(fs|shell):allow-(execute|spawn|write|remove)|^shell:/.test(id ?? ""))
+        problems.push(`capability "${capability.identifier}" grants dangerous permission ${id}`);
     }
   }
   return problems;
@@ -53,9 +68,13 @@ export function checkBundleConfig(tauriConf) {
   const problems = [];
   const bundle = tauriConf?.bundle ?? {};
   const targets = Array.isArray(bundle.targets) ? bundle.targets : [bundle.targets];
-  if (targets.length !== 1 || targets[0] !== "nsis") problems.push(`bundle.targets must be ["nsis"] (portable ZIP is built separately; no MSI), got ${JSON.stringify(bundle.targets)}`);
+  if (targets.length !== 1 || targets[0] !== "nsis")
+    problems.push(
+      `bundle.targets must be ["nsis"] (portable ZIP is built separately; no MSI), got ${JSON.stringify(bundle.targets)}`,
+    );
   const mode = bundle.windows?.webviewInstallMode?.type;
-  if (mode !== "embedBootstrapper") problems.push(`bundle.windows.webviewInstallMode.type must be "embedBootstrapper", got ${JSON.stringify(mode)}`);
+  if (mode !== "embedBootstrapper")
+    problems.push(`bundle.windows.webviewInstallMode.type must be "embedBootstrapper", got ${JSON.stringify(mode)}`);
   return problems;
 }
 

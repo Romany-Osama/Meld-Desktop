@@ -24,7 +24,11 @@ npm run tauri dev
 npm run check:versions
 npm run check:security
 npm run check:ui
+npm run check:tooling
+npm run lint            # ESLint (flat config); no new warnings allowed
+npm run format:check    # Prettier; fix with `npm run format`
 npm run test:scripts
+npm test
 npm run typecheck
 npm run build
 cd src-tauri
@@ -32,6 +36,8 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --locked -- -D warnings
 cargo test --locked
 ```
+
+Line endings are LF everywhere except PowerShell scripts (CRLF), enforced by `.gitattributes` and `npm run check:tooling`. The one-off Prettier reformat is listed in `.git-blame-ignore-revs`; run `git config blame.ignoreRevsFile .git-blame-ignore-revs` to skip it in `git blame`.
 
 ## Versioning
 

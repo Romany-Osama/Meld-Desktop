@@ -20,7 +20,9 @@ export function limitLabel(limitMb: number): string {
 
 export function usageSummary(usage: PlayerCacheUsage): string {
   if (usage.limitMb === 0) {
-    return usage.songs > 0 ? `Off · ${formatBytes(usage.bytes)} still cached` : "Off · songs are not cached during playback";
+    return usage.songs > 0
+      ? `Off · ${formatBytes(usage.bytes)} still cached`
+      : "Off · songs are not cached during playback";
   }
   const songs = usage.songs === 1 ? "1 song" : `${usage.songs} songs`;
   return `${formatBytes(usage.bytes)} of ${limitLabel(usage.limitMb)} used · ${songs}`;
