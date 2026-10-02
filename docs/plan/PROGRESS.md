@@ -67,8 +67,8 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 
 ## Phase 1 · M1.2 Typed IPC and capability model
 
-- [ ] S5-001 (P0) Inventory every Tauri command with an owner, caller, and risk class
-- [ ] S5-002 (P0) Remove or gate unused commands
+- [x] S5-001 (P0) Inventory every Tauri command with an owner, caller, and risk class — scripts/lib/ipc-inventory.mjs + docs/ipc-commands.md (D-039); checks.test.mjs (ipc inventory), npm run check:security
+- [x] S5-002 (P0) Remove or gate unused commands — none unused (104/104 called); check:security fails on a command without a caller (D-039); checks.test.mjs (ipc inventory)
 - [ ] S5-003 (P0) Split commands into Rust modules by domain
 - [ ] S5-004 (P0) Adopt Tauri v2 app-command permissions
 - [ ] S5-005 (P0) Keep remote login windows IPC-less — and test it

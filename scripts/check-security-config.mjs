@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // CI guard: CSP not null, asset scope limited to Meld folders, no remote IPC (S5-013, S5-037, TR-C3),
-// NSIS-only bundle with embedded WebView2 bootstrapper (S5-070) and no committed release binaries (TR-M12).
+// the IPC command inventory (S5-001), NSIS-only bundle with embedded WebView2 bootstrapper (S5-070) and no committed release binaries (TR-M12).
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
+import { inventoryState } from "./ipc-inventory.mjs";
 import { checkBundleConfig, checkSecurityConfig, checkTrackedFiles } from "./lib/security-config.mjs";
 
 const tauriConf = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
@@ -14,6 +15,7 @@ const problems = [
   ...checkSecurityConfig(tauriConf, capabilities),
   ...checkBundleConfig(tauriConf),
   ...checkTrackedFiles(tracked),
+  ...inventoryState().problems,
 ];
 if (problems.length > 0) {
   for (const problem of problems) console.error(`security config: ${problem}`);

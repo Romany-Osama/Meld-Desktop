@@ -16,6 +16,8 @@ import {
   RESTORED_UI_COMMANDS,
 } from "../lib/ui-invariants.mjs";
 import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
+import { COMMANDS, callersOf, checkIpcInventory, renderInventory } from "../lib/ipc-inventory.mjs";
+import { inventoryState } from "../ipc-inventory.mjs";
 import {
   checkAppComposition,
   checkCapabilities,
@@ -341,4 +343,24 @@ test("source stays inside the ES2020 lib that CI type-checks against", () => {
   assert.deepEqual(checkEs2020Lib("const last = list.at(-1);"), [
     "Array.prototype.at is not in the ES2020 lib; use index access",
   ]);
+});
+
+test("ipc: every registered command has an owner, a risk class and a caller (S5-001)", () => {
+  const registered = registeredCommands(readFileSync("src-tauri/src/lib.rs", "utf8"));
+  assert.deepEqual(checkIpcInventory(registered), []);
+  assert.deepEqual(inventoryState().problems, []);
+  assert.deepEqual(checkIpcInventory([...registered, "new_command"]), [
+    "new_command is registered but not in the IPC inventory",
+  ]);
+  assert.deepEqual(checkIpcInventory(registered.filter((command) => command !== "settings_get")), [
+    "settings_get is in the IPC inventory but not registered",
+  ]);
+  assert.deepEqual(checkIpcInventory(["x"], { x: { owner: "nowhere", risk: "mild" } }), [
+    "x: unknown owner nowhere",
+    "x: unknown risk class mild",
+  ]);
+  assert.deepEqual(callersOf("history_clear", { "a.ts": 'invoke("history_clear")', "b.ts": "history_clear" }), [
+    "a.ts",
+  ]);
+  assert.match(renderInventory(["settings_get"], {}, COMMANDS), /\| `settings_get` \| read-local \| \*\*none\*\* \|/);
 });
