@@ -8,3 +8,5 @@ src-tauri/vendor/
 src-tauri/icons/
 # Markdown is prose and plan documents; Prettier would re-align every table in docs/plan.
 *.md
+# Captured API responses used as test fixtures; keep them byte-for-byte.
+**/fixtures/**/*.json

@@ -17,7 +17,11 @@ export function isStreamNearExpiry(elapsedSeconds: number, expiresInSeconds: num
 }
 
 /** Decide whether to re-resolve after an audio error, and why. `null` means give up. */
-export function recoveryReason(attempts: number, elapsedSeconds: number, expiresInSeconds: number): RecoveryReason | null {
+export function recoveryReason(
+  attempts: number,
+  elapsedSeconds: number,
+  expiresInSeconds: number,
+): RecoveryReason | null {
   if (attempts >= MAX_STREAM_RECOVERIES) return null;
   return isStreamNearExpiry(elapsedSeconds, expiresInSeconds) ? "expired" : "rejected";
 }
@@ -28,4 +32,5 @@ export function recoveryNotice(reason: RecoveryReason, attempt: number, localSou
   return `This source failed — trying another YouTube source (${attempt}/${MAX_STREAM_RECOVERIES})…`;
 }
 
-export const FINAL_STREAM_ERROR = "This song could not be played after trying other sources. Try again in a few minutes.";
+export const FINAL_STREAM_ERROR =
+  "This song could not be played after trying other sources. Try again in a few minutes.";

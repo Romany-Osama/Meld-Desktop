@@ -11,7 +11,8 @@ export function checkTooling({ packageJson, ciYml, gitattributes }) {
   }
   for (const step of REQUIRED_CI_STEPS) if (!ciYml.includes(step)) problems.push(`ci.yml must run "${step}"`);
   const rules = gitattributes.split(/\r?\n/).map((line) => line.trim().replace(/\s+/g, " "));
-  for (const rule of REQUIRED_GITATTRIBUTES) if (!rules.includes(rule)) problems.push(`.gitattributes must contain "${rule}"`);
+  for (const rule of REQUIRED_GITATTRIBUTES)
+    if (!rules.includes(rule)) problems.push(`.gitattributes must contain "${rule}"`);
   return problems;
 }
 

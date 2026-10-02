@@ -20,9 +20,12 @@ export function checkVersions({ packageJson, packageLock, cargoToml, cargoLock, 
   const problems = [];
   const version = packageJson.version;
   if (!SEMVER.test(version ?? "")) problems.push(`package.json version "${version}" is not SemVer`);
-  if (tauriConf.version !== "../package.json") problems.push(`tauri.conf.json version must be "../package.json" (single source), found "${tauriConf.version}"`);
-  if (packageLock && packageLock.version !== version) problems.push(`package-lock.json version ${packageLock.version} != ${version}`);
-  if (packageLock?.packages?.[""] && packageLock.packages[""].version !== version) problems.push(`package-lock.json packages[""] version ${packageLock.packages[""].version} != ${version}`);
+  if (tauriConf.version !== "../package.json")
+    problems.push(`tauri.conf.json version must be "../package.json" (single source), found "${tauriConf.version}"`);
+  if (packageLock && packageLock.version !== version)
+    problems.push(`package-lock.json version ${packageLock.version} != ${version}`);
+  if (packageLock?.packages?.[""] && packageLock.packages[""].version !== version)
+    problems.push(`package-lock.json packages[""] version ${packageLock.packages[""].version} != ${version}`);
   const cargo = cargoPackageVersion(cargoToml);
   if (cargo !== version) problems.push(`src-tauri/Cargo.toml version ${cargo} != ${version}`);
   const lock = cargoLockVersion(cargoLock, "meld-desktop");
