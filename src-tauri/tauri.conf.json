@@ -54,11 +54,22 @@
         "next": "icons/taskbar/NEXT_THUMB.ico",
         "nextDisabled": "icons/taskbar/NEXT_THUMB_DISABLED.ico"
       }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJDOURCMzI0MzU0MTZERTkKUldUcGJVRTFKTE9kTE5tNnRoZGp6bURzeEQ2RUE5eWM3blBXU3psdHU1UEtpcGpwQ3hGQWlkNE0K",
+      "endpoints": [
+        "https://github.com/Romany-Osama/Meld-Desktop/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper",
@@ -86,6 +97,7 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
   }
 }

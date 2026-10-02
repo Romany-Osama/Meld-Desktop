@@ -6,7 +6,7 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 
 ## [0.2.0] — Reconciled security release (supersedes 0.1.8 for security)
 
-0.2.0 merges the two diverged lines of development: everything users had in 0.1.8 (persistent session, offline Home, taskbar thumbnail buttons, lyrics provider picker, artist follow, podcast refresh, local recap, profile refresh, overlay layering) plus the security and reliability hardening that only existed on `main`. **Everyone on 0.1.8 should update.**
+0.2.0 merges the two diverged lines of development: everything users had in 0.1.8 (persistent session, offline Home, taskbar thumbnail buttons, lyrics provider picker, artist follow, podcast refresh, local recap, profile refresh, overlay layering) plus the security and reliability hardening that only existed on `main`. **Everyone on 0.1.8 should update.** 0.1.8 cannot update itself: run the 0.2.0 setup EXE over it (your library, downloads and settings are kept), or extract the portable ZIP over the old folder. From 0.2.0 on, updates are offered inside the app.
 
 ### Security
 - Session secrets (Google cookie, Spotify access token, `sp_dc`, `sp_key`) are encrypted at rest with AES-256-GCM; the key lives in Windows Credential Manager. Existing 0.1.8 databases are migrated on first start and the database is vacuumed so no plaintext remains.
@@ -21,7 +21,13 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 - Settings shows Audio quality once.
 - Accessibility: keyboard focus outlines, `aria-pressed`/`aria-current`, minimum 12 px text and WCAG AA muted-text contrast.
 
+### Added
+- **Updates:** Settings → About shows the version and can check for, download and install signed updates (your library is backed up first). Meld Desktop also checks quietly once a day and tells you when an update is available. The portable version gets a link to the download page.
+- Each release now ships `SHA256SUMS.txt`, a CycloneDX SBOM, `THIRD-PARTY-NOTICES.txt` and build provenance attestations.
+
 ### Changed
+- Restoring a backup streams the library to disk and rejects oversized archives instead of reading them into memory.
+- The portable ZIP now includes the taskbar button icons (missing from 0.1.8's ZIP), a `README-portable.txt` and the licence files.
 - Version 0.2.0 everywhere (installer, About, Rust crate) from one source.
 - Release binaries are no longer committed to the repository; they are published only as GitHub Release assets.
 - Packaging: NSIS setup and portable ZIP only (no MSI).

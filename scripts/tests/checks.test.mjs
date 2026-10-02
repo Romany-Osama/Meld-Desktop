@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { checkVersions, cargoPackageVersion, cargoLockVersion, readRepo } from "../lib/versions.mjs";
 import { checkSecurityConfig, checkBundleConfig, checkTrackedFiles, ALLOWED_ASSET_SCOPE } from "../lib/security-config.mjs";
 import { checkUiInvariants, checkLogoutClearsWebview, registeredCommands, RESTORED_UI_COMMANDS } from "../lib/ui-invariants.mjs";
@@ -71,7 +71,7 @@ test("ui: the real App.tsx passes and every restored command is registered (TR-H
 });
 
 test("ui: every registered command is invoked by the UI or documented as backend-only", () => {
-  const app = readFileSync("src/App.tsx", "utf8");
+  const app = readdirSync("src", { recursive: true }).filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)).map((name) => readFileSync(`src/${name}`, "utf8")).join("\n");
   const registered = registeredCommands(readFileSync("src-tauri/src/lib.rs", "utf8"));
   const unused = registered.filter((command) => !app.includes(`"${command}"`) && !app.includes(`'${command}'`));
   assert.deepEqual(unused, [], `registered but never invoked: ${unused.join(", ")}`);
