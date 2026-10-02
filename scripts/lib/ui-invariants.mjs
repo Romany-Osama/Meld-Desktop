@@ -18,3 +18,25 @@ export function registeredCommands(libSource) {
   const match = libSource.match(/generate_handler!\[([^\]]*)\]/);
   return match ? match[1].split(",").map((value) => value.trim()).filter(Boolean) : [];
 }
+
+/** Body of a top-level Rust function, from its signature to the next top-level item. */
+export function rustFunctionBody(libSource, name) {
+  const start = libSource.search(new RegExp(`\\nfn ${name}\\(`));
+  if (start < 0) return null;
+  const rest = libSource.slice(start + 1);
+  const end = rest.search(/\n(#\[|fn |pub fn |async fn |struct |const |static |impl |mod )/);
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
+export const LOGOUT_COMMANDS = ["account_logout", "spotify_logout"];
+
+/** TR-H6: signing out must also clear the WebView's sign-in data, or the next login silently reuses it. */
+export function checkLogoutClearsWebview(libSource) {
+  const problems = [];
+  for (const name of LOGOUT_COMMANDS) {
+    const body = rustFunctionBody(libSource, name);
+    if (body === null) problems.push(`logout command ${name} not found`);
+    else if (!body.includes("clear_all_browsing_data()")) problems.push(`${name} no longer clears WebView browsing data`);
+  }
+  return problems;
+}
