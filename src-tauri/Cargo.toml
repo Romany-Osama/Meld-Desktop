@@ -1,6 +1,6 @@
 [package]
 name = "meld-desktop"
-version = "0.2.0"
+version = "0.3.0"
 description = "Meld Desktop — a Windows-native GPLv3 port of Meld"
 authors = ["Meld contributors"]
 edition = "2021"
@@ -36,6 +36,11 @@ tauri-plugin-single-instance = "2"
 aes-gcm = "0.10"
 keyring = { version = "3", default-features = false, features = ["windows-native"] }
 tauri-plugin-updater = "2"
+# Sandboxed JavaScript for YouTube signature/n transforms (vendor/ejs, PLAY-002).
+rquickjs = { version = "0.14", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+sha2 = "0.10"
 
 [profile.release]
 lto = "thin"

@@ -4,6 +4,31 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 
 ## [Unreleased]
 
+## [0.3.0] — Playback and search fixes, stronger YouTube fallbacks
+
+**Update recommended for everyone on 0.2.0.** 0.2.0 users get this update inside the app (Settings → About, or the daily check); you can also run the setup EXE over 0.2.0. Your library, downloads and settings are kept.
+
+### Fixed
+- **"The native audio element could not read the resolved stream URL."** In 0.2.0 every song that had already been cached or downloaded failed to play (most of Liked Songs). The asset-protocol scope pointed at the wrong folder (`%APPDATA%\com.romany-osama.meld-desktop\…` instead of `%APPDATA%\Meld Desktop\…`). The scope now points at the real data folder, those folders are also granted when the app starts, and a CI test checks that the two always match.
+- **Search missing songs.** YouTube Music changed its search page: the top result is now a card and the other results arrive as individual sections. 0.2.0 dropped the top result and could miss others; both layouts are now read in page order.
+- If a stream or cached file fails, Meld no longer stops at an error. It drops the bad cached copy or marks that YouTube source as failed for five minutes, resolves again and continues from the same position (up to two retries), then shows a clear message.
+- Streams close to expiry are refreshed a minute early, so resuming after a long pause doesn't hit a dead link.
+
+### Added
+- **More YouTube fallbacks, like Meld for Android.** When the direct-link clients (Android VR, visionOS, iOS) are refused, Meld now uses clients whose audio links are protected by YouTube's player signature and `n` parameter: YouTube Music web (with your account when signed in), TV and embedded players. The signature and `n` values are computed the same way YouTube's own web player does, using yt-dlp's EJS solver in a sandboxed QuickJS interpreter (no network, file or system access; memory and time limits). The player script is prepared in the background after start-up and cached on disk, so this fallback is fast. No DRM, ads or PoTokens are involved.
+- Uploaded songs use your signed-in YouTube Music session first.
+- Every stream request carries a playback nonce, and stream URLs are accepted only from HTTPS `*.googlevideo.com` hosts.
+- Player menu → **Copy playback report**: a redacted list of the sources tried and why each failed (no links, cookies or e-mail addresses), for bug reports.
+- Clearer errors: a failed song now lists each source tried with its reason (bot check, sign-in, age or region restriction, unavailable…).
+
+### Changed
+- Signing out also clears the resolver's memory of failed sources.
+- Release metadata (SBOM, third-party notices) now includes the vendored yt-dlp EJS solver, meriyah and astring.
+
+### Known limitations
+- Releases are still not Authenticode-signed (Windows SmartScreen may warn); verify downloads with `SHA256SUMS.txt`.
+- YouTube can still refuse every source for a song, for example with a bot check on some networks. Signing in usually helps.
+
 ## [0.2.0] — Reconciled security release (supersedes 0.1.8 for security)
 
 0.2.0 merges the two diverged lines of development: everything users had in 0.1.8 (persistent session, offline Home, taskbar thumbnail buttons, lyrics provider picker, artist follow, podcast refresh, local recap, profile refresh, overlay layering) plus the security and reliability hardening that only existed on `main`. **Everyone on 0.1.8 should update.** 0.1.8 cannot update itself: run the 0.2.0 setup EXE over it (your library, downloads and settings are kept), or extract the portable ZIP over the old folder. From 0.2.0 on, updates are offered inside the app.

@@ -433,18 +433,18 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [ ] PLAY-002 (P1) Direct-URL-only extraction
 - [ ] PLAY-003 (P1) No dynamic player configuration
 - [ ] PLAY-004 (P1) Hardcoded client versions age silently
-- [ ] PLAY-005 (P1) No failed-client memory
-- [ ] PLAY-006 (P1) Only the last resolver failure is returned
+- [x] PLAY-005 (P1) No failed-client memory
+- [x] PLAY-006 (P1) Only the last resolver failure is returned
 - [ ] PLAY-007 (P1) Missing content hints
 - [ ] PLAY-008 (P1) Main dropped playlist context
-- [ ] PLAY-009 (P1) No client playback nonce
+- [x] PLAY-009 (P1) No client playback nonce
 - [ ] PLAY-010 (P1) No PoToken capability
 - [ ] PLAY-011 (P1) Client-specific stream headers are discarded
 - [ ] PLAY-012 (P1) Browser request identity differs from resolver client
 - [ ] PLAY-013 (P1) No stream-host allowlist
 - [ ] PLAY-014 (P1) Region and language are hardcoded to US/en
-- [ ] PLAY-030 (P1) Immediate 403/410 does not trigger client fallback
-- [ ] PLAY-032 (P1) No expiry safety margin
+- [x] PLAY-030 (P1) Immediate 403/410 does not trigger client fallback
+- [x] PLAY-032 (P1) No expiry safety margin
 - [ ] PLAY-033 (P1) No retry limit/state visible to UI
 - [ ] R6-012 (P1) Bound continuation loops
 - [ ] R6-013 (P1) Parallelize independent requests with limits
@@ -457,7 +457,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [ ] R6-020 (P1) Prefetch next track stream URL
 - [ ] R6-021 (P1) Expired stream URL handling everywhere
 - [ ] TR-H2 (P1) Playback fundamentally behind upstream Meld 0.9.2
-- [ ] PLAY-015 (P2) Playability errors lack taxonomy
+- [x] PLAY-015 (P2) Playability errors lack taxonomy
 - [ ] PLAY-016 (P2) No resolver prewarm
 - [ ] PLAY-017 (P2) No resolver metrics
 

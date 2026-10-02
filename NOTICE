@@ -14,3 +14,12 @@ recorded in this repository's commit history (GPL-3.0, section 5(a)).
 
 Meld Desktop is not an official Meld release and is not affiliated with or
 endorsed by YouTube, Google, or Spotify.
+
+Bundled third-party code
+------------------------
+src-tauri/vendor/ejs/ contains the yt-dlp EJS solver 0.8.0
+(https://github.com/yt-dlp/ejs, Unlicense), which bundles meriyah 6.1.4
+(ISC, https://github.com/meriyah/meriyah) and astring 1.9.0 (MIT,
+https://github.com/davidbonnet/astring). Their license texts are in
+src-tauri/vendor/ejs/LICENSE and src-tauri/vendor/ejs/BUNDLED-LICENSES.txt
+and in THIRD-PARTY-NOTICES.txt shipped with every release.

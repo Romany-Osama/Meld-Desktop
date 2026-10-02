@@ -43,3 +43,15 @@ test("SBOM and notices list every package with an SPDX license", () => {
   assert.ok(notices.indexOf("aa 2") < notices.indexOf("zz 1"));
   assert.match(notices, /MIT text/);
 });
+
+test("vendored solver sources are declared with SPDX licenses and existing files", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const list = JSON.parse(readFileSync("src-tauri/vendor/vendored.json", "utf8"));
+  assert.deepEqual(list.map((pkg) => pkg.name).sort(), ["astring", "meriyah", "yt-dlp-ejs"]);
+  for (const pkg of list) {
+    assert.match(pkg.license, /^(Unlicense|ISC|MIT)$/);
+    for (const file of [...pkg.files, ...pkg.licenseFiles]) assert.ok(existsSync(`src-tauri/vendor/${file}`), file);
+  }
+  const bom = cycloneDx({ appName: "A", appVersion: "1", crates: [], npmPackages: [], vendored: list, timestamp: "t" });
+  assert.ok(bom.components.some((c) => c.name === "meriyah" && c.purl.startsWith("pkg:generic/meriyah@6.1.4")));
+});

@@ -96,3 +96,11 @@ test("logout: both sign-out commands clear WebView data (TR-H6)", () => {
   assert.deepEqual(checkLogoutClearsWebview(v018), ["account_logout no longer clears WebView browsing data"]);
   assert.deepEqual(checkLogoutClearsWebview(readFileSync("src-tauri/src/lib.rs", "utf8")), []);
 });
+
+test("security: asset scope points at the real data folder, not Tauri's identifier folder", () => {
+  // database_path() is %APPDATA%\Meld Desktop, which Tauri calls $DATA. $APPDATA would be
+  // %APPDATA%\com.romany-osama.meld-desktop and blocked every cached/downloaded song in 0.2.0.
+  assert.ok(ALLOWED_ASSET_SCOPE.every((entry) => entry.startsWith("$DATA/Meld Desktop/")));
+  const legacy = checkSecurityConfig(conf({ ...goodSecurity, assetProtocol: { enable: true, scope: ["$APPDATA/Meld Desktop/player-cache/**"] } }));
+  assert.ok(legacy.some((problem) => problem.includes("asset protocol scope")));
+});

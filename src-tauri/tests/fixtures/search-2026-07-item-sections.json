@@ -1,0 +1,1226 @@
+{
+ "contents": {
+  "tabbedSearchResultsRenderer": {
+   "tabs": [
+    {
+     "tabRenderer": {
+      "content": {
+       "sectionListRenderer": {
+        "contents": [
+         {
+          "musicCardShelfRenderer": {
+           "thumbnail": {
+            "musicThumbnailRenderer": {
+             "thumbnail": {
+              "thumbnails": [
+               {
+                "url": "https://i.ytimg.com/vi/4NRXx6U8ABQ/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kbhOvz5GOWNb6cfx3BbfF3mAKwmw",
+                "width": 400,
+                "height": 225
+               }
+              ]
+             },
+             "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+             "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT"
+            }
+           },
+           "title": {
+            "runs": [
+             {
+              "text": "Blinding Lights (Official Video)",
+              "navigationEndpoint": {
+               "watchEndpoint": {
+                "videoId": "4NRXx6U8ABQ",
+                "watchEndpointMusicSupportedConfigs": {
+                 "watchEndpointMusicConfig": {
+                  "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                 }
+                }
+               }
+              }
+             }
+            ]
+           },
+           "subtitle": {
+            "runs": [
+             {
+              "text": "Video"
+             },
+             {
+              "text": " • "
+             },
+             {
+              "text": "The Weeknd",
+              "navigationEndpoint": {
+               "browseEndpoint": {
+                "browseId": "UClYV6hHlupm_S_ObS1W-DYw",
+                "browseEndpointContextSupportedConfigs": {
+                 "browseEndpointContextMusicConfig": {
+                  "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                 }
+                }
+               }
+              }
+             },
+             {
+              "text": " • "
+             },
+             {
+              "text": "1B views"
+             },
+             {
+              "text": " • "
+             },
+             {
+              "text": "4:23"
+             }
+            ]
+           },
+           "contents": [
+            {
+             "messageRenderer": {
+              "text": {
+               "runs": [
+                {
+                 "text": "More from YouTube"
+                }
+               ]
+              },
+              "style": {
+               "value": "RENDER_STYLE_SIMPLE_HEADER"
+              }
+             }
+            },
+            {
+             "musicResponsiveListItemRenderer": {
+              "thumbnail": {
+               "musicThumbnailRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://i.ytimg.com/vi/ewfdRy5jfF8/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lOHRVYR5vgatKnasJbLmanHOfcHA",
+                   "width": 400,
+                   "height": 225
+                  }
+                 ]
+                },
+                "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT"
+               }
+              },
+              "overlay": {
+               "musicItemThumbnailOverlayRenderer": {
+                "background": {
+                 "verticalGradient": {
+                  "gradientLayerColors": [
+                   "3422552064",
+                   "3422552064"
+                  ]
+                 }
+                },
+                "content": {
+                 "musicPlayButtonRenderer": {
+                  "playNavigationEndpoint": {
+                   "watchEndpoint": {
+                    "videoId": "ewfdRy5jfF8",
+                    "playerParams": "0gcJCQYB-iE-y48-",
+                    "watchEndpointMusicSupportedConfigs": {
+                     "watchEndpointMusicConfig": {
+                      "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                     }
+                    }
+                   }
+                  },
+                  "playIcon": {
+                   "iconType": "PLAY_ARROW"
+                  },
+                  "pauseIcon": {
+                   "iconType": "PAUSE"
+                  },
+                  "iconColor": 4294967295,
+                  "backgroundColor": 0,
+                  "activeBackgroundColor": 0,
+                  "loadingIndicatorColor": 14745645,
+                  "playingIcon": {
+                   "iconType": "VOLUME_UP"
+                  },
+                  "iconLoadingColor": 0,
+                  "activeScaleFactor": 1,
+                  "buttonSize": "MUSIC_PLAY_BUTTON_SIZE_SMALL",
+                  "rippleTarget": "MUSIC_PLAY_BUTTON_RIPPLE_TARGET_SELF",
+                  "accessibilityPlayData": {},
+                  "accessibilityPauseData": {}
+                 }
+                },
+                "contentPosition": "MUSIC_ITEM_THUMBNAIL_OVERLAY_CONTENT_POSITION_CENTERED",
+                "displayStyle": "MUSIC_ITEM_THUMBNAIL_OVERLAY_DISPLAY_STYLE_PERSISTENT"
+               }
+              },
+              "flexColumns": [
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Blinding Lights (Live On The 2020 MTV VMAs)",
+                    "navigationEndpoint": {
+                     "watchEndpoint": {
+                      "videoId": "ewfdRy5jfF8",
+                      "watchEndpointMusicSupportedConfigs": {
+                       "watchEndpointMusicConfig": {
+                        "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "The Weeknd",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "UClYV6hHlupm_S_ObS1W-DYw",
+                      "browseEndpointContextSupportedConfigs": {
+                       "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                       }
+                      }
+                     }
+                    }
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "50M views"
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "3:19"
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               }
+              ],
+              "playlistItemData": {
+               "videoId": "ewfdRy5jfF8"
+              },
+              "flexColumnDisplayStyle": "MUSIC_RESPONSIVE_LIST_ITEM_FLEX_COLUMN_DISPLAY_STYLE_TWO_LINE_STACK",
+              "itemHeight": "MUSIC_RESPONSIVE_LIST_ITEM_HEIGHT_TALL"
+             }
+            },
+            {
+             "musicResponsiveListItemRenderer": {
+              "thumbnail": {
+               "musicThumbnailRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://i.ytimg.com/vi/GeUGGyNA6B8/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nuYI2LG6n4O5XG6KeWT9c_voaXKw",
+                   "width": 400,
+                   "height": 225
+                  }
+                 ]
+                },
+                "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT"
+               }
+              },
+              "overlay": {
+               "musicItemThumbnailOverlayRenderer": {
+                "background": {
+                 "verticalGradient": {
+                  "gradientLayerColors": [
+                   "3422552064",
+                   "3422552064"
+                  ]
+                 }
+                },
+                "content": {
+                 "musicPlayButtonRenderer": {
+                  "playNavigationEndpoint": {
+                   "watchEndpoint": {
+                    "videoId": "GeUGGyNA6B8",
+                    "watchEndpointMusicSupportedConfigs": {
+                     "watchEndpointMusicConfig": {
+                      "musicVideoType": "MUSIC_VIDEO_TYPE_UGC"
+                     }
+                    }
+                   }
+                  },
+                  "playIcon": {
+                   "iconType": "PLAY_ARROW"
+                  },
+                  "pauseIcon": {
+                   "iconType": "PAUSE"
+                  },
+                  "iconColor": 4294967295,
+                  "backgroundColor": 0,
+                  "activeBackgroundColor": 0,
+                  "loadingIndicatorColor": 14745645,
+                  "playingIcon": {
+                   "iconType": "VOLUME_UP"
+                  },
+                  "iconLoadingColor": 0,
+                  "activeScaleFactor": 1,
+                  "buttonSize": "MUSIC_PLAY_BUTTON_SIZE_SMALL",
+                  "rippleTarget": "MUSIC_PLAY_BUTTON_RIPPLE_TARGET_SELF",
+                  "accessibilityPlayData": {},
+                  "accessibilityPauseData": {}
+                 }
+                },
+                "contentPosition": "MUSIC_ITEM_THUMBNAIL_OVERLAY_CONTENT_POSITION_CENTERED",
+                "displayStyle": "MUSIC_ITEM_THUMBNAIL_OVERLAY_DISPLAY_STYLE_PERSISTENT"
+               }
+              },
+              "flexColumns": [
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "The Weeknd - Blinding Lights  - Vintage Dance Choreography - Roberto F",
+                    "navigationEndpoint": {
+                     "watchEndpoint": {
+                      "videoId": "GeUGGyNA6B8",
+                      "watchEndpointMusicSupportedConfigs": {
+                       "watchEndpointMusicConfig": {
+                        "musicVideoType": "MUSIC_VIDEO_TYPE_UGC"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Video"
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "Roberto Formentini",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "UCGndVIYvu6ney9uhDXF8UUQ",
+                      "browseEndpointContextSupportedConfigs": {
+                       "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
+                       }
+                      }
+                     }
+                    }
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "58M views"
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "3:41"
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               }
+              ],
+              "playlistItemData": {
+               "videoId": "GeUGGyNA6B8"
+              },
+              "flexColumnDisplayStyle": "MUSIC_RESPONSIVE_LIST_ITEM_FLEX_COLUMN_DISPLAY_STYLE_TWO_LINE_STACK",
+              "itemHeight": "MUSIC_RESPONSIVE_LIST_ITEM_HEIGHT_TALL"
+             }
+            },
+            {
+             "musicResponsiveListItemRenderer": {
+              "thumbnail": {
+               "musicThumbnailRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://i.ytimg.com/vi/CRv7hE-_8_k/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kwj5pWvzhJZcHL5XHydygO3yRnDQ",
+                   "width": 400,
+                   "height": 225
+                  }
+                 ]
+                },
+                "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT"
+               }
+              },
+              "overlay": {
+               "musicItemThumbnailOverlayRenderer": {
+                "background": {
+                 "verticalGradient": {
+                  "gradientLayerColors": [
+                   "3422552064",
+                   "3422552064"
+                  ]
+                 }
+                },
+                "content": {
+                 "musicPlayButtonRenderer": {
+                  "playNavigationEndpoint": {
+                   "watchEndpoint": {
+                    "videoId": "CRv7hE-_8_k",
+                    "watchEndpointMusicSupportedConfigs": {
+                     "watchEndpointMusicConfig": {
+                      "musicVideoType": "MUSIC_VIDEO_TYPE_UGC"
+                     }
+                    }
+                   }
+                  },
+                  "playIcon": {
+                   "iconType": "PLAY_ARROW"
+                  },
+                  "pauseIcon": {
+                   "iconType": "PAUSE"
+                  },
+                  "iconColor": 4294967295,
+                  "backgroundColor": 0,
+                  "activeBackgroundColor": 0,
+                  "loadingIndicatorColor": 14745645,
+                  "playingIcon": {
+                   "iconType": "VOLUME_UP"
+                  },
+                  "iconLoadingColor": 0,
+                  "activeScaleFactor": 1,
+                  "buttonSize": "MUSIC_PLAY_BUTTON_SIZE_SMALL",
+                  "rippleTarget": "MUSIC_PLAY_BUTTON_RIPPLE_TARGET_SELF",
+                  "accessibilityPlayData": {},
+                  "accessibilityPauseData": {}
+                 }
+                },
+                "contentPosition": "MUSIC_ITEM_THUMBNAIL_OVERLAY_CONTENT_POSITION_CENTERED",
+                "displayStyle": "MUSIC_ITEM_THUMBNAIL_OVERLAY_DISPLAY_STYLE_PERSISTENT"
+               }
+              },
+              "flexColumns": [
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "The Weeknd - Blinding Lights (Geonis & Lil Meet Extended Remix)",
+                    "navigationEndpoint": {
+                     "watchEndpoint": {
+                      "videoId": "CRv7hE-_8_k",
+                      "playerParams": "0gcJCTMC0OBS9m0t",
+                      "watchEndpointMusicSupportedConfigs": {
+                       "watchEndpointMusicConfig": {
+                        "musicVideoType": "MUSIC_VIDEO_TYPE_UGC"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Mr. Deep Magic",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "UC0ACBUVv1pwYBnXJqVL3k6g",
+                      "browseEndpointContextSupportedConfigs": {
+                       "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
+                       }
+                      }
+                     }
+                    }
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "374K views"
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "4:50"
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               }
+              ],
+              "playlistItemData": {
+               "videoId": "CRv7hE-_8_k"
+              },
+              "flexColumnDisplayStyle": "MUSIC_RESPONSIVE_LIST_ITEM_FLEX_COLUMN_DISPLAY_STYLE_TWO_LINE_STACK",
+              "itemHeight": "MUSIC_RESPONSIVE_LIST_ITEM_HEIGHT_TALL"
+             }
+            }
+           ],
+           "onTap": {
+            "watchEndpoint": {
+             "videoId": "4NRXx6U8ABQ",
+             "watchEndpointMusicSupportedConfigs": {
+              "watchEndpointMusicConfig": {
+               "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+              }
+             }
+            }
+           },
+           "thumbnailOverlay": {
+            "musicItemThumbnailOverlayRenderer": {
+             "background": {
+              "verticalGradient": {
+               "gradientLayerColors": [
+                "3422552064",
+                "3422552064"
+               ]
+              }
+             },
+             "content": {
+              "musicPlayButtonRenderer": {
+               "playNavigationEndpoint": {
+                "watchEndpoint": {
+                 "videoId": "4NRXx6U8ABQ",
+                 "watchEndpointMusicSupportedConfigs": {
+                  "watchEndpointMusicConfig": {
+                   "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                  }
+                 }
+                }
+               },
+               "playIcon": {
+                "iconType": "PLAY_ARROW"
+               },
+               "pauseIcon": {
+                "iconType": "PAUSE"
+               },
+               "iconColor": 4294967295,
+               "backgroundColor": 0,
+               "activeBackgroundColor": 0,
+               "loadingIndicatorColor": 14745645,
+               "playingIcon": {
+                "iconType": "VOLUME_UP"
+               },
+               "iconLoadingColor": 0,
+               "activeScaleFactor": 1,
+               "buttonSize": "MUSIC_PLAY_BUTTON_SIZE_LARGE",
+               "rippleTarget": "MUSIC_PLAY_BUTTON_RIPPLE_TARGET_SELF",
+               "accessibilityPlayData": {},
+               "accessibilityPauseData": {}
+              }
+             },
+             "contentPosition": "MUSIC_ITEM_THUMBNAIL_OVERLAY_CONTENT_POSITION_CENTERED",
+             "displayStyle": "MUSIC_ITEM_THUMBNAIL_OVERLAY_DISPLAY_STYLE_PERSISTENT"
+            }
+           }
+          }
+         },
+         {
+          "itemSectionRenderer": {
+           "contents": [
+            {
+             "musicResponsiveListItemRenderer": {
+              "thumbnail": {
+               "musicThumbnailRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://yt3.googleusercontent.com/R_cjQK3wwLPEzri1jerx-79zgzGocoKvwGU3NMONaTsaMM0Idd641pfB8r5jgfpn6I8JAoFtf9RBIcI=w60-h60-l90-rj",
+                   "width": 60,
+                   "height": 60
+                  },
+                  {
+                   "url": "https://yt3.googleusercontent.com/R_cjQK3wwLPEzri1jerx-79zgzGocoKvwGU3NMONaTsaMM0Idd641pfB8r5jgfpn6I8JAoFtf9RBIcI=w120-h120-l90-rj",
+                   "width": 120,
+                   "height": 120
+                  }
+                 ]
+                },
+                "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT"
+               }
+              },
+              "overlay": {
+               "musicItemThumbnailOverlayRenderer": {
+                "background": {
+                 "verticalGradient": {
+                  "gradientLayerColors": [
+                   "3422552064",
+                   "3422552064"
+                  ]
+                 }
+                },
+                "content": {
+                 "musicPlayButtonRenderer": {
+                  "playNavigationEndpoint": {
+                   "watchEndpoint": {
+                    "videoId": "J7p4bzqLvCw",
+                    "watchEndpointMusicSupportedConfigs": {
+                     "watchEndpointMusicConfig": {
+                      "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                     }
+                    }
+                   }
+                  },
+                  "playIcon": {
+                   "iconType": "PLAY_ARROW"
+                  },
+                  "pauseIcon": {
+                   "iconType": "PAUSE"
+                  },
+                  "iconColor": 4294967295,
+                  "backgroundColor": 0,
+                  "activeBackgroundColor": 0,
+                  "loadingIndicatorColor": 14745645,
+                  "playingIcon": {
+                   "iconType": "VOLUME_UP"
+                  },
+                  "iconLoadingColor": 0,
+                  "activeScaleFactor": 1,
+                  "buttonSize": "MUSIC_PLAY_BUTTON_SIZE_SMALL",
+                  "rippleTarget": "MUSIC_PLAY_BUTTON_RIPPLE_TARGET_SELF",
+                  "accessibilityPlayData": {},
+                  "accessibilityPauseData": {}
+                 }
+                },
+                "contentPosition": "MUSIC_ITEM_THUMBNAIL_OVERLAY_CONTENT_POSITION_CENTERED",
+                "displayStyle": "MUSIC_ITEM_THUMBNAIL_OVERLAY_DISPLAY_STYLE_PERSISTENT"
+               }
+              },
+              "flexColumns": [
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Blinding Lights",
+                    "navigationEndpoint": {
+                     "watchEndpoint": {
+                      "videoId": "J7p4bzqLvCw",
+                      "watchEndpointMusicSupportedConfigs": {
+                       "watchEndpointMusicConfig": {
+                        "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Song"
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "The Weeknd",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "UClYV6hHlupm_S_ObS1W-DYw",
+                      "browseEndpointContextSupportedConfigs": {
+                       "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "3.6B plays"
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               }
+              ],
+              "playlistItemData": {
+               "videoId": "J7p4bzqLvCw"
+              },
+              "flexColumnDisplayStyle": "MUSIC_RESPONSIVE_LIST_ITEM_FLEX_COLUMN_DISPLAY_STYLE_TWO_LINE_STACK",
+              "itemHeight": "MUSIC_RESPONSIVE_LIST_ITEM_HEIGHT_TALL"
+             }
+            }
+           ]
+          }
+         },
+         {
+          "itemSectionRenderer": {
+           "contents": [
+            {
+             "musicResponsiveListItemRenderer": {
+              "thumbnail": {
+               "musicThumbnailRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://lh3.googleusercontent.com/U-SAmNOu4TynE818gLCfKsuHZ0U5YNEtO9mrjSI9WCCKERs98LzrCal5kajBBTQNwdcisoB2Bn-pHp4=w60-h60-p-l90-rj",
+                   "width": 60,
+                   "height": 60
+                  },
+                  {
+                   "url": "https://lh3.googleusercontent.com/U-SAmNOu4TynE818gLCfKsuHZ0U5YNEtO9mrjSI9WCCKERs98LzrCal5kajBBTQNwdcisoB2Bn-pHp4=w120-h120-p-l90-rj",
+                   "width": 120,
+                   "height": 120
+                  }
+                 ]
+                },
+                "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_CIRCLE",
+                "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FILL"
+               }
+              },
+              "flexColumns": [
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "The Weeknd"
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Artist"
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "244M monthly audience"
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               }
+              ],
+              "flexColumnDisplayStyle": "MUSIC_RESPONSIVE_LIST_ITEM_FLEX_COLUMN_DISPLAY_STYLE_TWO_LINE_STACK",
+              "navigationEndpoint": {
+               "browseEndpoint": {
+                "browseId": "UClYV6hHlupm_S_ObS1W-DYw",
+                "browseEndpointContextSupportedConfigs": {
+                 "browseEndpointContextMusicConfig": {
+                  "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                 }
+                }
+               }
+              },
+              "itemHeight": "MUSIC_RESPONSIVE_LIST_ITEM_HEIGHT_TALL"
+             }
+            }
+           ]
+          }
+         },
+         {
+          "itemSectionRenderer": {
+           "contents": [
+            {
+             "musicResponsiveListItemRenderer": {
+              "thumbnail": {
+               "musicThumbnailRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://yt3.googleusercontent.com/JDKz3Anlyo49xBhFcFx13QD_Tk4-kqdiYTo15gtkL93nE8biWyZ7o0BPyW6RnXVxcXaJ5DgU5nJ_0NjJ=w60-h60-l90-rj",
+                   "width": 60,
+                   "height": 60
+                  },
+                  {
+                   "url": "https://yt3.googleusercontent.com/JDKz3Anlyo49xBhFcFx13QD_Tk4-kqdiYTo15gtkL93nE8biWyZ7o0BPyW6RnXVxcXaJ5DgU5nJ_0NjJ=w120-h120-l90-rj",
+                   "width": 120,
+                   "height": 120
+                  }
+                 ]
+                },
+                "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT"
+               }
+              },
+              "overlay": {
+               "musicItemThumbnailOverlayRenderer": {
+                "background": {
+                 "verticalGradient": {
+                  "gradientLayerColors": [
+                   "3422552064",
+                   "3422552064"
+                  ]
+                 }
+                },
+                "content": {
+                 "musicPlayButtonRenderer": {
+                  "playNavigationEndpoint": {
+                   "watchEndpoint": {
+                    "videoId": "RmYCOm4ehKs",
+                    "watchEndpointMusicSupportedConfigs": {
+                     "watchEndpointMusicConfig": {
+                      "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                     }
+                    }
+                   }
+                  },
+                  "playIcon": {
+                   "iconType": "PLAY_ARROW"
+                  },
+                  "pauseIcon": {
+                   "iconType": "PAUSE"
+                  },
+                  "iconColor": 4294967295,
+                  "backgroundColor": 0,
+                  "activeBackgroundColor": 0,
+                  "loadingIndicatorColor": 14745645,
+                  "playingIcon": {
+                   "iconType": "VOLUME_UP"
+                  },
+                  "iconLoadingColor": 0,
+                  "activeScaleFactor": 1,
+                  "buttonSize": "MUSIC_PLAY_BUTTON_SIZE_SMALL",
+                  "rippleTarget": "MUSIC_PLAY_BUTTON_RIPPLE_TARGET_SELF",
+                  "accessibilityPlayData": {},
+                  "accessibilityPauseData": {}
+                 }
+                },
+                "contentPosition": "MUSIC_ITEM_THUMBNAIL_OVERLAY_CONTENT_POSITION_CENTERED",
+                "displayStyle": "MUSIC_ITEM_THUMBNAIL_OVERLAY_DISPLAY_STYLE_PERSISTENT"
+               }
+              },
+              "flexColumns": [
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Save Your Tears",
+                    "navigationEndpoint": {
+                     "watchEndpoint": {
+                      "videoId": "RmYCOm4ehKs",
+                      "watchEndpointMusicSupportedConfigs": {
+                       "watchEndpointMusicConfig": {
+                        "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Song"
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "The Weeknd",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "UClYV6hHlupm_S_ObS1W-DYw",
+                      "browseEndpointContextSupportedConfigs": {
+                       "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "3.3B plays"
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               }
+              ],
+              "playlistItemData": {
+               "videoId": "RmYCOm4ehKs"
+              },
+              "flexColumnDisplayStyle": "MUSIC_RESPONSIVE_LIST_ITEM_FLEX_COLUMN_DISPLAY_STYLE_TWO_LINE_STACK",
+              "itemHeight": "MUSIC_RESPONSIVE_LIST_ITEM_HEIGHT_TALL"
+             }
+            }
+           ]
+          }
+         },
+         {
+          "itemSectionRenderer": {
+           "contents": [
+            {
+             "musicResponsiveListItemRenderer": {
+              "thumbnail": {
+               "musicThumbnailRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://yt3.googleusercontent.com/ucLZx2UlY3ZSOWEegQfsbBWiYElW7ogWIZ594vh-3sDKKXxC2I3I9myuXimekgTFUiiaqkj5NfgOR0Y=w60-h60-l90-rj",
+                   "width": 60,
+                   "height": 60
+                  },
+                  {
+                   "url": "https://yt3.googleusercontent.com/ucLZx2UlY3ZSOWEegQfsbBWiYElW7ogWIZ594vh-3sDKKXxC2I3I9myuXimekgTFUiiaqkj5NfgOR0Y=w120-h120-l90-rj",
+                   "width": 120,
+                   "height": 120
+                  }
+                 ]
+                },
+                "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT"
+               }
+              },
+              "overlay": {
+               "musicItemThumbnailOverlayRenderer": {
+                "background": {
+                 "verticalGradient": {
+                  "gradientLayerColors": [
+                   "3422552064",
+                   "3422552064"
+                  ]
+                 }
+                },
+                "content": {
+                 "musicPlayButtonRenderer": {
+                  "playNavigationEndpoint": {
+                   "watchEndpoint": {
+                    "videoId": "H64a2ggVIWc",
+                    "watchEndpointMusicSupportedConfigs": {
+                     "watchEndpointMusicConfig": {
+                      "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                     }
+                    }
+                   }
+                  },
+                  "playIcon": {
+                   "iconType": "PLAY_ARROW"
+                  },
+                  "pauseIcon": {
+                   "iconType": "PAUSE"
+                  },
+                  "iconColor": 4294967295,
+                  "backgroundColor": 0,
+                  "activeBackgroundColor": 0,
+                  "loadingIndicatorColor": 14745645,
+                  "playingIcon": {
+                   "iconType": "VOLUME_UP"
+                  },
+                  "iconLoadingColor": 0,
+                  "activeScaleFactor": 1,
+                  "buttonSize": "MUSIC_PLAY_BUTTON_SIZE_SMALL",
+                  "rippleTarget": "MUSIC_PLAY_BUTTON_RIPPLE_TARGET_SELF",
+                  "accessibilityPlayData": {},
+                  "accessibilityPauseData": {}
+                 }
+                },
+                "contentPosition": "MUSIC_ITEM_THUMBNAIL_OVERLAY_CONTENT_POSITION_CENTERED",
+                "displayStyle": "MUSIC_ITEM_THUMBNAIL_OVERLAY_DISPLAY_STYLE_PERSISTENT"
+               }
+              },
+              "flexColumns": [
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Blinding Lights",
+                    "navigationEndpoint": {
+                     "watchEndpoint": {
+                      "videoId": "H64a2ggVIWc",
+                      "playerParams": "0gcJCTMC0OBS9m0t",
+                      "watchEndpointMusicSupportedConfigs": {
+                       "watchEndpointMusicConfig": {
+                        "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Song"
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "The Weeknd",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "UClYV6hHlupm_S_ObS1W-DYw",
+                      "browseEndpointContextSupportedConfigs": {
+                       "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "3.6B plays"
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               }
+              ],
+              "playlistItemData": {
+               "videoId": "H64a2ggVIWc"
+              },
+              "flexColumnDisplayStyle": "MUSIC_RESPONSIVE_LIST_ITEM_FLEX_COLUMN_DISPLAY_STYLE_TWO_LINE_STACK",
+              "itemHeight": "MUSIC_RESPONSIVE_LIST_ITEM_HEIGHT_TALL"
+             }
+            }
+           ]
+          }
+         },
+         {
+          "itemSectionRenderer": {
+           "contents": [
+            {
+             "musicResponsiveListItemRenderer": {
+              "thumbnail": {
+               "musicThumbnailRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://yt3.googleusercontent.com/dcxXIIlest09vnvKznWM9VWQXu1EL7lKxBzXGzwgmVjmMNBm1dEWT_0qn1xrEZYyKF_qRE1TLq8P_JY_mQ=w60-h60-l90-rj",
+                   "width": 60,
+                   "height": 60
+                  },
+                  {
+                   "url": "https://yt3.googleusercontent.com/dcxXIIlest09vnvKznWM9VWQXu1EL7lKxBzXGzwgmVjmMNBm1dEWT_0qn1xrEZYyKF_qRE1TLq8P_JY_mQ=w120-h120-l90-rj",
+                   "width": 120,
+                   "height": 120
+                  }
+                 ]
+                },
+                "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT"
+               }
+              },
+              "overlay": {
+               "musicItemThumbnailOverlayRenderer": {
+                "background": {
+                 "verticalGradient": {
+                  "gradientLayerColors": [
+                   "3422552064",
+                   "3422552064"
+                  ]
+                 }
+                },
+                "content": {
+                 "musicPlayButtonRenderer": {
+                  "playNavigationEndpoint": {
+                   "watchEndpoint": {
+                    "videoId": "3_g2un5M350",
+                    "playerParams": "0gcJCQYB-iE-y48-",
+                    "watchEndpointMusicSupportedConfigs": {
+                     "watchEndpointMusicConfig": {
+                      "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                     }
+                    }
+                   }
+                  },
+                  "playIcon": {
+                   "iconType": "PLAY_ARROW"
+                  },
+                  "pauseIcon": {
+                   "iconType": "PAUSE"
+                  },
+                  "iconColor": 4294967295,
+                  "backgroundColor": 0,
+                  "activeBackgroundColor": 0,
+                  "loadingIndicatorColor": 14745645,
+                  "playingIcon": {
+                   "iconType": "VOLUME_UP"
+                  },
+                  "iconLoadingColor": 0,
+                  "activeScaleFactor": 1,
+                  "buttonSize": "MUSIC_PLAY_BUTTON_SIZE_SMALL",
+                  "rippleTarget": "MUSIC_PLAY_BUTTON_RIPPLE_TARGET_SELF",
+                  "accessibilityPlayData": {},
+                  "accessibilityPauseData": {}
+                 }
+                },
+                "contentPosition": "MUSIC_ITEM_THUMBNAIL_OVERLAY_CONTENT_POSITION_CENTERED",
+                "displayStyle": "MUSIC_ITEM_THUMBNAIL_OVERLAY_DISPLAY_STYLE_PERSISTENT"
+               }
+              },
+              "flexColumns": [
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Starboy (feat. Daft Punk)",
+                    "navigationEndpoint": {
+                     "watchEndpoint": {
+                      "videoId": "3_g2un5M350",
+                      "watchEndpointMusicSupportedConfigs": {
+                       "watchEndpointMusicConfig": {
+                        "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "Song"
+                   },
+                   {
+                    "text": " • "
+                   },
+                   {
+                    "text": "The Weeknd",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "UClYV6hHlupm_S_ObS1W-DYw",
+                      "browseEndpointContextSupportedConfigs": {
+                       "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               },
+               {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "4.1B plays"
+                   }
+                  ]
+                 },
+                 "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                }
+               }
+              ],
+              "badges": [
+               {
+                "musicInlineBadgeRenderer": {
+                 "icon": {
+                  "iconType": "MUSIC_EXPLICIT_BADGE"
+                 }
+                }
+               }
+              ],
+              "playlistItemData": {
+               "videoId": "3_g2un5M350"
+              },
+              "flexColumnDisplayStyle": "MUSIC_RESPONSIVE_LIST_ITEM_FLEX_COLUMN_DISPLAY_STYLE_TWO_LINE_STACK",
+              "itemHeight": "MUSIC_RESPONSIVE_LIST_ITEM_HEIGHT_TALL"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}
