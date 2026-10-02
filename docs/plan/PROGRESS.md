@@ -467,7 +467,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [ ] PLAY-042 (P0) Unlimited concurrent player-cache jobs
 - [ ] PLAY-028 (P1) Playback and cache download the same song twice
 - [ ] PLAY-043 (P1) Player-cache jobs survive skip/close
-- [ ] PLAY-044 (P1) No final byte-count validation
+- [ ] PLAY-044 (P1) No final byte-count validation — partial: downloads and player cache reject transfers shorter than the announced length (`transfer_complete`); unknown-length container probe pending
 - [ ] PLAY-045 (P1) No content-type/container validation
 - [ ] PLAY-046 (P1) Redirect targets are not revalidated
 - [ ] PLAY-047 (P1) No pre-download disk-space check

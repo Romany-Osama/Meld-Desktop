@@ -58,3 +58,16 @@
 - Authenticode certificate (D-010) still pending.
 
 **Next task:** PLAY-013 (validate every redirect hop), then Phase 1 M1.1 — U4-001.
+
+## 2026-10-02 — Session 4 (0.3.1 offline-download hotfix)
+
+**Done**
+- Root cause of "audio cache response failed: HTTP 403" for offline downloads: ANDROID_VR 1.65.10 stream URLs (first client in the order) serve only the first ~800 KB and answer 403 for later ranges, `bytes=0-` and plain GETs. The audio element only fetched the start, so playback looked fine while every download failed. Reproduced live.
+- Resolver range-probes 1 KiB past the first MiB of each new URL; refused URLs (`StreamForbidden`) exclude the client for that song and demote it for 30 min for all songs (D-018).
+- Downloads use range requests, re-resolve with another client on a refused URL and resume from the partial bytes (max 3 requests), restart on 416. Truncated transfers are not saved as complete (PLAY-044, partial). Errors no longer contain signed URLs.
+- Live test now downloads each client's full stream: ANDROID_VR 1.65.10 rejected by the probe; WEB_REMIX, VISIONOS, ANDROID_VR 1.43.32, IOS deliver 3,433,755/3,433,755 bytes.
+
+**Blockers / owner actions**
+- Same as session 3 (Authenticode certificate, real-PC check). The sandbox was reset between sessions, so the GitHub token had to be supplied again.
+
+**Next task:** PLAY-013 (validate every redirect hop; overlaps PLAY-046), then Phase 1 M1.1 — U4-001.
