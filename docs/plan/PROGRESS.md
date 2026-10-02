@@ -11,11 +11,11 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] TR-C3 (P0) v0.1.8 disables CSP and grants asset access to broad user folders — checks.test.mjs security
 - [x] TR-C4 (P0) v0.1.8 contains known post-release correctness/data-integrity bugs — youtube_sync_*, like_state_save_*, active_download_guard_*, every_song_delete_*, spotify_matcher_*
 - [x] TR-H1 (P0) Main regresses major v0.1.8 features — checks.test.mjs ui (restored commands registered)
-- [ ] TR-H4 (P0) v0.1.8 restore can consume unbounded memory
-- [ ] TR-H5 (P0) v0.1.8 networking can hang indefinitely
-- [ ] TR-H6 (P0) Logout did not clear login WebView state (v0.1.8)
+- [x] TR-H4 (P0) v0.1.8 restore can consume unbounded memory — extract_backup streams song.db to disk, caps entries; backup_restore_* tests
+- [x] TR-H5 (P0) v0.1.8 networking can hang indefinitely — api_requests_time_out_*, a_transfer_that_stops_sending_data_is_reported_as_stalled
+- [x] TR-H6 (P0) Logout did not clear login WebView state (v0.1.8) — signing_out_removes_every_session_row_*, checks.test.mjs logout
 - [x] TR-M3 (P0) Duplicate Audio quality control in v0.1.8 settings — checks.test.mjs ui (duplicate Audio quality)
-- [ ] TR-M4 (P0) Main stats less accurate (playtime removed)
+- [x] TR-M4 (P0) Main stats less accurate (playtime removed) — stats_use_measured_listening_time_instead_of_song_length
 
 ## Phase 0 · M0.2 Restore v0.1.8 playback features on the reconciled branch
 

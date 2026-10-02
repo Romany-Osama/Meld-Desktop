@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { checkVersions, cargoPackageVersion, cargoLockVersion, readRepo } from "../lib/versions.mjs";
 import { checkSecurityConfig, checkBundleConfig, checkTrackedFiles, ALLOWED_ASSET_SCOPE } from "../lib/security-config.mjs";
-import { checkUiInvariants, registeredCommands, RESTORED_UI_COMMANDS } from "../lib/ui-invariants.mjs";
+import { checkUiInvariants, checkLogoutClearsWebview, registeredCommands, RESTORED_UI_COMMANDS } from "../lib/ui-invariants.mjs";
 
 const goodRepo = () => ({
   packageJson: { version: "0.2.0" },
@@ -87,4 +87,12 @@ test("bundle: main's targets \"all\" without bootstrapper is rejected; NSIS + em
 test("tracked files: committed release binaries are rejected (TR-M12)", () => {
   assert.equal(checkTrackedFiles(["release/meld-desktop-0.1.8-portable.zip", "release/notes.md", "src/App.tsx", "dist/x.EXE"]).length, 3);
   assert.deepEqual(checkTrackedFiles(["src-tauri/icons/icon.ico", "src-tauri/icons/taskbar/play.ico", "README.md"]), []);
+});
+
+test("logout: both sign-out commands clear WebView data (TR-H6)", () => {
+  const ok = '\n#[tauri::command]\nfn account_logout(app: AppHandle) -> R {\n    db();\n    let _ = window.clear_all_browsing_data();\n}\n\n#[tauri::command]\nfn spotify_logout(app: AppHandle) -> R {\n    let _ = window.clear_all_browsing_data();\n}\n';
+  assert.deepEqual(checkLogoutClearsWebview(ok), []);
+  const v018 = ok.replace("    let _ = window.clear_all_browsing_data();\n}\n\n", "}\n\n");
+  assert.deepEqual(checkLogoutClearsWebview(v018), ["account_logout no longer clears WebView browsing data"]);
+  assert.deepEqual(checkLogoutClearsWebview(readFileSync("src-tauri/src/lib.rs", "utf8")), []);
 });

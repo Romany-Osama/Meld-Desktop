@@ -214,23 +214,45 @@ static DOWNLOAD_CANCELS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = Onc
 static PLAYER_CACHE_ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static PLAYER_CACHE_BLOCKED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
+fn build_http_client(connect: Duration, request: Duration) -> Client {
+    Client::builder()
+        .user_agent(USER_AGENT)
+        .gzip(true)
+        .brotli(true)
+        .deflate(true)
+        // Without these, a request to a server that never responds (or a truly unreachable host) hangs
+        // forever - nothing in this file previously set any timeout at all, client-wide or per-request.
+        // connect_timeout alone would not be enough: it only covers establishing the connection, not a
+        // server that connects fine but then never sends a response. The download's own GET overrides
+        // this default (see download_start) since a large file can legitimately take far longer than 20s.
+        .connect_timeout(connect)
+        .timeout(request)
+        .build()
+        .expect("HTTP client must build")
+}
+
+/// Establishing a connection (TR-H5).
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Whole request for normal API calls (TR-H5).
+const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+/// Whole transfer for downloads and the player cache, which can legitimately take long on slow links.
+const TRANSFER_TIMEOUT: Duration = Duration::from_secs(3600);
+/// A transfer that receives no bytes for this long is treated as stalled (TR-H5).
+const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+
 fn http() -> &'static Client {
-    HTTP.get_or_init(|| {
-        Client::builder()
-            .user_agent(USER_AGENT)
-            .gzip(true)
-            .brotli(true)
-            .deflate(true)
-            // Without these, a request to a server that never responds (or a truly unreachable host) hangs
-            // forever - nothing in this file previously set any timeout at all, client-wide or per-request.
-            // connect_timeout alone would not be enough: it only covers establishing the connection, not a
-            // server that connects fine but then never sends a response. The download's own GET overrides
-            // this default (see download_start) since a large file can legitimately take far longer than 20s.
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(20))
-            .build()
-            .expect("HTTP client must build")
-    })
+    HTTP.get_or_init(|| build_http_client(HTTP_CONNECT_TIMEOUT, HTTP_REQUEST_TIMEOUT))
+}
+
+/// Waits for the next chunk of a transfer, failing with "`what` stalled" if nothing arrives within `idle`.
+async fn next_chunk_within<S: futures_util::Stream + Unpin>(
+    stream: &mut S,
+    idle: Duration,
+    what: &str,
+) -> Result<Option<S::Item>, String> {
+    timeout(idle, stream.next())
+        .await
+        .map_err(|_| format!("{what} stalled: no data received for {}s", idle.as_secs()))
 }
 
 struct RuntimeState {
@@ -1993,7 +2015,7 @@ async fn download_start(
         // The client's default 20s timeout would abort any download that legitimately takes longer (a large
         // file on a slow connection); override it with a generous cap, and catch a truly stalled connection
         // separately below via a per-chunk idle timeout instead.
-        let mut request = http().get(&payload.stream_url).timeout(Duration::from_secs(3600));
+        let mut request = http().get(&payload.stream_url).timeout(TRANSFER_TIMEOUT);
         if existing_partial_bytes > 0 { request = request.header(RANGE, format!("bytes={existing_partial_bytes}-")); }
         let response = request.send().await.map_err(|error| format!("audio cache request failed: {error}"))?;
         let resume = can_resume_partial_download(existing_partial_bytes, response.status());
@@ -2001,7 +2023,7 @@ async fn download_start(
             response
         } else {
             if existing_partial_bytes > 0 { let _ = fs::remove_file(&partial_path); }
-            http().get(&payload.stream_url).timeout(Duration::from_secs(3600)).send().await.map_err(|error| format!("audio cache request failed: {error}"))?
+            http().get(&payload.stream_url).timeout(TRANSFER_TIMEOUT).send().await.map_err(|error| format!("audio cache request failed: {error}"))?
         }.error_for_status().map_err(|error| format!("audio cache response failed: {error}"))?;
         let total_bytes = response.content_length().map(|value| value as i64).map(|value| if resume { value + existing_partial_bytes } else { value });
         {
@@ -2015,7 +2037,7 @@ async fn download_start(
         };
         let mut stream = response.bytes_stream();
         let mut bytes = if resume { existing_partial_bytes } else { 0_i64 };
-        while let Some(chunk) = tokio::time::timeout(Duration::from_secs(30), stream.next()).await.map_err(|_| "download stalled: no data received for 30s".to_owned())? {
+        while let Some(chunk) = next_chunk_within(&mut stream, STALL_TIMEOUT, "download").await? {
             if cancel.load(Ordering::Acquire) { return Err("download cancelled".to_owned()); }
             let chunk = chunk.map_err(|error| format!("download stream failed: {error}"))?;
             file.write_all(&chunk).await.map_err(|error| format!("download cache write failed: {error}"))?;
@@ -2134,11 +2156,11 @@ async fn ytm_player(
         tokio::spawn(async move {
             let result: Result<(), String> = async {
                 if let Some(parent) = cache_path.parent() { tokio::fs::create_dir_all(parent).await.map_err(|error| format!("player cache directory failed: {error}"))?; }
-                let response = http().get(&cache_url).timeout(Duration::from_secs(3600)).send().await.map_err(|error| format!("player cache request failed: {error}"))?.error_for_status().map_err(|error| format!("player cache response failed: {error}"))?;
+                let response = http().get(&cache_url).timeout(TRANSFER_TIMEOUT).send().await.map_err(|error| format!("player cache request failed: {error}"))?.error_for_status().map_err(|error| format!("player cache response failed: {error}"))?;
                 let mut file = tokio::fs::File::create(format!("{}.part", cache_path.to_string_lossy())).await.map_err(|error| format!("player cache file failed: {error}"))?;
                 let mut stream = response.bytes_stream();
                 let mut bytes = 0_i64;
-                while let Some(chunk) = tokio::time::timeout(Duration::from_secs(30), stream.next()).await.map_err(|_| "player cache stalled: no data received for 30s".to_owned())? {
+                while let Some(chunk) = next_chunk_within(&mut stream, STALL_TIMEOUT, "player cache").await? {
                     let chunk = chunk.map_err(|error| format!("player cache stream failed: {error}"))?;
                     file.write_all(&chunk).await.map_err(|error| format!("player cache write failed: {error}"))?;
                     bytes += chunk.len() as i64;
@@ -7330,15 +7352,51 @@ async fn open_spotify_login(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Settings rows that make up a Google / YouTube Music session; all are removed on sign-out (TR-H6).
+const GOOGLE_SESSION_KEYS: &[&str] = &[
+    "cookie",
+    "dataSyncId",
+    "visitorData",
+    "accountName",
+    "accountEmail",
+    "accountChannelHandle",
+    "accountAvatar",
+];
+/// Settings rows that make up a Spotify session; all are removed on sign-out (TR-H6).
+const SPOTIFY_SESSION_KEYS: &[&str] = &[
+    "spotifySpDc",
+    "spotifySpKey",
+    "spotifyAccessToken",
+    "spotifyTokenExpiry",
+    "spotifyUsername",
+    "spotifyUserId",
+];
+
+fn delete_settings(db: &Connection, keys: &[&str]) -> rusqlite::Result<()> {
+    let mut statement = db.prepare("DELETE FROM settings WHERE key = ?1")?;
+    for key in keys {
+        statement.execute([key])?;
+    }
+    Ok(())
+}
+
+fn forget_google_session(db: &Connection) -> rusqlite::Result<()> {
+    delete_settings(db, GOOGLE_SESSION_KEYS)
+}
+
+fn forget_spotify_session(db: &Connection) -> rusqlite::Result<()> {
+    delete_settings(db, SPOTIFY_SESSION_KEYS)?;
+    db.execute("DELETE FROM spotify_match", [])?;
+    Ok(())
+}
+
 #[tauri::command]
 fn spotify_logout(
     app: tauri::AppHandle,
     state: tauri::State<'_, RuntimeState>,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    db.execute("DELETE FROM settings WHERE key IN ('spotifySpDc', 'spotifySpKey', 'spotifyAccessToken', 'spotifyTokenExpiry', 'spotifyUsername', 'spotifyUserId')", []).map_err(|e| format!("Spotify logout failed: {e}"))?;
-    db.execute("DELETE FROM spotify_match", [])
-        .map_err(|e| format!("Spotify match cache clear failed: {e}"))?;
+    forget_spotify_session(&db).map_err(|e| format!("Spotify logout failed: {e}"))?;
     // Without this, the Spotify login window's WebView2 cookies survive logout, so reopening the login page
     // silently reuses the old session instead of asking to sign in again. Best-effort: the account is already
     // disconnected locally either way, so a failure here does not fail the whole logout.
@@ -7394,7 +7452,7 @@ fn account_logout(
         .lock()
         .map_err(|_| "visitor state poisoned")? = None;
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    db.execute("DELETE FROM settings WHERE key IN ('cookie', 'dataSyncId', 'visitorData', 'accountName', 'accountEmail', 'accountChannelHandle', 'accountAvatar')", []).map_err(|e| format!("account logout failed: {e}"))?;
+    forget_google_session(&db).map_err(|e| format!("account logout failed: {e}"))?;
     // Without this, the Google login window's WebView2 cookies survive logout (they live in the profile shared
     // by every webview in the app, not just the login popup, so clearing it from the main window is sufficient
     // even though the login popup itself is usually already destroyed by the time this runs). Best-effort: the
@@ -7605,16 +7663,26 @@ fn history_record_playtime(
     play_time_ms: i64,
     state: tauri::State<'_, RuntimeState>,
 ) -> Result<(), String> {
+    let db = state.db.lock().map_err(|_| "database state poisoned")?;
+    record_playtime(&db, history_id, play_time_ms)
+        .map_err(|error| format!("history playtime update failed: {error}"))
+}
+
+/// Adds measured listening time to one history row (TR-M4). Non-positive input is ignored.
+fn record_playtime(db: &Connection, history_id: i64, play_time_ms: i64) -> rusqlite::Result<()> {
     if history_id <= 0 || play_time_ms <= 0 {
         return Ok(());
     }
-    let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute(
         "UPDATE history SET play_time_ms = play_time_ms + ?1 WHERE id = ?2",
         params![play_time_ms, history_id],
-    )
-    .map_err(|error| format!("history playtime update failed: {error}"))?;
+    )?;
     Ok(())
+}
+
+/// Minutes listened since `cutoff`: measured play time where recorded, otherwise the song duration (TR-M4).
+fn listened_minutes(db: &Connection, cutoff: i64) -> rusqlite::Result<i64> {
+    db.query_row("SELECT COALESCE(SUM(CASE WHEN h.play_time_ms > 0 THEN h.play_time_ms ELSE MAX(s.duration, 0) * 1000 END), 0) / 60000 FROM history h INNER JOIN songs s ON s.id = h.song_id WHERE h.played_at >= ?1", params![cutoff], |row| row.get(0))
 }
 
 #[tauri::command]
@@ -7651,7 +7719,8 @@ fn library_stats(
             |row| row.get(0),
         )
         .map_err(|error| format!("stats total plays query failed: {error}"))?;
-    let total_minutes: i64 = db.query_row("SELECT COALESCE(SUM(CASE WHEN h.play_time_ms > 0 THEN h.play_time_ms ELSE MAX(s.duration, 0) * 1000 END), 0) / 60000 FROM history h INNER JOIN songs s ON s.id = h.song_id WHERE h.played_at >= ?1", params![cutoff], |row| row.get(0)).map_err(|error| format!("stats total time query failed: {error}"))?;
+    let total_minutes: i64 = listened_minutes(&db, cutoff)
+        .map_err(|error| format!("stats total time query failed: {error}"))?;
     let unique_songs: i64 = db
         .query_row(
             "SELECT COUNT(DISTINCT song_id) FROM history WHERE played_at >= ?1",
@@ -7908,6 +7977,71 @@ fn backup_create(state: tauri::State<'_, RuntimeState>) -> Result<String, String
     result.map(|_| output_path.to_string_lossy().to_string())
 }
 
+/// Largest `song.db` accepted from a backup (TR-H4).
+const MAX_BACKUP_DATABASE_BYTES: u64 = 500 * 1024 * 1024;
+/// Largest `settings.json` accepted from a backup (TR-H4).
+const MAX_BACKUP_SETTINGS_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Reads a Meld Desktop backup archive. `song.db` is streamed straight to `database_out` (never held in
+/// memory) and `settings.json` is returned. Only those two entries are read and entry names are never used
+/// to build a path, so there is no zip-slip risk. Both the declared and the actual size of each entry are
+/// capped, so a hostile archive cannot exhaust memory or disk (TR-H4).
+fn extract_backup<R: Read + std::io::Seek>(
+    reader: R,
+    database_out: &Path,
+    max_database: u64,
+    max_settings: u64,
+) -> Result<Vec<u8>, String> {
+    let mut archive =
+        ZipArchive::new(reader).map_err(|error| format!("invalid Meld Desktop backup: {error}"))?;
+    let mut database_written = false;
+    let mut settings_bytes = None;
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|error| format!("backup entry read failed: {error}"))?;
+        let (name, limit) = match entry.name() {
+            "song.db" => ("song.db", max_database),
+            "settings.json" => ("settings.json", max_settings),
+            _ => continue,
+        };
+        if entry.size() > limit {
+            return Err(format!(
+                "backup entry {name} is too large ({} bytes, limit {limit})",
+                entry.size()
+            ));
+        }
+        let mut limited = (&mut entry).take(limit + 1);
+        if name == "song.db" {
+            let mut out = fs::File::create(database_out)
+                .map_err(|error| format!("backup database temp write failed: {error}"))?;
+            let copied = std::io::copy(&mut limited, &mut out)
+                .map_err(|error| format!("backup database read failed: {error}"))?;
+            if copied > limit {
+                return Err(format!(
+                    "backup entry {name} is larger than its declared size limit ({limit} bytes)"
+                ));
+            }
+            database_written = copied > 0;
+        } else {
+            let mut bytes = Vec::new();
+            limited
+                .read_to_end(&mut bytes)
+                .map_err(|error| format!("backup settings read failed: {error}"))?;
+            if bytes.len() as u64 > limit {
+                return Err(format!(
+                    "backup entry {name} is larger than its declared size limit ({limit} bytes)"
+                ));
+            }
+            settings_bytes = Some(bytes);
+        }
+    }
+    match (database_written, settings_bytes) {
+        (true, Some(settings)) if !settings.is_empty() => Ok(settings),
+        _ => Err("backup is missing song.db or settings.json".to_owned()),
+    }
+}
+
 #[tauri::command]
 fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, String> {
     let input_path = FileDialog::new()
@@ -7917,47 +8051,27 @@ fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, Strin
         .ok_or_else(|| "Restore cancelled".to_owned())?;
     let file =
         fs::File::open(&input_path).map_err(|error| format!("backup open failed: {error}"))?;
-    let mut archive =
-        ZipArchive::new(file).map_err(|error| format!("invalid Meld Desktop backup: {error}"))?;
-    let mut database_bytes = Vec::new();
-    let mut settings_bytes = Vec::new();
-    // Only song.db and settings.json are ever read (everything else in the archive is ignored, so there is no
-    // zip-slip risk here - entry names are never used to build a filesystem path). A malicious or corrupt
-    // archive claiming a huge uncompressed size for one of those two entries could still exhaust memory, so
-    // both the declared size and the actual bytes read are capped.
-    const MAX_BACKUP_ENTRY_BYTES: u64 = 500 * 1024 * 1024;
-    for index in 0..archive.len() {
-        let mut entry = archive
-            .by_index(index)
-            .map_err(|error| format!("backup entry read failed: {error}"))?;
-        if entry.size() > MAX_BACKUP_ENTRY_BYTES {
-            continue;
-        }
-        match entry.name() {
-            "song.db" => {
-                (&mut entry)
-                    .take(MAX_BACKUP_ENTRY_BYTES)
-                    .read_to_end(&mut database_bytes)
-                    .map_err(|error| format!("backup database read failed: {error}"))?;
-            }
-            "settings.json" => {
-                (&mut entry)
-                    .take(MAX_BACKUP_ENTRY_BYTES)
-                    .read_to_end(&mut settings_bytes)
-                    .map_err(|error| format!("backup settings read failed: {error}"))?;
-            }
-            _ => {}
-        }
-    }
-    if database_bytes.is_empty() || settings_bytes.is_empty() {
-        return Err("backup is missing song.db or settings.json".to_owned());
-    }
-    let imported_settings: Vec<SettingEntry> = serde_json::from_slice(&settings_bytes)
-        .map_err(|error| format!("backup settings are invalid: {error}"))?;
     let temp_db = database_path().with_extension("restore.part");
     let _ = fs::remove_file(&temp_db);
-    fs::write(&temp_db, &database_bytes)
-        .map_err(|error| format!("backup database temp write failed: {error}"))?;
+    let settings_bytes = match extract_backup(
+        file,
+        &temp_db,
+        MAX_BACKUP_DATABASE_BYTES,
+        MAX_BACKUP_SETTINGS_BYTES,
+    ) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let _ = fs::remove_file(&temp_db);
+            return Err(error);
+        }
+    };
+    let imported_settings: Vec<SettingEntry> = match serde_json::from_slice(&settings_bytes) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = fs::remove_file(&temp_db);
+            return Err(format!("backup settings are invalid: {error}"));
+        }
+    };
     let candidate = match Connection::open(&temp_db) {
         Ok(connection) => connection,
         Err(error) => {
@@ -9832,5 +9946,221 @@ mod tests {
         drop(db);
         let _ = fs::remove_dir_all(&dir);
     }
+    fn current_thread_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+    }
+
+    #[test]
+    fn api_requests_time_out_when_the_server_accepts_but_never_responds() {
+        // TR-H5: v0.1.8 had no timeouts, so a silent server hung the request forever.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = listener.local_addr().expect("address");
+        let holder = std::thread::spawn(move || {
+            let (_connection, _) = listener.accept().expect("accept");
+            std::thread::sleep(Duration::from_secs(3));
+        });
+        let client = build_http_client(Duration::from_secs(1), Duration::from_millis(300));
+        let url = format!("http://{address}/");
+        let started = std::time::Instant::now();
+        let error = current_thread_runtime()
+            .block_on(async { client.get(url).send().await })
+            .expect_err("must time out");
+        assert!(error.is_timeout(), "expected a timeout, got {error}");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "timeout took {:?}",
+            started.elapsed()
+        );
+        drop(holder);
+    }
+
+    #[test]
+    fn a_transfer_that_stops_sending_data_is_reported_as_stalled() {
+        // TR-H5: downloads and the player cache stop with a clear error instead of hanging.
+        current_thread_runtime().block_on(async {
+            let mut stream =
+                futures_util::stream::iter(vec![1_u8]).chain(futures_util::stream::pending());
+            assert_eq!(
+                next_chunk_within(&mut stream, Duration::from_millis(50), "download").await,
+                Ok(Some(1))
+            );
+            let error = next_chunk_within(&mut stream, Duration::from_millis(50), "download")
+                .await
+                .expect_err("must stall");
+            assert!(
+                error.starts_with("download stalled: no data received"),
+                "{error}"
+            );
+            let mut finished = futures_util::stream::iter(Vec::<u8>::new());
+            assert_eq!(
+                next_chunk_within(&mut finished, Duration::from_millis(50), "player cache").await,
+                Ok(None)
+            );
+        });
+    }
+
+    #[test]
+    fn production_timeouts_are_bounded_and_consistent() {
+        assert!(HTTP_CONNECT_TIMEOUT <= HTTP_REQUEST_TIMEOUT);
+        assert!(HTTP_REQUEST_TIMEOUT <= Duration::from_secs(60));
+        assert!(STALL_TIMEOUT < TRANSFER_TIMEOUT);
+        assert!(STALL_TIMEOUT <= Duration::from_secs(60));
+    }
+
+    fn backup_zip(entries: &[(&str, &[u8])]) -> std::io::Cursor<Vec<u8>> {
+        let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, bytes) in entries {
+            writer
+                .start_file(*name, SimpleFileOptions::default())
+                .expect("start entry");
+            writer.write_all(bytes).expect("write entry");
+        }
+        let mut cursor = writer.finish().expect("finish zip");
+        cursor.set_position(0);
+        cursor
+    }
+
+    fn scratch_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("meld-test-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch dir");
+        dir.join("restore.part")
+    }
+
+    #[test]
+    fn backup_restore_streams_the_database_to_disk_and_returns_settings() {
+        let out = scratch_path("restore-ok");
+        let settings = extract_backup(
+            backup_zip(&[
+                ("song.db", b"SQLite format 3\0data"),
+                ("settings.json", b"[]"),
+                ("../../evil.txt", b"x"),
+            ]),
+            &out,
+            1024,
+            1024,
+        )
+        .expect("valid backup");
+        assert_eq!(settings, b"[]");
+        assert_eq!(
+            fs::read(&out).expect("db written"),
+            b"SQLite format 3\0data"
+        );
+        assert!(!out.parent().unwrap().join("evil.txt").exists());
+    }
+
+    #[test]
+    fn backup_restore_rejects_entries_above_the_size_cap() {
+        // TR-H4: v0.1.8 read every entry fully into memory with no limit.
+        let out = scratch_path("restore-big");
+        let big = vec![7_u8; 4096];
+        let error = extract_backup(
+            backup_zip(&[("song.db", &big), ("settings.json", b"[]")]),
+            &out,
+            1024,
+            1024,
+        )
+        .expect_err("db too large");
+        assert!(error.contains("song.db is too large"), "{error}");
+        let error = extract_backup(
+            backup_zip(&[("song.db", b"db"), ("settings.json", &big)]),
+            &out,
+            1024,
+            1024,
+        )
+        .expect_err("settings too large");
+        assert!(error.contains("settings.json is too large"), "{error}");
+    }
+
+    #[test]
+    fn backup_restore_requires_both_entries() {
+        let out = scratch_path("restore-missing");
+        assert!(
+            extract_backup(backup_zip(&[("song.db", b"db")]), &out, 1024, 1024)
+                .expect_err("no settings")
+                .contains("missing")
+        );
+        assert!(
+            extract_backup(backup_zip(&[("settings.json", b"[]")]), &out, 1024, 1024)
+                .expect_err("no db")
+                .contains("missing")
+        );
+        assert!(extract_backup(
+            std::io::Cursor::new(b"not a zip".to_vec()),
+            &out,
+            1024,
+            1024
+        )
+        .expect_err("not zip")
+        .contains("invalid"));
+    }
+
+    #[test]
+    fn signing_out_removes_every_session_row_for_that_service_only() {
+        // TR-H6: sign-out must leave nothing that could silently restore the session (the WebView data is
+        // cleared separately by the logout commands; see scripts/lib/ui-invariants.mjs).
+        let store = MemKeyStore(Mutex::new(None));
+        let db = Connection::open_in_memory().expect("db");
+        initialize_database(&db, &store).expect("schema");
+        for key in GOOGLE_SESSION_KEYS.iter().chain(SPOTIFY_SESSION_KEYS) {
+            secrets::set_with(&db, &store, key, "FAKE-VALUE").expect("set");
+        }
+        db.execute(
+            "INSERT INTO settings(key, value) VALUES ('volume', '0.5')",
+            [],
+        )
+        .expect("other setting");
+        let remaining = |keys: &[&str]| {
+            keys.iter()
+                .filter(|key| {
+                    db.query_row("SELECT 1 FROM settings WHERE key = ?1", [**key], |_| Ok(()))
+                        .optional()
+                        .unwrap()
+                        .is_some()
+                })
+                .count()
+        };
+        forget_google_session(&db).expect("google logout");
+        assert_eq!(remaining(GOOGLE_SESSION_KEYS), 0);
+        assert_eq!(remaining(SPOTIFY_SESSION_KEYS), SPOTIFY_SESSION_KEYS.len());
+        forget_spotify_session(&db).expect("spotify logout");
+        assert_eq!(remaining(SPOTIFY_SESSION_KEYS), 0);
+        assert_eq!(remaining(&["volume"]), 1);
+        for key in secrets::SEALED_KEYS {
+            assert!(
+                GOOGLE_SESSION_KEYS.contains(&key) || SPOTIFY_SESSION_KEYS.contains(&key),
+                "sealed secret {key} is not removed by any sign-out"
+            );
+        }
+    }
+
+    #[test]
+    fn stats_use_measured_listening_time_instead_of_song_length() {
+        // TR-M4: main dropped history_record_playtime, so stats counted a skipped song as fully played.
+        let db = Connection::open_in_memory().expect("db");
+        initialize_database(&db, &MemKeyStore(Mutex::new(None))).expect("schema");
+        db.execute("INSERT INTO songs (id, title, kind, saved_at, duration) VALUES ('a', 'Long', 'song', 0, 600), ('b', 'Other', 'song', 0, 180)", []).expect("songs");
+        db.execute(
+            "INSERT INTO history (song_id, played_at) VALUES ('a', 100), ('b', 100)",
+            [],
+        )
+        .expect("history");
+        let first: i64 = db
+            .query_row("SELECT id FROM history WHERE song_id = 'a'", [], |row| {
+                row.get(0)
+            })
+            .expect("id");
+        assert_eq!(listened_minutes(&db, 0).expect("minutes"), 13); // 600 s + 180 s, nothing measured yet
+        record_playtime(&db, first, 30_000).expect("record");
+        record_playtime(&db, first, 30_000).expect("record");
+        record_playtime(&db, first, -5).expect("ignored");
+        record_playtime(&db, 0, 99_000).expect("ignored");
+        assert_eq!(listened_minutes(&db, 0).expect("minutes"), 4); // 60 s measured + 180 s fallback
+        assert_eq!(listened_minutes(&db, 101).expect("minutes"), 0);
+    }
+
     // --- regression tests for the review fixes (end) ---
 }
