@@ -17,7 +17,7 @@ export const MAX_HISTORY_ENTRIES = 50;
 
 /** Records `current` before navigating to a different route. Clears the forward list, like a browser. */
 export function pushEntry(history: NavHistory, current: HistoryEntry): NavHistory {
-  const last = history.back.at(-1);
+  const last = history.back[history.back.length - 1];
   const back =
     last && sameRoute(last.route, current.route) ? [...history.back.slice(0, -1), current] : [...history.back, current];
   return { back: back.slice(-MAX_HISTORY_ENTRIES), forward: [] };
@@ -28,7 +28,7 @@ export function stepBack(
   history: NavHistory,
   current: HistoryEntry,
 ): { entry: HistoryEntry; history: NavHistory } | null {
-  const entry = history.back.at(-1);
+  const entry = history.back[history.back.length - 1];
   if (!entry) return null;
   return {
     entry,
