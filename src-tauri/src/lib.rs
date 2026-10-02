@@ -38,13 +38,11 @@ const YOUTUBE_API_KEY: &str = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX3";
 const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 const VISITOR_PREFIX: &str = "Cg";
-const VISIONOS_NAME: &str = "VISIONOS";
-const VISIONOS_VERSION: &str = "0.1";
-const VISIONOS_ID: &str = "101";
-const VISIONOS_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
 
+mod resolver;
 mod secrets;
 mod updates;
+mod ytjs;
 
 /// Full database schema. A const (rather than an inline literal) so tests can create a real database.
 const SCHEMA_SQL: &str = "PRAGMA foreign_keys = ON;
@@ -705,6 +703,8 @@ struct PlayerPayload {
     bitrate: i64,
     expires_in_seconds: i64,
     duration: i64,
+    /// Resolver client that produced the stream (diagnostics only; never contains secrets).
+    source_client: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1276,162 +1276,367 @@ async fn post(endpoint: &str, body: Value, session: Option<&AuthSession>) -> Res
     post_with_query(endpoint, body, session, &[]).await
 }
 
-#[derive(Clone, Copy)]
-struct PlayerClient {
-    name: &'static str,
-    version: &'static str,
-    id: &'static str,
-    user_agent: &'static str,
-    os_name: Option<&'static str>,
-    os_version: Option<&'static str>,
-    device_make: Option<&'static str>,
-    device_model: Option<&'static str>,
-    login_supported: bool,
-    login_required: bool,
+/// Process-wide resolver memory: failed clients per video (PLAY-005) and the last attempts for reports.
+fn resolver_memory() -> &'static Mutex<resolver::FailureMemory> {
+    static MEMORY: OnceLock<Mutex<resolver::FailureMemory>> = OnceLock::new();
+    MEMORY.get_or_init(|| Mutex::new(resolver::FailureMemory::default()))
 }
 
-const PLAYER_CLIENTS: [PlayerClient; 7] = [
-    PlayerClient { name: VISIONOS_NAME, version: VISIONOS_VERSION, id: VISIONOS_ID, user_agent: VISIONOS_USER_AGENT, os_name: Some("visionOS"), os_version: Some("1.3.21O771"), device_make: Some("Apple"), device_model: Some("RealityDevice14,1"), login_supported: false, login_required: false },
-    PlayerClient { name: "ANDROID_VR", version: "1.65.10", id: "28", user_agent: "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip", os_name: Some("Android"), os_version: Some("12L"), device_make: Some("Oculus"), device_model: Some("Quest 3"), login_supported: false, login_required: false },
-    PlayerClient { name: "TVHTML5", version: "7.20260213.00.00", id: "7", user_agent: "Mozilla/5.0(SMART-TV; Linux; Tizen 4.0.0.2) AppleWebkit/605.1.15 (KHTML, like Gecko) SamsungBrowser/9.2 TV Safari/605.1.15", os_name: None, os_version: None, device_make: None, device_model: None, login_supported: true, login_required: true },
-    PlayerClient { name: "ANDROID_VR", version: "1.43.32", id: "28", user_agent: "com.google.android.apps.youtube.vr.oculus/1.43.32 (Linux; U; Android 12; en_US; Quest 3; Build/SQ3A.220605.009.A1; Cronet/107.0.5284.2)", os_name: Some("Android"), os_version: Some("12"), device_make: Some("Oculus"), device_model: Some("Quest 3"), login_supported: false, login_required: false },
-    PlayerClient { name: "IOS", version: "21.03.3", id: "5", user_agent: "com.google.ios.youtube/21.03.3 (iPad7,6; U; CPU iPadOS 17_7_10 like Mac OS X; en-US)", os_name: Some("iPadOS"), os_version: Some("17.7.10.21H450"), device_make: Some("Apple"), device_model: Some("iPad7,6"), login_supported: false, login_required: false },
-    PlayerClient { name: "IOS", version: "21.03.1", id: "5", user_agent: "com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)", os_name: Some("iOS"), os_version: Some("18.2"), device_make: Some("Apple"), device_model: Some("iPhone16,2"), login_supported: false, login_required: false },
-    PlayerClient { name: "WEB_CREATOR", version: "1.20260213.00.00", id: "62", user_agent: USER_AGENT, os_name: None, os_version: None, device_make: None, device_model: None, login_supported: true, login_required: true },
-];
+fn resolver_attempts() -> &'static Mutex<HashMap<String, Vec<resolver::Attempt>>> {
+    static ATTEMPTS: OnceLock<Mutex<HashMap<String, Vec<resolver::Attempt>>>> = OnceLock::new();
+    ATTEMPTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
-async fn player_post(
+/// YouTube's current player script, preprocessed once per player version by the EJS solver.
+struct PlayerJs {
+    id: String,
+    signature_timestamp: u32,
+    preprocessed: std::sync::Arc<String>,
+    checked_at: std::time::Instant,
+    solutions: HashMap<(bool, String), String>,
+}
+
+const PLAYER_JS_RECHECK: Duration = Duration::from_secs(6 * 60 * 60);
+
+fn player_js_state() -> &'static tokio::sync::Mutex<Option<PlayerJs>> {
+    static STATE: OnceLock<tokio::sync::Mutex<Option<PlayerJs>>> = OnceLock::new();
+    STATE.get_or_init(|| tokio::sync::Mutex::new(None))
+}
+
+fn player_js_dir() -> PathBuf {
+    database_path()
+        .parent()
+        .map(|value| value.join("player-js"))
+        .unwrap_or_else(|| PathBuf::from("player-js"))
+}
+
+/// Reads `{id}.pre.js` + `{id}.sts` written by an earlier run.
+fn read_cached_player_js(id: &str) -> Option<(u32, String)> {
+    let dir = player_js_dir();
+    let sts = fs::read_to_string(dir.join(format!("{id}.sts")))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    let preprocessed = fs::read_to_string(dir.join(format!("{id}.pre.js"))).ok()?;
+    (!preprocessed.is_empty()).then_some((sts, preprocessed))
+}
+
+fn newest_cached_player_id() -> Option<String> {
+    let mut entries: Vec<(SystemTime, String)> = fs::read_dir(player_js_dir())
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let id = name.strip_suffix(".pre.js")?.to_owned();
+            Some((entry.metadata().ok()?.modified().ok()?, id))
+        })
+        .collect();
+    entries.sort();
+    entries.pop().map(|(_, id)| id)
+}
+
+/// Keep only the two newest player versions on disk.
+fn prune_player_js_cache(keep: &str) {
+    let Ok(entries) = fs::read_dir(player_js_dir()) else {
+        return;
+    };
+    let mut ids: Vec<(SystemTime, String)> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let id = name.strip_suffix(".pre.js")?.to_owned();
+            Some((entry.metadata().ok()?.modified().ok()?, id))
+        })
+        .filter(|(_, id)| id != keep)
+        .collect();
+    ids.sort();
+    ids.reverse();
+    for (_, id) in ids.into_iter().skip(1) {
+        let dir = player_js_dir();
+        let _ = fs::remove_file(dir.join(format!("{id}.pre.js")));
+        let _ = fs::remove_file(dir.join(format!("{id}.sts")));
+    }
+}
+
+async fn fetch_text(url: &str) -> Result<String, String> {
+    http()
+        .get(url)
+        .header("User-Agent", USER_AGENT)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("request rejected: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("response failed: {e}"))
+}
+
+/// Ensure the current player script is loaded and preprocessed; returns its signature timestamp.
+async fn ensure_player_js() -> Result<u32, String> {
+    let mut state = player_js_state().lock().await;
+    if let Some(current) = state.as_ref() {
+        if current.checked_at.elapsed() < PLAYER_JS_RECHECK {
+            return Ok(current.signature_timestamp);
+        }
+    }
+    let latest_id = match fetch_text("https://www.youtube.com/iframe_api").await {
+        Ok(text) => ytjs::extract_player_id(&text),
+        Err(_) => None,
+    };
+    let Some(id) = latest_id
+        .or_else(|| state.as_ref().map(|value| value.id.clone()))
+        .or_else(newest_cached_player_id)
+    else {
+        return Err("YouTube player version could not be determined".to_owned());
+    };
+    if let Some(current) = state.as_mut().filter(|value| value.id == id) {
+        current.checked_at = std::time::Instant::now();
+        return Ok(current.signature_timestamp);
+    }
+    let (sts, preprocessed) = match read_cached_player_js(&id) {
+        Some(cached) => cached,
+        None => {
+            let url =
+                ytjs::player_js_url(&id).ok_or_else(|| "invalid YouTube player id".to_owned())?;
+            let source = fetch_text(&url)
+                .await
+                .map_err(|e| format!("YouTube player script {e}"))?;
+            let sts = ytjs::extract_signature_timestamp(&source)
+                .ok_or_else(|| "YouTube player script has no signature timestamp".to_owned())?;
+            let output = tokio::task::spawn_blocking(move || {
+                ytjs::solve(
+                    ytjs::PlayerSource::Raw(&source),
+                    &[],
+                    &[],
+                    true,
+                    ytjs::SOLVE_TIMEOUT,
+                )
+            })
+            .await
+            .map_err(|_| "player script preprocessing was interrupted".to_owned())??;
+            let preprocessed = output
+                .preprocessed
+                .ok_or_else(|| "player script preprocessing returned nothing".to_owned())?;
+            let dir = player_js_dir();
+            if fs::create_dir_all(&dir).is_ok() {
+                let _ = fs::write(dir.join(format!("{id}.pre.js")), &preprocessed);
+                let _ = fs::write(dir.join(format!("{id}.sts")), sts.to_string());
+                prune_player_js_cache(&id);
+            }
+            (sts, preprocessed)
+        }
+    };
+    *state = Some(PlayerJs {
+        id,
+        signature_timestamp: sts,
+        preprocessed: std::sync::Arc::new(preprocessed),
+        checked_at: std::time::Instant::now(),
+        solutions: HashMap::new(),
+    });
+    Ok(sts)
+}
+
+/// Solve `n`/signature challenges with the loaded player (cached per challenge).
+async fn solve_challenges(
+    n: Option<String>,
+    sig: Option<String>,
+) -> Result<(Option<String>, Option<String>), String> {
+    let (preprocessed, mut known_n, mut known_sig) = {
+        let state = player_js_state().lock().await;
+        let current = state
+            .as_ref()
+            .ok_or_else(|| "YouTube player script is not loaded".to_owned())?;
+        let lookup = |is_n: bool, value: &Option<String>| {
+            value
+                .as_ref()
+                .and_then(|v| current.solutions.get(&(is_n, v.clone())).cloned())
+        };
+        (
+            current.preprocessed.clone(),
+            lookup(true, &n),
+            lookup(false, &sig),
+        )
+    };
+    let pending_n: Vec<String> = n.iter().filter(|_| known_n.is_none()).cloned().collect();
+    let pending_sig: Vec<String> = sig
+        .iter()
+        .filter(|_| known_sig.is_none())
+        .cloned()
+        .collect();
+    if !pending_n.is_empty() || !pending_sig.is_empty() {
+        let (task_n, task_sig) = (pending_n.clone(), pending_sig.clone());
+        let output = tokio::task::spawn_blocking(move || {
+            ytjs::solve(
+                ytjs::PlayerSource::Preprocessed(&preprocessed),
+                &task_n,
+                &task_sig,
+                false,
+                ytjs::SOLVE_TIMEOUT,
+            )
+        })
+        .await
+        .map_err(|_| "signature solver was interrupted".to_owned())??;
+        let mut state = player_js_state().lock().await;
+        if let Some(current) = state.as_mut() {
+            if current.solutions.len() > 4096 {
+                current.solutions.clear();
+            }
+            for (challenge, answer) in &output.n {
+                current
+                    .solutions
+                    .insert((true, challenge.clone()), answer.clone());
+            }
+            for (challenge, answer) in &output.sig {
+                current
+                    .solutions
+                    .insert((false, challenge.clone()), answer.clone());
+            }
+        }
+        if let Some(value) = pending_n.first() {
+            known_n = output.n.get(value).cloned();
+        }
+        if let Some(value) = pending_sig.first() {
+            known_sig = output.sig.get(value).cloned();
+        }
+    }
+    Ok((known_n, known_sig))
+}
+
+fn random_cpn() -> String {
+    use aes_gcm::aead::rand_core::RngCore;
+    let mut bytes = [0_u8; 16];
+    aes_gcm::aead::OsRng.fill_bytes(&mut bytes);
+    resolver::generate_cpn(&bytes)
+}
+
+fn sapisid_hash_for(cookie: &str, origin: &str) -> Option<String> {
+    let sapisid = cookie
+        .split(';')
+        .filter_map(|part| part.trim().split_once('='))
+        .find(|(key, _)| *key == "SAPISID")
+        .map(|(_, value)| value.trim())
+        .filter(|value| !value.is_empty())?;
+    let timestamp = now_seconds();
+    let mut hasher = Sha1::new();
+    hasher.update(format!("{timestamp} {sapisid} {origin}"));
+    let digest = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Some(format!("SAPISIDHASH {timestamp}_{digest}"))
+}
+
+fn player_request_body(
     video_id: &str,
     playlist_id: Option<&str>,
     visitor_data: &str,
-    client: PlayerClient,
-    session: Option<&AuthSession>,
-) -> Result<Value, String> {
+    client: &resolver::ClientProfile,
+    signature_timestamp: Option<u32>,
+    data_sync_id: Option<&str>,
+    cpn: &str,
+) -> Value {
     let mut client_context = json!({
         "clientName": client.name,
         "clientVersion": client.version,
-        "clientScreen": "WATCH",
+        "clientScreen": if client.embedded { "EMBED" } else { "WATCH" },
         "userAgent": client.user_agent,
         "hl": "en",
         "gl": "US",
         "visitorData": visitor_data
     });
-    if let Some(value) = client.os_name {
-        client_context["osName"] = json!(value);
+    for (key, value) in [
+        ("osName", client.os_name),
+        ("osVersion", client.os_version),
+        ("deviceMake", client.device_make),
+        ("deviceModel", client.device_model),
+    ] {
+        if let Some(value) = value {
+            client_context[key] = json!(value);
+        }
     }
-    if let Some(value) = client.os_version {
-        client_context["osVersion"] = json!(value);
+    if let Some(sdk) = client.android_sdk {
+        client_context["androidSdkVersion"] = json!(sdk);
     }
-    if let Some(value) = client.device_make {
-        client_context["deviceMake"] = json!(value);
+    let mut context = json!({ "client": client_context, "user": {} });
+    if let Some(data_sync_id) = data_sync_id {
+        context["user"] = json!({ "onBehalfOfUser": data_sync_id });
     }
-    if let Some(value) = client.device_model {
-        client_context["deviceModel"] = json!(value);
+    if client.embedded {
+        context["thirdParty"] = json!({ "embedUrl": "https://www.youtube.com/" });
     }
-    let body = json!({
-        "context": { "client": client_context, "user": if client.login_supported { json!({ "onBehalfOfUser": session.map(|value| value.data_sync_id.clone()) }) } else { json!({}) } },
+    let mut body = json!({
+        "context": context,
         "videoId": video_id,
-        "playlistId": playlist_id.map(Value::from).unwrap_or(Value::Null),
+        "cpn": cpn,
         "contentCheckOk": true,
         "racyCheckOk": true
     });
+    if let Some(playlist_id) = playlist_id.filter(|value| !value.is_empty()) {
+        body["playlistId"] = json!(playlist_id);
+    }
+    if let Some(sts) = signature_timestamp {
+        body["playbackContext"] = json!({ "contentPlaybackContext": { "signatureTimestamp": sts, "html5Preference": "HTML5_PREF_WANTS" } });
+    }
+    body
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn player_post(
+    video_id: &str,
+    playlist_id: Option<&str>,
+    visitor_data: &str,
+    client: &resolver::ClientProfile,
+    signature_timestamp: Option<u32>,
+    session: Option<&AuthSession>,
+    cpn: &str,
+) -> Result<Value, String> {
+    let session = session.filter(|_| client.auth != resolver::Auth::None);
+    let origin = format!("https://{}", client.host);
+    let body = player_request_body(
+        video_id,
+        playlist_id,
+        visitor_data,
+        client,
+        signature_timestamp,
+        session
+            .map(|value| value.data_sync_id.as_str())
+            .filter(|value| !value.is_empty()),
+        cpn,
+    );
     let mut request = http()
-        .post(format!("{API_BASE}player"))
+        .post(format!("{origin}/youtubei/v1/player?prettyPrint=false"))
+        .header("User-Agent", client.user_agent)
         .header("X-Goog-Api-Format-Version", "1")
         .header("X-YouTube-Client-Name", client.id)
         .header("X-YouTube-Client-Version", client.version)
-        .header("X-Origin", ORIGIN)
-        .header("Referer", REFERER)
+        .header("Origin", &origin)
+        .header("X-Origin", &origin)
+        .header("Referer", format!("{origin}/"))
         .header("X-Goog-Visitor-Id", visitor_data)
         .json(&body);
-    if let Some(session) = session.filter(|_| client.login_supported) {
+    if let Some(session) = session {
         request = request.header("Cookie", &session.cookie);
-        if let Some(authorization) = sapisid_hash(&session.cookie) {
+        if let Some(authorization) = sapisid_hash_for(&session.cookie, &origin) {
             request = request.header("Authorization", authorization);
         }
     }
     request
         .send()
         .await
-        .map_err(|e| format!("YouTube player request failed for {}: {e}", client.name))?
+        .map_err(|e| format!("player request failed: {e}"))?
         .error_for_status()
-        .map_err(|e| format!("YouTube player returned error for {}: {e}", client.name))?
+        .map_err(|e| format!("player request rejected: {e}"))?
         .json::<Value>()
         .await
-        .map_err(|e| format!("YouTube player JSON failed for {}: {e}", client.name))
+        .map_err(|e| format!("player response unreadable: {e}"))
 }
 
-fn parse_direct_audio(
-    response: &Value,
-    video_id: &str,
-    audio_quality: &str,
-) -> Result<PlayerPayload, String> {
-    let status = response
-        .get("playabilityStatus")
-        .and_then(|v| v.get("status"))
-        .and_then(Value::as_str)
-        .unwrap_or("UNKNOWN");
-    if status != "OK" {
-        let reason = response
-            .get("playabilityStatus")
-            .and_then(|v| v.get("reason"))
-            .and_then(Value::as_str)
-            .unwrap_or("unknown reason");
-        return Err(format!("YouTube player status {status}: {reason}"));
-    }
+fn player_metadata(response: &Value, video_id: &str) -> PlayerPayload {
     let details = response.get("videoDetails");
-    let formats = response
-        .get("streamingData")
-        .and_then(|v| v.get("adaptiveFormats"))
-        .and_then(Value::as_array)
-        .ok_or_else(|| "YouTube player returned no adaptive formats".to_owned())?;
-    let mut candidates = formats
-        .iter()
-        .filter_map(|format| {
-            let mime = format.get("mimeType").and_then(Value::as_str)?;
-            if !mime.starts_with("audio/") || format.get("width").is_some() {
-                return None;
-            }
-            let url = format.get("url").and_then(Value::as_str)?.to_owned();
-            if url.is_empty()
-                || format.get("signatureCipher").is_some()
-                || format.get("cipher").is_some()
-            {
-                return None;
-            }
-            if format
-                .get("audioTrack")
-                .and_then(|v| v.get("isAutoDubbed"))
-                .and_then(Value::as_bool)
-                == Some(true)
-            {
-                return None;
-            }
-            Some((format, url, mime.to_owned()))
-        })
-        .collect::<Vec<_>>();
-    // Meld's AUTO switches on metered network state. Desktop currently has no native metered signal, so AUTO intentionally falls back to HIGH rather than pretending to provide that policy.
-    let prefer_low = audio_quality.eq_ignore_ascii_case("low");
-    candidates.sort_by_key(|(format, _, mime)| {
-        let bitrate = format.get("bitrate").and_then(Value::as_i64).unwrap_or(0);
-        let direction = if prefer_low { -1_i64 } else { 1_i64 };
-        let opus_bonus = if mime.starts_with("audio/webm") {
-            10240_i64
-        } else {
-            0_i64
-        };
-        std::cmp::Reverse(bitrate.saturating_mul(direction).saturating_add(opus_bonus))
-    });
-    let (format, stream_url, mime_type) = candidates.into_iter().next().ok_or_else(|| {
-        "YouTube player returned no direct original audio URL; cipher/SABR resolver is required"
-            .to_owned()
-    })?;
-    let duration = details
-        .and_then(|value| value.get("lengthSeconds"))
-        .and_then(Value::as_str)
-        .and_then(|value| value.parse::<i64>().ok())
-        .unwrap_or(0);
-    Ok(PlayerPayload {
+    PlayerPayload {
         video_id: video_id.to_owned(),
         title: details
             .and_then(|v| v.get("title"))
@@ -1441,16 +1646,269 @@ fn parse_direct_audio(
             .and_then(|v| v.get("author"))
             .and_then(Value::as_str)
             .map(str::to_owned),
-        stream_url,
-        mime_type,
-        bitrate: format.get("bitrate").and_then(Value::as_i64).unwrap_or(0),
+        stream_url: String::new(),
+        mime_type: String::new(),
+        bitrate: 0,
         expires_in_seconds: response
             .get("streamingData")
             .and_then(|v| v.get("expiresInSeconds"))
-            .and_then(Value::as_i64)
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
             .unwrap_or(0),
-        duration,
-    })
+        duration: details
+            .and_then(|value| value.get("lengthSeconds"))
+            .and_then(Value::as_str)
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or(0),
+        source_client: None,
+    }
+}
+
+/// Try one client: /player → playability → audio format → (solve) → validated URL.
+async fn try_player_client(
+    video_id: &str,
+    playlist_id: Option<&str>,
+    audio_quality: &str,
+    visitor_data: &str,
+    client: &resolver::ClientProfile,
+    session: Option<&AuthSession>,
+    signature_timestamp: Option<u32>,
+) -> Result<PlayerPayload, (resolver::Category, String)> {
+    use resolver::Category;
+    let cpn = random_cpn();
+    let response = player_post(
+        video_id,
+        playlist_id,
+        visitor_data,
+        client,
+        signature_timestamp,
+        session,
+        &cpn,
+    )
+    .await
+    .map_err(|error| (Category::Network, error))?;
+    let playability = response.get("playabilityStatus");
+    let status = playability
+        .and_then(|v| v.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or("UNKNOWN");
+    if status != "OK" {
+        let reason = playability
+            .and_then(|v| v.get("reason"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        return Err((
+            resolver::classify_playability(status, reason),
+            format!("{status}: {reason}"),
+        ));
+    }
+    let candidates =
+        resolver::audio_candidates(&response, audio_quality.eq_ignore_ascii_case("low"));
+    let candidate = candidates
+        .first()
+        .ok_or_else(|| (Category::NoAudio, "no audio-only format".to_owned()))?;
+    let (n_challenge, sig_challenge) = match &candidate.url {
+        resolver::FormatUrl::Direct(url) => (
+            resolver::n_challenge(url).filter(|_| client.uses_player_js),
+            None,
+        ),
+        resolver::FormatUrl::Ciphered { url, s, .. } => {
+            (resolver::n_challenge(url), Some(s.clone()))
+        }
+    };
+    let (n_solution, signature) = if n_challenge.is_some() || sig_challenge.is_some() {
+        solve_challenges(n_challenge.clone(), sig_challenge.clone())
+            .await
+            .map_err(|error| (Category::CipherUnsolved, error))?
+    } else {
+        (None, None)
+    };
+    if n_challenge.is_some() && n_solution.is_none() {
+        // An unsolved `n` is throttled to unusable speeds; treat it as a failed client.
+        return Err((
+            Category::CipherUnsolved,
+            "n challenge was not solved".to_owned(),
+        ));
+    }
+    let stream_url = resolver::finalize_url(
+        &candidate.url,
+        signature.as_deref(),
+        n_solution.as_deref(),
+        &cpn,
+    )
+    .map_err(|error| (Category::CipherUnsolved, error))?;
+    let mut payload = player_metadata(&response, video_id);
+    payload.stream_url = stream_url;
+    payload.mime_type = candidate.mime.clone();
+    payload.bitrate = candidate.bitrate;
+    payload.source_client = Some(client.key.to_owned());
+    Ok(payload)
+}
+
+async fn resolve_player_payload(
+    video_id: &str,
+    playlist_id: Option<&str>,
+    audio_quality: &str,
+    state: &tauri::State<'_, RuntimeState>,
+) -> Result<PlayerPayload, String> {
+    let id = video_id.trim();
+    if id.is_empty() {
+        return Err("video id is empty".to_owned());
+    }
+    let visitor_data = visitor(state).await?;
+    let session = auth_session(state)?;
+    let hints = resolver::Hints {
+        uploaded: resolver::is_uploaded_context(playlist_id),
+    };
+    let excluded = resolver_memory()
+        .lock()
+        .map_err(|_| "resolver state poisoned".to_owned())?
+        .excluded(id, std::time::Instant::now());
+    let mut clients = resolver::client_order(session.is_some(), true, hints, &excluded);
+    if clients.is_empty() {
+        // Every client failed recently: start over rather than refusing to play.
+        clients = resolver::client_order(session.is_some(), true, hints, &[]);
+    }
+    let mut attempts = Vec::new();
+    let mut js_state: Option<Result<u32, String>> = None;
+    let mut result = None;
+    for client in &clients {
+        let signature_timestamp = if client.uses_player_js {
+            if js_state.is_none() {
+                js_state = Some(ensure_player_js().await);
+            }
+            match js_state.as_ref() {
+                Some(Ok(sts)) => Some(*sts),
+                Some(Err(error)) => {
+                    attempts.push(resolver::Attempt {
+                        client: client.key,
+                        category: resolver::Category::CipherUnsolved,
+                        detail: resolver::redact(error),
+                    });
+                    continue;
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+        match try_player_client(
+            id,
+            playlist_id,
+            audio_quality,
+            &visitor_data,
+            client,
+            session.as_ref(),
+            signature_timestamp,
+        )
+        .await
+        {
+            Ok(payload) => {
+                if let Ok(mut memory) = resolver_memory().lock() {
+                    memory.record_success(id, client.key);
+                }
+                result = Some(payload);
+                break;
+            }
+            Err((category, detail)) => {
+                attempts.push(resolver::Attempt {
+                    client: client.key,
+                    category,
+                    detail: resolver::redact(&detail),
+                });
+                if category.is_final() {
+                    break;
+                }
+            }
+        }
+    }
+    if let Ok(mut stored) = resolver_attempts().lock() {
+        if stored.len() > 256 {
+            stored.clear();
+        }
+        stored.insert(id.to_owned(), attempts.clone());
+    }
+    result.ok_or_else(|| resolver::summarize(&attempts))
+}
+
+/// Called by the player when the audio element could not use the resolved stream (PLAY-030). A local
+/// player-cache file is dropped so the next resolve fetches fresh; a remote stream marks its client as
+/// failed for five minutes so the next resolve uses another client.
+#[tauri::command]
+fn ytm_report_stream_failure(
+    video_id: String,
+    stream_url: String,
+    state: tauri::State<'_, RuntimeState>,
+) -> Result<(), String> {
+    let id = video_id.trim();
+    if id.is_empty() {
+        return Ok(());
+    }
+    if stream_url.starts_with("https://") {
+        let mut memory = resolver_memory()
+            .lock()
+            .map_err(|_| "resolver state poisoned".to_owned())?;
+        if let Some(client) = memory.last_client(id) {
+            memory.mark_failed(id, client, std::time::Instant::now());
+        }
+        return Ok(());
+    }
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database state poisoned".to_owned())?;
+    let cached: Option<String> = db
+        .query_row(
+            "SELECT path FROM player_cache WHERE song_id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("player cache path read failed: {error}"))?;
+    if let Some(path) = cached.filter(|path| path == &stream_url) {
+        let _ = fs::remove_file(&path);
+        db.execute("DELETE FROM player_cache WHERE song_id = ?1", params![id])
+            .map_err(|error| format!("player cache removal failed: {error}"))?;
+    }
+    Ok(())
+}
+
+/// Copyable, redacted report of the last resolution for a song (PLAY-006).
+#[tauri::command]
+fn ytm_playback_report(video_id: String) -> Result<String, String> {
+    let id = video_id.trim();
+    let attempts = resolver_attempts()
+        .lock()
+        .map_err(|_| "resolver state poisoned".to_owned())?
+        .get(id)
+        .cloned()
+        .unwrap_or_default();
+    let mut lines = vec![
+        format!("Meld Desktop {} playback report", env!("CARGO_PKG_VERSION")),
+        format!("Solver: yt-dlp EJS {}", ytjs::EJS_VERSION),
+    ];
+    if attempts.is_empty() {
+        lines.push("No failed attempts recorded for this song.".to_owned());
+    }
+    for attempt in attempts {
+        lines.push(format!(
+            "- {}: {} ({})",
+            attempt.client,
+            attempt.category.label(),
+            attempt.detail
+        ));
+    }
+    Ok(lines.join("\n"))
+}
+
+/// Load and preprocess the player script in the background so a cipher fallback is fast (PLAY-016).
+fn prewarm_player_js() {
+    tauri::async_runtime::spawn(async {
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        let _ = ensure_player_js().await;
+    });
 }
 
 #[tauri::command]
@@ -1566,40 +2024,6 @@ async fn ytm_queue_continuation(
     Ok(parse_queue(&response))
 }
 
-async fn resolve_player_payload(
-    video_id: &str,
-    playlist_id: Option<&str>,
-    audio_quality: &str,
-    state: &tauri::State<'_, RuntimeState>,
-) -> Result<PlayerPayload, String> {
-    let id = video_id.trim();
-    if id.is_empty() {
-        return Err("video id is empty".to_owned());
-    }
-    let visitor_data = visitor(state).await?;
-    let session = auth_session(state)?;
-    let mut failures = Vec::new();
-    for client in PLAYER_CLIENTS {
-        if client.login_required && session.is_none() {
-            continue;
-        }
-        match player_post(id, playlist_id, &visitor_data, client, session.as_ref())
-            .await
-            .and_then(|response| parse_direct_audio(&response, id, audio_quality))
-        {
-            Ok(payload) => return Ok(payload),
-            Err(error) => failures.push(error),
-        }
-    }
-    Err(format!(
-        "YouTube native playback unavailable after source client cascade: {}",
-        failures
-            .last()
-            .cloned()
-            .unwrap_or_else(|| "no usable player client".to_owned())
-    ))
-}
-
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct DownloadInfo {
@@ -1641,6 +2065,17 @@ fn normalize_audio_quality(value: Option<&str>) -> &'static str {
         "low" => "low",
         _ => "auto",
     }
+}
+
+/// Directories whose files the WebView may load through the asset protocol.
+fn media_directories() -> Vec<PathBuf> {
+    let Some(root) = database_path().parent().map(Path::to_path_buf) else {
+        return Vec::new();
+    };
+    ["downloads", "player-cache", "artwork"]
+        .iter()
+        .map(|name| root.join(name))
+        .collect()
 }
 
 fn player_cache_path(song_id: &str) -> PathBuf {
@@ -2140,6 +2575,7 @@ async fn ytm_player(
             bitrate: 0,
             expires_in_seconds: 0,
             duration: 0,
+            source_client: None,
         });
     }
     let payload =
@@ -2749,6 +3185,37 @@ fn parse_responsive_typed(renderer: &Value) -> Option<YtItem> {
     })
 }
 
+/// The "Top result" card: re-shaped into a list item so it shares the normal item parser.
+fn parse_card_shelf_top(card: &Value) -> Option<YtItem> {
+    let title = card.get("title")?;
+    let navigation = title
+        .get("runs")
+        .and_then(Value::as_array)
+        .and_then(|runs| runs.first())
+        .and_then(|run| run.get("navigationEndpoint"))
+        .or_else(|| card.get("onTap"))?
+        .clone();
+    let video_id = navigation
+        .get("watchEndpoint")
+        .and_then(|v| v.get("videoId"))
+        .cloned();
+    let mut renderer = json!({
+        "flexColumns": [
+            { "musicResponsiveListItemFlexColumnRenderer": { "text": title } },
+            { "musicResponsiveListItemFlexColumnRenderer": { "text": card.get("subtitle").cloned().unwrap_or(Value::Null) } }
+        ],
+        "thumbnail": card.get("thumbnail").cloned().unwrap_or(Value::Null),
+        "navigationEndpoint": navigation
+    });
+    if let Some(video_id) = video_id {
+        renderer["playlistItemData"] = json!({ "videoId": video_id });
+    }
+    if let Some(badges) = card.get("subtitleBadges").or_else(|| card.get("badges")) {
+        renderer["badges"] = badges.clone();
+    }
+    parse_responsive_typed(&renderer)
+}
+
 fn parse_search(response: &Value) -> SearchPage {
     let shelves = response
         .get("contents")
@@ -2783,25 +3250,36 @@ fn parse_search(response: &Value) -> SearchPage {
                 .and_then(Value::as_str)
                 .map(str::to_owned)
         });
-    let mut items = shelves
-        .into_iter()
-        .flatten()
-        .filter_map(|shelf| shelf.get("musicShelfRenderer"))
-        .flat_map(|shelf| {
-            shelf
-                .get("contents")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-        })
-        .filter_map(|content| content.get("musicResponsiveListItemRenderer"))
-        .filter_map(parse_responsive_typed)
-        .fold(Vec::<YtItem>::new(), |mut items, item| {
-            if !items.iter().any(|existing| existing.id == item.id) {
-                items.push(item);
+    // YouTube Music returns the top result as a `musicCardShelfRenderer` and, since mid-2026, every other
+    // result in its own `itemSectionRenderer` instead of `musicShelfRenderer` shelves. Read all three in
+    // page order so the best match is first and nothing is dropped.
+    let mut items = Vec::<YtItem>::new();
+    let push = |item: YtItem, items: &mut Vec<YtItem>| {
+        if !items.iter().any(|existing| existing.id == item.id) {
+            items.push(item);
+        }
+    };
+    for section in shelves.into_iter().flatten() {
+        if let Some(card) = section.get("musicCardShelfRenderer") {
+            if let Some(item) = parse_card_shelf_top(card) {
+                push(item, &mut items);
             }
-            items
-        });
+        }
+        let contents = section
+            .get("musicCardShelfRenderer")
+            .or_else(|| section.get("musicShelfRenderer"))
+            .or_else(|| section.get("itemSectionRenderer"))
+            .and_then(|value| value.get("contents"))
+            .and_then(Value::as_array);
+        for content in contents.into_iter().flatten() {
+            if let Some(item) = content
+                .get("musicResponsiveListItemRenderer")
+                .and_then(parse_responsive_typed)
+            {
+                push(item, &mut items);
+            }
+        }
+    }
     if items.is_empty() {
         collect_typed_items(response, &mut items);
     }
@@ -7454,6 +7932,9 @@ fn account_logout(
         .map_err(|_| "visitor state poisoned")? = None;
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     forget_google_session(&db).map_err(|e| format!("account logout failed: {e}"))?;
+    if let Ok(mut memory) = resolver_memory().lock() {
+        memory.clear();
+    }
     // Without this, the Google login window's WebView2 cookies survive logout (they live in the profile shared
     // by every webview in the app, not just the login popup, so clearing it from the main window is sufficient
     // even though the login popup itself is usually already destroyed by the time this runs). Best-effort: the
@@ -9177,9 +9658,17 @@ pub fn run() {
             };
             let scope = app.asset_protocol_scope();
             for path in db_paths { let _ = scope.allow_file(&path); }
+            // Downloads, the player cache and artwork live next to the database (`%APPDATA%\\Meld Desktop`),
+            // not in Tauri's identifier-based `$APPDATA`. Grant exactly those directories at runtime so
+            // cached/downloaded songs keep playing whatever the configured scope resolves to.
+            for directory in media_directories() {
+                let _ = fs::create_dir_all(&directory);
+                let _ = scope.allow_directory(&directory, true);
+            }
+            prewarm_player_js();
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![updates::app_update_check, updates::app_update_install, updates::app_open_releases_page, ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, ytm_refresh_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_browse, ytm_browse_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, fetch_lyrics, fetch_lyrics_fresh, fetch_lyrics_from_provider, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, library_artist_state, library_toggle_artist_bookmarked, speed_dial_toggle, speed_dial_items, open_google_login, account_refresh_profile, account_logout, clear_local_library_keep_downloads, session_status, open_spotify_login, spotify_session_status, spotify_logout])
+        .invoke_handler(tauri::generate_handler![updates::app_update_check, updates::app_update_install, updates::app_open_releases_page, ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, ytm_refresh_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_browse, ytm_browse_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, ytm_report_stream_failure, ytm_playback_report, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, fetch_lyrics, fetch_lyrics_fresh, fetch_lyrics_from_provider, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, library_artist_state, library_toggle_artist_bookmarked, speed_dial_toggle, speed_dial_items, open_google_login, account_refresh_profile, account_logout, clear_local_library_keep_downloads, session_status, open_spotify_login, spotify_session_status, spotify_logout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -9188,8 +9677,153 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    /// End-to-end against YouTube: `MELD_LIVE_TESTS=1 cargo test live_ -- --ignored --nocapture`.
     #[test]
-    fn direct_audio_quality_selects_supported_high_or_low_format() {
+    #[ignore]
+    fn live_cipher_clients_resolve_playable_audio() {
+        if std::env::var("MELD_LIVE_TESTS").is_err() {
+            return;
+        }
+        let video = std::env::var("MELD_LIVE_VIDEO").unwrap_or_else(|_| "dQw4w9WgXcQ".to_owned());
+        tauri::async_runtime::block_on(async {
+            let started = std::time::Instant::now();
+            let sts = ensure_player_js().await.expect("player js");
+            eprintln!("player js ready in {:?} (sts {sts})", started.elapsed());
+            for key in std::env::var("MELD_LIVE_CLIENTS")
+                .unwrap_or_else(|_| "WEB_REMIX,ANDROID_VR_1_65_10".to_owned())
+                .split(',')
+            {
+                let client = resolver::CLIENTS.iter().find(|c| c.key == key).unwrap();
+                let started = std::time::Instant::now();
+                match try_player_client(
+                    &video,
+                    None,
+                    "high",
+                    "",
+                    client,
+                    None,
+                    client.uses_player_js.then_some(sts),
+                )
+                .await
+                {
+                    Ok(payload) => {
+                        let response = http()
+                            .get(&payload.stream_url)
+                            .header(RANGE, "bytes=0-65535")
+                            .send()
+                            .await
+                            .unwrap();
+                        eprintln!(
+                            "{key}: {} {} in {:?} -> HTTP {}",
+                            payload.mime_type,
+                            payload.bitrate,
+                            started.elapsed(),
+                            response.status()
+                        );
+                        assert_eq!(response.status().as_u16(), 206, "{key}");
+                    }
+                    Err((category, detail)) => eprintln!("{key}: {} ({detail})", category.label()),
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn search_reads_top_card_and_item_sections() {
+        let response: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/search-2026-07-item-sections.json"
+        ))
+        .unwrap();
+        let page = parse_search(&response);
+        let ids: Vec<&str> = page.items.iter().map(|item| item.id.as_str()).collect();
+        // Top result card (official video) first, then the item sections in order, deduplicated.
+        assert_eq!(ids[0], "4NRXx6U8ABQ");
+        assert_eq!(page.items[0].kind, "song");
+        assert_eq!(page.items[0].title, "Blinding Lights (Official Video)");
+        assert!(page.items[0]
+            .artists
+            .iter()
+            .any(|artist| artist.name == "The Weeknd"));
+        assert!(ids.contains(&"J7p4bzqLvCw"));
+        assert!(page
+            .items
+            .iter()
+            .any(|item| item.kind == "artist" && item.title == "The Weeknd"));
+        assert_eq!(ids.iter().filter(|id| **id == "J7p4bzqLvCw").count(), 1);
+        assert!(page.items.len() >= 5, "{ids:?}");
+    }
+
+    #[test]
+    fn media_directories_sit_next_to_the_database() {
+        let root = database_path().parent().unwrap().to_path_buf();
+        let directories = media_directories();
+        assert_eq!(
+            directories,
+            vec![
+                root.join("downloads"),
+                root.join("player-cache"),
+                root.join("artwork")
+            ]
+        );
+        assert_eq!(
+            player_cache_path("x").parent().unwrap(),
+            root.join("player-cache")
+        );
+        // tauri.conf.json must use `$DATA` (= %APPDATA%), not `$APPDATA` (= %APPDATA%\<identifier>).
+        let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let scope = conf["app"]["security"]["assetProtocol"]["scope"]
+            .as_array()
+            .unwrap();
+        assert!(root.ends_with("Meld Desktop"));
+        assert!(
+            scope
+                .iter()
+                .all(|entry| entry.as_str().unwrap().starts_with("$DATA/Meld Desktop/")),
+            "{scope:?}"
+        );
+    }
+
+    #[test]
+    fn player_request_body_matches_client_contract() {
+        let tv = resolver::CLIENTS
+            .iter()
+            .find(|c| c.key == "TVHTML5")
+            .unwrap();
+        let body = player_request_body(
+            "vid",
+            Some("PL1"),
+            "VIS",
+            tv,
+            Some(20725),
+            Some("DSID"),
+            "cpn1234567890abc",
+        );
+        assert_eq!(body["context"]["client"]["clientName"], "TVHTML5");
+        assert_eq!(
+            body["playbackContext"]["contentPlaybackContext"]["signatureTimestamp"],
+            20725
+        );
+        assert_eq!(body["playlistId"], "PL1");
+        assert_eq!(body["cpn"], "cpn1234567890abc");
+        assert_eq!(body["context"]["user"]["onBehalfOfUser"], "DSID");
+        let vr = resolver::CLIENTS
+            .iter()
+            .find(|c| c.key == "ANDROID_VR_1_65_10")
+            .unwrap();
+        let body = player_request_body("vid", None, "VIS", vr, None, None, "c");
+        assert!(body.get("playbackContext").is_none() && body.get("playlistId").is_none());
+        assert_eq!(body["context"]["client"]["androidSdkVersion"], 32);
+        let embedded = resolver::CLIENTS.iter().find(|c| c.embedded).unwrap();
+        let body = player_request_body("vid", None, "VIS", embedded, Some(1), None, "c");
+        assert_eq!(
+            body["context"]["thirdParty"]["embedUrl"],
+            "https://www.youtube.com/"
+        );
+        assert_eq!(body["context"]["client"]["clientScreen"], "EMBED");
+    }
+
+    #[test]
+    fn audio_quality_selects_high_or_low_format_including_ciphered() {
         let response = json!({
             "playabilityStatus": { "status": "OK" },
             "videoDetails": { "title": "Quality", "author": "Artist", "lengthSeconds": "10" },
@@ -9198,16 +9832,29 @@ mod tests {
                 "adaptiveFormats": [
                     { "mimeType": "audio/mp4; codecs=\\\"mp4a.40.2\\\"", "bitrate": 100000, "url": "https://example.test/low" },
                     { "mimeType": "audio/webm; codecs=\\\"opus\\\"", "bitrate": 120000, "url": "https://example.test/high" },
-                    { "mimeType": "audio/mp4", "bitrate": 320000, "signatureCipher": "cipher", "url": "https://example.test/rejected" }
+                    { "mimeType": "audio/mp4", "bitrate": 320000, "signatureCipher": "s=SIG&sp=sig&url=https%3A%2F%2Frr1.googlevideo.com%2Fvideoplayback" }
                 ]
             }
         });
-        let high = parse_direct_audio(&response, "video", "high").expect("high format");
-        assert_eq!(high.stream_url, "https://example.test/high");
-        let auto = parse_direct_audio(&response, "video", "auto").expect("auto format");
-        assert_eq!(auto.stream_url, high.stream_url);
-        let low = parse_direct_audio(&response, "video", "low").expect("low format");
-        assert_eq!(low.stream_url, "https://example.test/low");
+        // AUTO behaves like HIGH (no metered-network signal on desktop yet); ciphered formats are now
+        // candidates too (PLAY-002) and are solved before use.
+        let pick = |quality: &str| {
+            resolver::audio_candidates(&response, quality.eq_ignore_ascii_case("low"))
+                .into_iter()
+                .next()
+                .expect("format")
+        };
+        assert!(
+            matches!(pick("high").url, resolver::FormatUrl::Ciphered { ref s, .. } if s == "SIG")
+        );
+        assert_eq!(pick("auto").bitrate, pick("high").bitrate);
+        assert_eq!(
+            pick("low").url,
+            resolver::FormatUrl::Direct("https://example.test/low".to_owned())
+        );
+        let metadata = player_metadata(&response, "video");
+        assert_eq!((metadata.expires_in_seconds, metadata.duration), (60, 10));
+        assert_eq!(metadata.title.as_deref(), Some("Quality"));
     }
 
     #[test]

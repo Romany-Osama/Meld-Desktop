@@ -26,6 +26,11 @@ function npmRuntimePackages() {
   return Object.entries(lock.packages).filter(([path, info]) => path.startsWith("node_modules/") && !info.dev && !info.optional).map(([path, info]) => ({ ecosystem: "npm", name: path.slice(path.lastIndexOf("node_modules/") + 13), version: info.version, license: info.license, repository: undefined, licenseTexts: licenseTexts(path) }));
 }
 
+function vendoredPackages() {
+  const list = JSON.parse(readFileSync("src-tauri/vendor/vendored.json", "utf8"));
+  return list.map((pkg) => ({ ...pkg, licenseTexts: pkg.licenseFiles.map((file) => `--- ${file} ---\n${readFileSync(join("src-tauri/vendor", file), "utf8")}`) }));
+}
+
 switch (command) {
   case "notes": {
     writeFileSync(args[1], `${changelogSection(readFileSync("CHANGELOG.md", "utf8"), args[0])}\n`);
@@ -40,9 +45,10 @@ switch (command) {
   case "metadata": {
     const crates = rustCrates();
     const npmPackages = npmRuntimePackages();
-    writeFileSync(join(args[0], "sbom.cdx.json"), `${JSON.stringify(cycloneDx({ appName: "Meld Desktop", appVersion: pkg.version, crates, npmPackages, timestamp: new Date().toISOString() }), null, 2)}\n`);
-    writeFileSync(join(args[0], "THIRD-PARTY-NOTICES.txt"), thirdPartyNotices({ appName: "Meld Desktop", packages: [...crates, ...npmPackages] }));
-    console.log(`metadata: ${crates.length} crates, ${npmPackages.length} npm packages`);
+    const vendored = vendoredPackages();
+    writeFileSync(join(args[0], "sbom.cdx.json"), `${JSON.stringify(cycloneDx({ appName: "Meld Desktop", appVersion: pkg.version, crates, npmPackages, vendored, timestamp: new Date().toISOString() }), null, 2)}\n`);
+    writeFileSync(join(args[0], "THIRD-PARTY-NOTICES.txt"), thirdPartyNotices({ appName: "Meld Desktop", packages: [...crates, ...npmPackages, ...vendored] }));
+    console.log(`metadata: ${crates.length} crates, ${npmPackages.length} npm packages, ${vendored.length} vendored`);
     break;
   }
   case "latest": {

@@ -47,7 +47,7 @@ const purlCargo = (name, version) => `pkg:cargo/${name}@${version}`;
 const purlNpm = (name, version) => `pkg:npm/${name.startsWith("@") ? `%40${name.slice(1)}` : name}@${version}`;
 
 /** Minimal CycloneDX 1.5 SBOM for the shipped Rust crates and npm runtime packages. */
-export function cycloneDx({ appName, appVersion, crates, npmPackages, timestamp }) {
+export function cycloneDx({ appName, appVersion, crates, npmPackages, vendored = [], timestamp }) {
   const component = (type, name, version, license, purl) => ({ type, name, version, purl, "bom-ref": purl, licenses: [{ expression: spdx(license) }] });
   return {
     bomFormat: "CycloneDX",
@@ -57,6 +57,8 @@ export function cycloneDx({ appName, appVersion, crates, npmPackages, timestamp 
     components: [
       ...crates.map((crate) => component("library", crate.name, crate.version, crate.license, purlCargo(crate.name, crate.version))),
       ...npmPackages.map((pkg) => component("library", pkg.name, pkg.version, pkg.license, purlNpm(pkg.name, pkg.version))),
+      // Sources copied into the repository (src-tauri/vendor/vendored.json), identified by their upstream repository.
+      ...vendored.map((pkg) => component("library", pkg.name, pkg.version, pkg.license, `pkg:generic/${encodeURIComponent(pkg.name)}@${encodeURIComponent(pkg.version)}?vcs_url=${encodeURIComponent(`git+${pkg.repository}`)}`)),
     ],
   };
 }

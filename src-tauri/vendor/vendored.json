@@ -1,0 +1,5 @@
+[
+  { "ecosystem": "vendored", "name": "yt-dlp-ejs", "version": "0.8.0", "license": "Unlicense", "repository": "https://github.com/yt-dlp/ejs", "files": ["ejs/yt.solver.core.js", "ejs/yt.solver.lib.js"], "licenseFiles": ["ejs/LICENSE"] },
+  { "ecosystem": "vendored", "name": "meriyah", "version": "6.1.4", "license": "ISC", "repository": "https://github.com/meriyah/meriyah", "files": ["ejs/yt.solver.lib.js"], "licenseFiles": ["ejs/BUNDLED-LICENSES.txt"] },
+  { "ecosystem": "vendored", "name": "astring", "version": "1.9.0", "license": "MIT", "repository": "https://github.com/davidbonnet/astring", "files": ["ejs/yt.solver.lib.js"], "licenseFiles": ["ejs/BUNDLED-LICENSES.txt"] }
+]
