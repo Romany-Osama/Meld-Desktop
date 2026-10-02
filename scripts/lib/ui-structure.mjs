@@ -111,3 +111,57 @@ export function checkFeatureModules(readFile) {
   }
   return problems;
 }
+
+// U4-008: server state (pages fetched from the backend) lives in the resource cache and the feature data hooks.
+// App.tsx keeps view state and must neither fetch these pages itself nor hold them in useState. (Queue continuations
+// are player state and move with the playback coordinator, M4.1.)
+export const SERVER_STATE_HOOKS = {
+  home: { path: "src/features/home/useHomeData.ts", hook: "useHomeData" },
+  search: { path: "src/features/search/useSearchData.ts", hook: "useSearchData" },
+  library: { path: "src/features/library/useLibraryData.ts", hook: "useLibraryData" },
+  history: { path: "src/features/history/useHistoryData.ts", hook: "useHistoryData" },
+  detail: { path: "src/features/detail/useDetailData.ts", hook: "useDetailData" },
+  playlist: { path: "src/features/playlist/usePlaylistData.ts", hook: "usePlaylistData" },
+};
+export const SERVER_PAGE_COMMANDS = [
+  "ytm_home",
+  "ytm_home_continuation",
+  "speed_dial_items",
+  "ytm_search",
+  "ytm_search_continuation",
+  "search_history_items",
+  "library_mix_songs",
+  "library_liked_songs",
+  "library_top_songs",
+  "history_items",
+  "ytm_history",
+  "library_stats",
+  "ytm_detail",
+  "ytm_browse",
+  "ytm_detail_continuation",
+  "ytm_browse_continuation",
+  "ytm_playlist",
+  "library_playlist_songs",
+];
+const SERVER_STATE_NAMES = ["home", "search", "library", "history", "stats", "remoteHistory", "detail", "playlist"];
+
+export function checkServerState(readFile) {
+  const problems = [];
+  const app = readFile("src/App.tsx") ?? "";
+  for (const [area, { path, hook }] of Object.entries(SERVER_STATE_HOOKS)) {
+    const source = readFile(path);
+    if (source === null) {
+      problems.push(`${area}: ${path} is missing`);
+      continue;
+    }
+    if (!new RegExp(`export function ${hook}\\(`).test(source)) problems.push(`${path} must export ${hook}`);
+    if (!new RegExp(`\\b${hook}\\(`).test(app)) problems.push(`App.tsx no longer uses ${hook}`);
+  }
+  for (const command of SERVER_PAGE_COMMANDS)
+    if (new RegExp(`invoke(<[^>]*>)?\\(\\s*"${command}"`).test(app))
+      problems.push(`App.tsx fetches ${command}; server state belongs in a data hook`);
+  for (const name of SERVER_STATE_NAMES)
+    if (new RegExp(`const \\[${name}, set\\w+\\] = useState`).test(app))
+      problems.push(`App.tsx keeps ${name} in useState; it is server state`);
+  return problems;
+}

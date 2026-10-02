@@ -1,4 +1,3 @@
-import { Dispatch, SetStateAction } from "react";
 import { InlineLikeButton } from "../../components/InlineLikeButton";
 import { AudioQuality } from "../../lib/audioQuality";
 import { mediaSrc } from "../../lib/media";
@@ -19,7 +18,7 @@ export type PlaylistScreenProps = {
   playlist: LoadState<PlaylistPage> | null;
   selectedItems: YtItem[];
   selectionMode: boolean;
-  setPlaylist: Dispatch<SetStateAction<LoadState<PlaylistPage> | null>>;
+  closePlaylist: () => void;
   settings: Record<string, boolean>;
   toggleSelectedItem: (item: YtItem) => void;
 };
@@ -32,7 +31,7 @@ export function PlaylistScreen({
   playlist,
   selectedItems,
   selectionMode,
-  setPlaylist,
+  closePlaylist,
   settings,
   toggleSelectedItem,
 }: PlaylistScreenProps) {
@@ -41,7 +40,7 @@ export function PlaylistScreen({
       {playlist && (
         <div className="detail-overlay" role="dialog" aria-modal="true">
           <div className="detail-panel">
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setPlaylist(null)}>
+            <button className="close-button" title="Close" aria-label="Close" onClick={closePlaylist}>
               ×
             </button>
             {playlist.status === "loading" && (
