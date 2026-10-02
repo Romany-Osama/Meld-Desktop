@@ -5,7 +5,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 
 ## Phase 0 · M0.1 Branch reconciliation
 
-- [ ] QUEUE-001 (P0) Use one canonical branch
+- [x] QUEUE-001 (P0) Use one canonical branch — CONTRIBUTING “Branches and releases”; release.yml tag-on-main check; queue.test.ts (arrangeQueue, queue edits) on the single implementation (D-024)
 - [x] TR-C1 (P0) Default branch and released product have diverged — merge-base check; upgrade test
 - [x] TR-C2 (P0) v0.1.8 stores Google/Spotify credentials in plaintext SQLite — secrets::tests::migration_*, upgrade_from_a_v0_1_8_database_*
 - [x] TR-C3 (P0) v0.1.8 disables CSP and grants asset access to broad user folders — checks.test.mjs security
@@ -20,10 +20,10 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 ## Phase 0 · M0.2 Restore v0.1.8 playback features on the reconciled branch
 
 - [x] PLAY-001 (P0) Reconcile the two playback branches — v0.1.8 is an ancestor of main (D-001)
-- [ ] PLAY-021 (P1) Main removed quality support entirely
-- [ ] PLAY-031 (P1) v0.1.8 has no expiry recovery
-- [ ] PLAY-035 (P1) Main's effect is keyed only by song ID
-- [ ] PLAY-055 (P1) Main removed resume entirely — partial: Windows smoke + upgrade test cover app-restart state; cancel/restart resume tests pending
+- [x] PLAY-021 (P1) Main removed quality support entirely — tests::playback_cache_serves_only_the_requested_quality, tests::audio_quality_selects_high_or_low_format_including_ciphered, audioQuality.test.ts; Settings → Audio quality drives playback, cache and downloads
+- [x] PLAY-031 (P1) v0.1.8 has no expiry recovery — playbackSession.test.ts “expiry recovery” (expired stream refreshed for the same occurrence keeps its position), streamRecovery.test.ts
+- [x] PLAY-035 (P1) Main's effect is keyed only by song ID — playbackSession.test.ts “effect keys: song id + occurrence” (replay restarts, refresh keeps position, late refresh ignored)
+- [x] PLAY-055 (P1) Main removed resume entirely — download_resume::tests::cancelled_download_keeps_its_partial_and_resumes_after_restart, partial_from_another_stream_is_restarted_not_mixed, complete_partial_is_restarted_cleanly_after_416; persistentPlayback.test.ts, playbackSession.test.ts “resume after app restart”; tests::startup_cleanup_removes_orphans_but_keeps_downloads_and_resumable_parts (D-023)
 - [x] PLAY-056 (P1) v0.1.8 can leak an “active download” lock on early return — active_download_guard_clears_the_map_on_early_return
 - [x] PLAY-091 (P1) No branch/version contract test — checks.test.mjs versions
 
@@ -37,8 +37,8 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [ ] S5-097 (P0) Branch protection — partial: main requires CI; review requirement and signed tags pending (solo maintainer)
 - [x] R6-073 (P0) Add GitHub Actions CI — .github/workflows/ci.yml
 - [x] R6-074 (P0) Windows runner as the primary target — windows-latest job
-- [ ] R6-075 (P0) Required checks
-- [ ] TR-H9 (P0) No automated release gate or CI
+- [x] R6-075 (P0) Required checks — main protected by 4 required checks, strict, admins included (D-022); branch-protection.test.mjs, release.test.mjs (dry-run gate)
+- [x] TR-H9 (P0) No automated release gate or CI — CI jobs + always-reported Release dry run on every PR (D-022); release.test.mjs
 - [x] TR-M11 (P0) Public issue tracking disabled — Issues enabled, templates, SECURITY.md
 - [x] TR-M12 (P0) Release binaries committed into Git history — checks.test.mjs tracked files
 - [x] TR-M13 (P0) Release naming/version history inconsistent — CHANGELOG corrected; D-008 open for tags

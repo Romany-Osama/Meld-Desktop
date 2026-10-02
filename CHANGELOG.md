@@ -12,6 +12,7 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 - Downloads send range requests the way the player does. If a link is refused during a download, Meld picks another source and continues from the bytes it already has (up to two retries). A partial file that no longer matches is restarted cleanly.
 - A download or cache file that was cut short is no longer saved as complete. The partial file is kept, and the next try resumes from it.
 - Download and cache errors no longer include the signed stream URL.
+- A download that is resumed after a cancel, an error or an app restart is appended to only when YouTube sends the rest of the very same file. If the file changed (for example after switching Audio quality), the download starts again cleanly instead of joining two different streams into a broken file.
 - The playback cache no longer grows without limit. Settings → Storage shows how much space it uses and lets you pick a limit (Off, 512 MB to 20 GB; default 2 GB). The songs played longest ago are removed first, and offline downloads are never touched. Half-written files left by a crash are cleaned up at start-up, except downloads that can still resume.
 - Skipping quickly through songs no longer starts a full background download for every song. At most two background cache jobs exist at once. Skipping stops the previous song's job within a quarter of a second, and closing the app stops them all and removes their half-written files.
 
