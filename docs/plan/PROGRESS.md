@@ -52,7 +52,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] U4-002 (P0) Extract reusable feature modules — 12 feature hooks in src/features (D-026); featureModules.test.tsx, App.test.tsx, checks.test.mjs (feature hooks)
 - [x] U4-003 (P0) Introduce a typed router — src/app/routes.ts (D-027); routes.test.ts
 - [x] U4-004 (P0) Make navigation history route-based — src/app/history.ts (D-027); routes.test.ts, App.test.tsx (back/forward, detail restore)
-- [ ] U4-005 (P0) Give overlays explicit route/modal state
+- [x] U4-005 (P0) Give overlays explicit route/modal state — src/app/layers.ts (D-028); layers.test.ts, App.test.tsx (Escape/Back order)
 - [ ] U4-006 (P0) Persist and restore the last safe route
 - [ ] U4-007 (P0) Add deep-link parsing
 - [ ] U4-008 (P0) Separate server state from view state

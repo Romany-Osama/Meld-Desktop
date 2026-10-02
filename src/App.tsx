@@ -73,6 +73,7 @@ import {
   StatsPeriod,
   topLevelOf,
 } from "./app/routes";
+import { Layer, LayerState, topmostLayer } from "./app/layers";
 
 function App() {
   const { notice, setNotice } = useNotice();
@@ -426,46 +427,89 @@ function App() {
     restoreEntry(step.entry);
   };
 
-  const goBack = () => {
-    if (settingsOpen) {
-      setSettingsOpen(false);
-      return;
-    }
-    if (lyrics) {
-      setLyrics(null);
-      return;
-    }
-    if (playerExpanded) {
-      setPlayerExpanded(false);
-      return;
-    }
-    if (queueOpen) {
-      setQueueOpen(false);
-      return;
-    }
-    if (menuItem) {
-      setMenuItem(null);
-      setPlayerMenuOpen(false);
-      return;
-    }
-    if (detail) {
-      setDetail(null);
-      return;
-    }
-    if (playlist) {
-      setPlaylist(null);
-      return;
-    }
-    if (infoItem) {
-      setInfoItem(null);
-      return;
-    }
-    navigateBack();
+  // Which overlays are open (U4-005). Back and Escape close the topmost one; see src/app/layers.ts for the order.
+  const layerState: LayerState = {
+    logoutDialog: logoutDialogOpen,
+    createPlaylist: createPlaylistOpen,
+    playlistPicker: playlistPickerItems !== null,
+    artistPicker: artistPickerItem !== null,
+    youtubeMatch: youtubeMatchItem !== null,
+    spotifyAdd: spotifyAddItem !== null,
+    editItem: editItem !== null,
+    speedDialog: speedDialogOpen,
+    sleepTimer: sleepTimerOpen,
+    info: infoItem !== null,
+    recap: recapOpen,
+    menu: menuItem !== null || playerMenuOpen,
+    settings: settingsOpen,
+    lyrics: lyrics !== null,
+    queue: queueOpen,
+    expandedPlayer: playerExpanded,
+    playlist: playlist !== null,
+    detail: detail !== null,
+    spotifyPlaylist: spotifyOpenPlaylist !== null,
+    spotifyLiked: spotifyLikedOpen,
   };
 
-  const hasTransientLayer = Boolean(
-    settingsOpen || lyrics || playerExpanded || queueOpen || menuItem || detail || playlist || infoItem,
-  );
+  const closeLayer = (layer: Layer) => {
+    switch (layer) {
+      case "logoutDialog":
+        return setLogoutDialogOpen(false);
+      case "createPlaylist":
+        return setCreatePlaylistOpen(false);
+      case "playlistPicker":
+        return setPlaylistPickerItems(null);
+      case "artistPicker":
+        return setArtistPickerItem(null);
+      case "youtubeMatch":
+        return setYoutubeMatchItem(null);
+      case "spotifyAdd":
+        return setSpotifyAddItem(null);
+      case "editItem":
+        return setEditItem(null);
+      case "speedDialog":
+        return setSpeedDialogOpen(false);
+      case "sleepTimer":
+        return setSleepTimerOpen(false);
+      case "info":
+        return setInfoItem(null);
+      case "recap":
+        return setRecapOpen(false);
+      case "menu":
+        setMenuItem(null);
+        return setPlayerMenuOpen(false);
+      case "settings":
+        return setSettingsOpen(false);
+      case "lyrics":
+        return setLyrics(null);
+      case "queue":
+        return setQueueOpen(false);
+      case "expandedPlayer":
+        return setPlayerExpanded(false);
+      case "playlist":
+        return setPlaylist(null);
+      case "detail":
+        return setDetail(null);
+      case "spotifyPlaylist":
+        return setSpotifyOpenPlaylist(null);
+      case "spotifyLiked":
+        return setSpotifyLikedOpen(false);
+    }
+  };
+
+  /** Closes the topmost layer; returns false when nothing was open. */
+  const closeTopmostLayer = () => {
+    const top = topmostLayer(layerState);
+    if (!top) return false;
+    closeLayer(top);
+    return true;
+  };
+
+  const goBack = () => {
+    if (!closeTopmostLayer()) navigateBack();
+  };
+
+  const hasTransientLayer = topmostLayer(layerState) !== null;
 
   const loadHomeMore = async () => {
     if (home.status !== "ready" || !home.data.continuation || homeMoreLoading) return;
@@ -1938,65 +1982,7 @@ function App() {
       target?.isContentEditable;
     if (typing && !(event.key === "Escape")) return;
     if (event.key === "Escape") {
-      if (settingsOpen) {
-        setSettingsOpen(false);
-        event.preventDefault();
-        return;
-      }
-      if (editItem) {
-        setEditItem(null);
-        event.preventDefault();
-        return;
-      }
-      if (spotifyAddItem) {
-        setSpotifyAddItem(null);
-        event.preventDefault();
-        return;
-      }
-      if (spotifyLikedOpen) {
-        setSpotifyLikedOpen(false);
-        event.preventDefault();
-        return;
-      }
-      if (spotifyOpenPlaylist) {
-        setSpotifyOpenPlaylist(null);
-        event.preventDefault();
-        return;
-      }
-      if (youtubeMatchItem) {
-        setYoutubeMatchItem(null);
-        event.preventDefault();
-        return;
-      }
-      if (sleepTimerOpen) {
-        setSleepTimerOpen(false);
-        event.preventDefault();
-        return;
-      }
-      if (artistPickerItem) {
-        setArtistPickerItem(null);
-        event.preventDefault();
-        return;
-      }
-      if (playlistPickerItems) {
-        setPlaylistPickerItems(null);
-        event.preventDefault();
-        return;
-      }
-      if (createPlaylistOpen) {
-        setCreatePlaylistOpen(false);
-        event.preventDefault();
-        return;
-      }
-      if (logoutDialogOpen) {
-        setLogoutDialogOpen(false);
-        event.preventDefault();
-        return;
-      }
-      if (lyrics || detail || playlist || menuItem || queueOpen || playerExpanded || infoItem) {
-        closeTransientLayers();
-        event.preventDefault();
-      }
+      if (closeTopmostLayer()) event.preventDefault();
       return;
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {

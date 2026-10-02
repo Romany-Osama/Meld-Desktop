@@ -99,3 +99,23 @@ it("returns to a detail page that was open when the user navigated away (U4-004)
   // The album was opened from Home, so Home is the selected destination again.
   expect(screen.getByRole("button", { name: /Home/, current: "page" })).toBeTruthy();
 });
+
+it("closes the topmost layer before navigating back (U4-005)", async () => {
+  const { default: App } = await import("./App");
+  const { container } = await act(async () => render(<App />));
+  const route = () => container.querySelector("main")?.getAttribute("data-route");
+  const click = async (element: HTMLElement) => act(async () => void fireEvent.click(element));
+  await click(screen.getByRole("button", { name: /Library/ }));
+  await click(screen.getByRole("button", { name: /Home/ }));
+  await click(screen.getByTitle("Open album"));
+  expect(route()).toBe("/album/MPREb_test");
+  // Escape closes the album page, not the history entry behind it.
+  await act(async () => void fireEvent.keyDown(window, { key: "Escape" }));
+  expect(route()).toBe("/home");
+  await click(screen.getByTitle("Open album"));
+  await click(screen.getByRole("button", { name: "Back" }));
+  expect(route()).toBe("/home");
+  // With no layer left, Back steps through the history.
+  await click(screen.getByRole("button", { name: "Back" }));
+  expect(route()).toBe("/library/mix");
+});
