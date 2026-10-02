@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Dispatch, SetStateAction, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { errorMessage } from "../../lib/util";
 import { SessionStatus, SpotifySessionStatus, SpotifyProfile } from "../../types";
+import type { SetNotice } from "../../app/notifications";
 
 export type AccountsDeps = {
-  setNotice: Dispatch<SetStateAction<string>>;
+  setNotice: SetNotice;
 };
 
 export function useAccounts({ setNotice }: AccountsDeps) {
@@ -27,7 +28,7 @@ export function useAccounts({ setNotice }: AccountsDeps) {
         }
       }
     } catch (error) {
-      setNotice(`Account status could not be read: ${errorMessage(error)}`);
+      setNotice(`Account status could not be read: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -35,7 +36,7 @@ export function useAccounts({ setNotice }: AccountsDeps) {
     try {
       setSpotifyStatus(await invoke<SpotifySessionStatus>("spotify_session_status"));
     } catch (error) {
-      setNotice(`Spotify status could not be read: ${errorMessage(error)}`);
+      setNotice(`Spotify status could not be read: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -46,7 +47,7 @@ export function useAccounts({ setNotice }: AccountsDeps) {
         "Google sign-in opened in Meld Desktop. Finish sign-in there; Meld will validate the session before saving it.",
       );
     } catch (error) {
-      setNotice(`Google sign-in could not open: ${errorMessage(error)}`);
+      setNotice(`Google sign-in could not open: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -55,7 +56,7 @@ export function useAccounts({ setNotice }: AccountsDeps) {
       await invoke("open_spotify_login");
       setNotice("Spotify sign-in opened in Meld Desktop. The session is saved only after token validation.");
     } catch (error) {
-      setNotice(`Spotify sign-in could not open: ${errorMessage(error)}`);
+      setNotice(`Spotify sign-in could not open: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -66,7 +67,7 @@ export function useAccounts({ setNotice }: AccountsDeps) {
       setSpotifyProfile(null);
       setNotice("Spotify account disconnected.");
     } catch (error) {
-      setNotice(`Spotify logout failed: ${errorMessage(error)}`);
+      setNotice(`Spotify logout failed: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -92,13 +93,13 @@ export function useAccounts({ setNotice }: AccountsDeps) {
     });
     let stopAccountError: (() => void) | undefined;
     void listen<string>("account-status-error", (event) => {
-      setNotice(`Google account validation failed: ${event.payload}`);
+      setNotice(`Google account validation failed: ${event.payload}`, "error");
     }).then((stop) => {
       stopAccountError = stop;
     });
     let stopSpotifyError: (() => void) | undefined;
     void listen<string>("spotify-status-error", (event) => {
-      setNotice(`Spotify account validation failed: ${event.payload}`);
+      setNotice(`Spotify account validation failed: ${event.payload}`, "error");
     }).then((stop) => {
       stopSpotifyError = stop;
     });

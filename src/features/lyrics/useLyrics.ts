@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Dispatch, SetStateAction, useState, useRef, useMemo, useEffect, RefObject } from "react";
+import { useState, useRef, useMemo, useEffect, RefObject } from "react";
 import { errorMessage } from "../../lib/util";
 import { YtItem, LoadState, LyricsPayload } from "../../types";
 import { lyricsProviderNames, lyricProviderSettingKeys } from "./providers";
+import type { SetNotice } from "../../app/notifications";
 
 export type LyricsDeps = {
-  setNotice: Dispatch<SetStateAction<string>>;
+  setNotice: SetNotice;
   settings: Record<string, boolean>;
 };
 
@@ -35,7 +36,7 @@ export function useLyrics({ setNotice, settings }: LyricsDeps) {
       await invoke("settings_set", { key: "lyricsProviderOrder", value: nextOrder.join(",") });
     } catch (error) {
       setLyricsProviderOrder(previous);
-      setNotice(`Lyrics provider order could not be saved: ${errorMessage(error)}`);
+      setNotice(`Lyrics provider order could not be saved: ${errorMessage(error)}`, "error");
     }
   };
 

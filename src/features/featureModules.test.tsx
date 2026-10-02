@@ -21,6 +21,12 @@ const { useSelection } = await import("./selection/useSelection");
 const { useQueue } = await import("./queue/useQueue");
 const { useDownloads } = await import("./downloads/useDownloads");
 const { useNotice } = await import("./notifications/useNotice");
+const { runDestructive } = await import("../app/destructive");
+// Confirms every question; tests that need a "no" pass their own.
+const destructive =
+  (setNotice: (...args: never[]) => void = vi.fn()) =>
+  (spec: Parameters<typeof runDestructive>[0]) =>
+    runDestructive(spec, { confirm: async () => true, notify: setNotice as never });
 
 const song = (id: string, extra: Partial<YtItem> = {}): YtItem => ({
   id,
@@ -74,7 +80,7 @@ describe("useQueue", () => {
     await act(() => result.current.toggleShuffle());
     expect(invoke).toHaveBeenCalledWith("settings_set", { key: "shuffleMode", value: "true" });
     expect(result.current.shuffleEnabled).toBe(false);
-    expect(setNotice).toHaveBeenCalledWith("Shuffle preference could not be saved: disk full");
+    expect(setNotice).toHaveBeenCalledWith("Shuffle preference could not be saved: disk full", "error");
   });
 
   it("cycles repeat off → all → one → off and persists each step", async () => {
@@ -91,7 +97,12 @@ describe("useDownloads", () => {
   it("starts a download at the chosen quality and tracks its progress events", async () => {
     const { result } = renderHook(() => useNotice());
     const downloads = renderHook(() =>
-      useDownloads({ audioQuality: "high", setNotice: result.current.setNotice, settings: {} }),
+      useDownloads({
+        audioQuality: "high",
+        setNotice: result.current.setNotice,
+        settings: {},
+        destructive: destructive(),
+      }),
     );
     await act(async () => downloads.result.current.startDownload(song("a")));
     expect(invoke).toHaveBeenCalledWith("download_start", { item: song("a"), audioQuality: "high" });
@@ -108,10 +119,12 @@ describe("useDownloads", () => {
 
   it("refuses local-only items and only batch-downloads items with a remote source", () => {
     const setNotice = vi.fn();
-    const { result } = renderHook(() => useDownloads({ audioQuality: "auto", setNotice, settings: {} }));
+    const { result } = renderHook(() =>
+      useDownloads({ audioQuality: "auto", setNotice, settings: {}, destructive: destructive() }),
+    );
     act(() => result.current.startDownload(song("local", { localPath: "C:/music/a.mp3" })));
     expect(invoke).not.toHaveBeenCalled();
-    expect(setNotice).toHaveBeenLastCalledWith("Offline download requires a remote source video.");
+    expect(setNotice).toHaveBeenLastCalledWith("Offline download requires a remote source video.", "warning");
     let started = 0;
     act(() => {
       started = result.current.downloadItems([song("a"), song("b", { videoId: undefined }), song("c")]);
@@ -121,11 +134,18 @@ describe("useDownloads", () => {
   });
 
   it("auto-downloads on like only when the setting is on", () => {
-    const off = renderHook(() => useDownloads({ audioQuality: "auto", setNotice: vi.fn(), settings: {} }));
+    const off = renderHook(() =>
+      useDownloads({ audioQuality: "auto", setNotice: vi.fn(), settings: {}, destructive: destructive() }),
+    );
     off.result.current.maybeAutoDownloadOnLike(song("a"), true);
     expect(invoke).not.toHaveBeenCalled();
     const on = renderHook(() =>
-      useDownloads({ audioQuality: "low", setNotice: vi.fn(), settings: { autoDownloadOnLike: true } }),
+      useDownloads({
+        audioQuality: "low",
+        setNotice: vi.fn(),
+        settings: { autoDownloadOnLike: true },
+        destructive: destructive(),
+      }),
     );
     on.result.current.maybeAutoDownloadOnLike(song("a"), false);
     on.result.current.maybeAutoDownloadOnLike(song("a"), true);

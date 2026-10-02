@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 // Source-level UI invariants that must hold until component tests cover them (Phase 1, M1.4).
 import { existsSync, readFileSync } from "node:fs";
-import { checkCapabilities, checkFeatureModules, checkScreenSplit, checkServerState } from "./lib/ui-structure.mjs";
+import {
+  checkCapabilities,
+  checkDestructivePolicy,
+  checkFeatureModules,
+  checkScreenSplit,
+  checkServerState,
+} from "./lib/ui-structure.mjs";
 import { checkLogoutClearsWebview, checkUiInvariants, readUiSource } from "./lib/ui-invariants.mjs";
 
 const problems = [
@@ -9,6 +15,7 @@ const problems = [
   ...checkFeatureModules((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
   ...checkServerState((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
   ...checkCapabilities((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
+  ...checkDestructivePolicy((path) => (existsSync(path) ? readFileSync(path, "utf8") : null), readUiSource()),
   ...checkUiInvariants(readUiSource()),
   ...checkLogoutClearsWebview(readFileSync("src-tauri/src/lib.rs", "utf8")),
 ];

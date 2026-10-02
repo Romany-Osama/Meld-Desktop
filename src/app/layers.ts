@@ -3,6 +3,8 @@
 // Only when nothing is open does Back step through the route history.
 
 export const LAYERS = [
+  // The confirmation of a permanent action (U4-012) can open over any other dialog.
+  "confirm",
   // Dialogs (opened from menus, Settings or panels, so they sit above all of them).
   "logoutDialog",
   "createPlaylist",
@@ -34,6 +36,7 @@ export type Layer = (typeof LAYERS)[number];
 export type LayerState = Record<Layer, boolean>;
 
 export const LAYER_KIND: Record<Layer, "dialog" | "menu" | "page" | "panel" | "screen"> = {
+  confirm: "dialog",
   logoutDialog: "dialog",
   createPlaylist: "dialog",
   playlistPicker: "dialog",

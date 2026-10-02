@@ -311,3 +311,35 @@ it("builds the item menu from the capability model (U4-011)", async () => {
   await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Pin to Speed Dial" })));
   expect(invoke).toHaveBeenCalledWith("speed_dial_toggle", expect.objectContaining({ pinned: true }));
 });
+
+it("asks before a permanent removal and reports the result in the notification center (U4-012, U4-013)", async () => {
+  const { default: App } = await import("./App");
+  await act(async () => render(<App />));
+  const click = async (element: HTMLElement) => act(async () => void fireEvent.click(element));
+  await click(screen.getByRole("button", { name: /History/ }));
+  invoke.mockClear();
+  // Escape closes the question first, and nothing is deleted.
+  await click(screen.getByRole("button", { name: "Clear local history" }));
+  expect(screen.getByRole("alertdialog")).toHaveProperty(
+    "textContent",
+    expect.stringContaining("Clear local history?"),
+  );
+  expect(document.activeElement?.textContent).toBe("Cancel");
+  await act(async () => void fireEvent.keyDown(window, { key: "Escape" }));
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(invoke).not.toHaveBeenCalledWith("history_clear", undefined);
+  // A failure stays on screen as an error with Retry; Retry does not ask again.
+  overrides.history_clear = async () => {
+    throw new Error("disk full");
+  };
+  await click(screen.getByRole("button", { name: "Clear local history" }));
+  await click(screen.getByRole("button", { name: "Clear history" }));
+  const alert = screen.getByRole("alert");
+  expect(alert.textContent).toContain("History could not be cleared: disk full");
+  delete overrides.history_clear;
+  await click(screen.getByRole("button", { name: "Retry" }));
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(invoke).toHaveBeenCalledWith("history_clear", undefined);
+  expect(screen.getByText("Meld playback history cleared.")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+});

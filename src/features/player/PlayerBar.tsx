@@ -2,6 +2,7 @@ import { RefObject, Dispatch, SetStateAction } from "react";
 import { mediaSrc } from "../../lib/media";
 import { FINAL_STREAM_ERROR } from "../../lib/streamRecovery";
 import { YtItem, LoadState, LyricsPayload, PlayerPayload, LibraryItemState, PlaytimeSession } from "../../types";
+import type { SetNotice } from "../../app/notifications";
 
 export type PlayerBarProps = {
   adjustVolumeByWheel: (event: { deltaY: number; preventDefault: () => void }) => void;
@@ -40,7 +41,7 @@ export type PlayerBarProps = {
   setDurationSeconds: Dispatch<SetStateAction<number>>;
   setIsPlaying: Dispatch<SetStateAction<boolean>>;
   setLyricsAutoScrollEnabled: Dispatch<SetStateAction<boolean>>;
-  setNotice: Dispatch<SetStateAction<string>>;
+  setNotice: SetNotice;
   setPlaybackSeconds: Dispatch<SetStateAction<number>>;
   setPlayer: Dispatch<SetStateAction<{ item: YtItem; payload: PlayerPayload; session: number } | null>>;
   setPlayerExpanded: Dispatch<SetStateAction<boolean>>;

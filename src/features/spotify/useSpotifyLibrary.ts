@@ -16,13 +16,16 @@ import {
   SpotifyTrackItem,
   SearchPage,
 } from "../../types";
+import type { SetNotice } from "../../app/notifications";
+import type { Destructive } from "../../app/destructive";
 
 export type SpotifyLibraryDeps = {
   audioQuality: AudioQuality;
   setMenuItem: Dispatch<SetStateAction<YtItem | null>>;
-  setNotice: Dispatch<SetStateAction<string>>;
+  setNotice: SetNotice;
   setSpotifyProfile: Dispatch<SetStateAction<SpotifyProfile | null>>;
   spotifyStatus: SpotifySessionStatus;
+  destructive: Destructive;
 };
 
 export function useSpotifyLibrary({
@@ -31,6 +34,7 @@ export function useSpotifyLibrary({
   setNotice,
   setSpotifyProfile,
   spotifyStatus,
+  destructive,
 }: SpotifyLibraryDeps) {
   const [spotifyLibrary, setSpotifyLibrary] = useState<LoadState<SpotifyLibraryNode>>({
     status: "idle",
@@ -76,7 +80,7 @@ export function useSpotifyLibrary({
       setSpotifyProfile(await invoke<SpotifyProfile>("spotify_profile"));
     } catch (error) {
       setSpotifyProfile(null);
-      setNotice(`Spotify profile could not be loaded: ${errorMessage(error)}`);
+      setNotice(`Spotify profile could not be loaded: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -174,9 +178,9 @@ export function useSpotifyLibrary({
     try {
       await invoke("spotify_move_in_playlist", { playlistId: spotifyOpenPlaylist.id, uids: [track.uid], beforeUid });
       await openSpotifyPlaylist(spotifyOpenPlaylist);
-      setNotice(`Moved “${track.name}” ${direction}.`);
+      setNotice(`Moved “${track.name}” ${direction}.`, "success");
     } catch (error) {
-      setNotice(`Spotify track could not be moved: ${errorMessage(error)}`);
+      setNotice(`Spotify track could not be moved: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -199,7 +203,7 @@ export function useSpotifyLibrary({
         data: { ...next, tracks: [...spotifyPlaylistTracks.data.tracks, ...next.tracks] },
       });
     } catch (error) {
-      setNotice(`More Spotify tracks could not be loaded: ${errorMessage(error)}`);
+      setNotice(`More Spotify tracks could not be loaded: ${errorMessage(error)}`, "error");
     } finally {
       setSpotifyPlaylistLoadingMore(false);
     }
@@ -214,26 +218,33 @@ export function useSpotifyLibrary({
       });
       const updated = { ...spotifyOpenPlaylist, name: spotifyRenameName.trim() };
       setSpotifyOpenPlaylist(updated);
-      setNotice(`Renamed Spotify playlist to “${updated.name}”.`);
+      setNotice(`Renamed Spotify playlist to “${updated.name}”.`, "success");
       await loadSpotifyLibrary(spotifyFolderStack[spotifyFolderStack.length - 1]?.uri ?? null);
     } catch (error) {
-      setNotice(`Spotify playlist could not be renamed: ${errorMessage(error)}`);
+      setNotice(`Spotify playlist could not be renamed: ${errorMessage(error)}`, "error");
     }
   };
 
   const removeSpotifyTrack = async (track: SpotifyTrackItem) => {
     if (!spotifyOpenPlaylist || !track.uid) {
-      setNotice("Spotify could not remove this track because the playlist item uid was not returned.");
+      setNotice("Spotify could not remove this track because the playlist item uid was not returned.", "warning");
       return;
     }
-    if (!window.confirm(`Remove “${track.name}” from “${spotifyOpenPlaylist.name}”?`)) return;
-    try {
-      await invoke("spotify_remove_from_playlist", { playlistId: spotifyOpenPlaylist.id, uid: track.uid });
-      setNotice(`Removed “${track.name}” from Spotify playlist.`);
-      await openSpotifyPlaylist(spotifyOpenPlaylist);
-    } catch (error) {
-      setNotice(`Spotify track could not be removed: ${errorMessage(error)}`);
-    }
+    const playlist = spotifyOpenPlaylist;
+    const uid = track.uid;
+    await destructive({
+      severity: "permanent",
+      key: `spotify-remove:${playlist.id}:${uid}`,
+      confirm: {
+        title: "Remove from Spotify playlist?",
+        message: `“${track.name}” is removed from “${playlist.name}” on Spotify.`,
+        confirmLabel: "Remove",
+      },
+      commit: () => invoke("spotify_remove_from_playlist", { playlistId: playlist.id, uid }),
+      refresh: () => openSpotifyPlaylist(playlist),
+      success: `Removed “${track.name}” from Spotify playlist.`,
+      failure: "Spotify track could not be removed",
+    });
   };
 
   const findYouTubeMatchForSpotifyTrack = async (track: SpotifyTrackItem) => {
@@ -243,15 +254,19 @@ export function useSpotifyLibrary({
 
   const downloadSpotifyPlaylist = async () => {
     if (!spotifyOpenPlaylist || spotifyPlaylistTracks.status !== "ready") return;
+    const progressKey = `spotify-download:${spotifyOpenPlaylist.id}`;
     let queued = 0;
     let skipped = 0;
     const tracks = [...spotifyPlaylistTracks.data.tracks];
     let offset = tracks.length;
     try {
       while (offset < spotifyPlaylistTracks.data.totalCount) {
-        setNotice(
-          `Loading Spotify playlist tracks for offline download… ${offset}/${spotifyPlaylistTracks.data.totalCount}`,
-        );
+        setNotice({
+          kind: "progress",
+          key: progressKey,
+          message: "Loading Spotify playlist tracks for offline download…",
+          progress: { value: offset, max: spotifyPlaylistTracks.data.totalCount },
+        });
         const next = await invoke<SpotifyTrackPage>("spotify_playlist_tracks", {
           playlistId: spotifyOpenPlaylist.id,
           offset,
@@ -262,11 +277,21 @@ export function useSpotifyLibrary({
       }
       setSpotifyPlaylistTracks({ status: "ready", data: { ...spotifyPlaylistTracks.data, tracks } });
     } catch (error) {
-      setNotice(`Spotify playlist pages could not be loaded: ${errorMessage(error)}`);
+      setNotice({
+        kind: "error",
+        key: progressKey,
+        message: `Spotify playlist pages could not be loaded: ${errorMessage(error)}`,
+      });
       return;
     }
-    setNotice(`Matching Spotify playlist “${spotifyOpenPlaylist.name}” for offline download…`);
+    let matched = 0;
     for (const track of tracks) {
+      setNotice({
+        kind: "progress",
+        key: progressKey,
+        message: `Matching Spotify playlist “${spotifyOpenPlaylist.name}” for offline download…`,
+        progress: { value: matched++, max: tracks.length },
+      });
       try {
         const item = await findYouTubeMatchForSpotifyTrack(track);
         if (!item?.videoId) {
@@ -279,9 +304,11 @@ export function useSpotifyLibrary({
         skipped++;
       }
     }
-    setNotice(
-      `Spotify playlist download queued: ${queued} track${queued === 1 ? "" : "s"}${skipped ? `; ${skipped} unmatched` : ""}.`,
-    );
+    setNotice({
+      kind: skipped ? "warning" : "success",
+      key: progressKey,
+      message: `Spotify playlist download queued: ${queued} track${queued === 1 ? "" : "s"}${skipped ? `; ${skipped} unmatched` : ""}.`,
+    });
   };
 
   const openSpotifyLiked = () => {
@@ -327,9 +354,9 @@ export function useSpotifyLibrary({
       await invoke("spotify_add_to_playlist", { playlistId: playlist.id, trackUri: match.uri });
       setSpotifyAddItem(null);
       setSpotifyAddState(null);
-      setNotice(`Added “${match.name}” to Spotify playlist “${playlist.name}”.`);
+      setNotice(`Added “${match.name}” to Spotify playlist “${playlist.name}”.`, "success");
     } catch (error) {
-      setNotice(`Spotify playlist add failed: ${errorMessage(error)}`);
+      setNotice(`Spotify playlist add failed: ${errorMessage(error)}`, "error");
     }
   };
 

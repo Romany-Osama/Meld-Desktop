@@ -5,6 +5,7 @@ import type { ResourceCache } from "../../data/resourceCache";
 import { useResource } from "../../data/useResource";
 import { detailKey, FRESH_FOR_MS, type DetailRef } from "../../data/keys";
 import { errorMessage } from "../../lib/util";
+import type { SetNotice } from "../../app/notifications";
 
 const DETAIL_FALLBACK = {
   status: "loading" as const,
@@ -32,7 +33,7 @@ export function useDetailData({
 }: {
   cache: ResourceCache;
   detailRef: DetailRef | null;
-  setNotice: (value: string) => void;
+  setNotice: SetNotice;
 }) {
   const key = detailRef ? detailKey(detailRef) : null;
   const [detail, setDetailData] = useResource<DetailPage>(cache, key, DETAIL_FALLBACK);
@@ -75,7 +76,7 @@ export function useDetailData({
         return { ...entry, data: { ...entry.data, items, continuation: next.continuation } };
       });
     } catch (error) {
-      if (token.isCurrent()) setNotice(`More ${page.kind} items could not be loaded: ${errorMessage(error)}`);
+      if (token.isCurrent()) setNotice(`More ${page.kind} items could not be loaded: ${errorMessage(error)}`, "error");
     } finally {
       token.finish();
       setDetailMoreLoading(false);
@@ -89,7 +90,7 @@ export function useDetailData({
     try {
       const outcome = await cache.load(detailKey(detailRef), () => fetchDetail(detailRef), { scope: "detail" });
       if (outcome.status === "ready") setNotice("Podcast details refreshed.");
-      else if (outcome.status === "error") setNotice(`Podcast refresh failed: ${outcome.error}`);
+      else if (outcome.status === "error") setNotice(`Podcast refresh failed: ${outcome.error}`, "error");
     } finally {
       setDetailRefreshing(false);
     }

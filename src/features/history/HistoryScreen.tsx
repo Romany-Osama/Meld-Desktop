@@ -3,8 +3,8 @@ import { Dispatch, SetStateAction } from "react";
 import { InlineLikeButton } from "../../components/InlineLikeButton";
 import { ItemCard } from "../../components/ItemCard";
 import { AudioQuality } from "../../lib/audioQuality";
-import { errorMessage } from "../../lib/util";
 import { YtItem, LoadState, RemoteHistoryPage, SessionStatus } from "../../types";
+import type { Destructive } from "../../app/destructive";
 
 export type HistoryScreenProps = {
   audioQuality: AudioQuality;
@@ -24,7 +24,7 @@ export type HistoryScreenProps = {
   sessionStatus: SessionStatus;
   setHistoryQuery: Dispatch<SetStateAction<string>>;
   setHistorySource: Dispatch<SetStateAction<"local" | "remote">>;
-  setNotice: Dispatch<SetStateAction<string>>;
+  destructive: Destructive;
   setSelectionMode: Dispatch<SetStateAction<boolean>>;
   settings: Record<string, boolean>;
   toggleSelectedItem: (item: YtItem) => void;
@@ -49,7 +49,7 @@ export function HistoryScreen({
   sessionStatus,
   setHistoryQuery,
   setHistorySource,
-  setNotice,
+  destructive,
   setSelectionMode,
   settings,
   toggleSelectedItem,
@@ -100,15 +100,21 @@ export function HistoryScreen({
               {historySource === "local" && (
                 <button
                   className="secondary-button"
-                  onClick={async () => {
-                    try {
-                      await invoke("history_clear");
-                      await loadHistory();
-                      setNotice("Meld playback history cleared.");
-                    } catch (error) {
-                      setNotice(`History could not be cleared: ${errorMessage(error)}`);
-                    }
-                  }}
+                  onClick={() =>
+                    void destructive({
+                      severity: "permanent",
+                      key: "history-clear",
+                      confirm: {
+                        title: "Clear local history?",
+                        message: "Every song in Meld's playback history is removed. Stats lose these plays too.",
+                        confirmLabel: "Clear history",
+                      },
+                      commit: () => invoke("history_clear"),
+                      refresh: loadHistory,
+                      success: "Meld playback history cleared.",
+                      failure: "History could not be cleared",
+                    })
+                  }
                 >
                   Clear local history
                 </button>

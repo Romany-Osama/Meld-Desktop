@@ -589,6 +589,48 @@ h2 {
   color: #aeb7fb;
   font-weight: 700;
 }
+/* U4-013: notification center */
+.notice-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 18px 36px -4px;
+}
+.notice-stack .notice {
+  margin: 0;
+  align-items: center;
+  border-left-width: 4px;
+}
+.notice-kind {
+  flex: 0 0 auto;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+}
+.notice-message {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.notice-progress {
+  flex: 0 0 120px;
+  height: 6px;
+}
+.notice-success {
+  border-left-color: #4fbf8b;
+}
+.notice-warning {
+  border-left-color: #e0b44c;
+}
+.notice-error {
+  border-left-color: #e0626b;
+  color: #f1c4c8;
+}
+.notice-progress-kind,
+.notice-progress {
+  accent-color: #8f9bff;
+}
 .search-page {
   max-width: 1000px;
   margin: 0 auto;
@@ -1206,9 +1248,14 @@ h2 {
     padding-left: 24px;
     padding-right: 24px;
   }
-  .notice {
+  .notice,
+  .notice-stack {
     margin-left: 24px;
     margin-right: 24px;
+  }
+  .notice-stack .notice {
+    margin-left: 0;
+    margin-right: 0;
   }
   .search-form {
     min-width: 280px;

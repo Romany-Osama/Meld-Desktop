@@ -2,10 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { Dispatch, SetStateAction, useState, useMemo, useCallback } from "react";
 import { errorMessage } from "../../lib/util";
 import { SessionStatus, YtItem, PlaylistSort } from "../../types";
+import type { SetNotice } from "../../app/notifications";
 
 export type PlaylistsDeps = {
   sessionStatus: SessionStatus;
-  setNotice: Dispatch<SetStateAction<string>>;
+  setNotice: SetNotice;
   setSelectedItems: Dispatch<SetStateAction<YtItem[]>>;
   setSelectionMode: Dispatch<SetStateAction<boolean>>;
   settings: Record<string, boolean>;
@@ -35,7 +36,7 @@ export function usePlaylists({
     try {
       setLocalPlaylists(await invoke<(YtItem & { songCount?: number; savedAt?: number })[]>("library_playlists"));
     } catch (error) {
-      setNotice(`Playlists could not be loaded: ${errorMessage(error)}`);
+      setNotice(`Playlists could not be loaded: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -49,7 +50,7 @@ export function usePlaylists({
       await loadLocalPlaylists();
       setNotice(`YouTube Music playlist sync finished: ${result.playlists} playlists.`);
     } catch (error) {
-      setNotice(`YouTube Music playlist sync failed: ${errorMessage(error)}`);
+      setNotice(`YouTube Music playlist sync failed: ${errorMessage(error)}`, "error");
       await loadLocalPlaylists();
     }
   };
@@ -77,7 +78,7 @@ export function usePlaylists({
         createSyncedPlaylist ? `Created YouTube Music playlist “${title}”.` : `Created local playlist “${title}”.`,
       );
     } catch (error) {
-      setNotice(`Playlist could not be created: ${errorMessage(error)}`);
+      setNotice(`Playlist could not be created: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -96,7 +97,7 @@ export function usePlaylists({
       } else {
         for (const item of items) {
           if (!item.videoId) {
-            setNotice(`“${item.title}” has no source videoId required for a playlist add.`);
+            setNotice(`“${item.title}” has no source videoId required for a playlist add.`, "warning");
             return;
           }
           await invoke("ytm_add_to_playlist", { playlistId, videoId: item.videoId });
@@ -112,7 +113,7 @@ export function usePlaylists({
       setSelectedItems([]);
       setSelectionMode(false);
     } catch (error) {
-      setNotice(`Could not add selected items to playlist: ${errorMessage(error)}`);
+      setNotice(`Could not add selected items to playlist: ${errorMessage(error)}`, "error");
     }
   };
 

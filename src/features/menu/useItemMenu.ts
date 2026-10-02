@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Dispatch, SetStateAction, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { parseLink } from "../../app/links";
 import { errorMessage } from "../../lib/util";
 import { YtItem, SpotifyTrackMatch, LoadState, LibraryItemState } from "../../types";
+import type { SetNotice } from "../../app/notifications";
 
 export type ItemMenuDeps = {
-  setNotice: Dispatch<SetStateAction<string>>;
+  setNotice: SetNotice;
 };
 
 export function useItemMenu({ setNotice }: ItemMenuDeps) {
@@ -71,7 +72,7 @@ export function useItemMenu({ setNotice }: ItemMenuDeps) {
       setYoutubeMatchPreview(null);
       setNotice(`Changed the YouTube version for “${match.name}”.`);
     } catch (error) {
-      setNotice(`YouTube version change failed: ${errorMessage(error)}`);
+      setNotice(`YouTube version change failed: ${errorMessage(error)}`, "error");
     }
   };
 

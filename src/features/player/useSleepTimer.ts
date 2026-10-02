@@ -1,12 +1,13 @@
 import { RefObject, Dispatch, SetStateAction, useState, useRef, useEffect } from "react";
 import { YtItem } from "../../types";
+import type { SetNotice } from "../../app/notifications";
 
 export type SleepTimerDeps = {
   audioRef: RefObject<HTMLAudioElement | null>;
   durationSeconds: number;
   playbackSeconds: number;
   setMenuItem: Dispatch<SetStateAction<YtItem | null>>;
-  setNotice: Dispatch<SetStateAction<string>>;
+  setNotice: SetNotice;
   volume: number;
 };
 

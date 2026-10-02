@@ -5,6 +5,7 @@ import type { ResourceCache } from "../../data/resourceCache";
 import { useResource } from "../../data/useResource";
 import { FRESH_FOR_MS, searchKey } from "../../data/keys";
 import { errorMessage } from "../../lib/util";
+import type { SetNotice } from "../../app/notifications";
 
 const EMPTY_SEARCH: SearchPage = { items: [], continuation: null };
 const SEARCH_FALLBACK = { status: "idle" as const, data: EMPTY_SEARCH };
@@ -18,7 +19,7 @@ export function useSearchData({
   submittedQuery,
 }: {
   cache: ResourceCache;
-  setNotice: (value: string) => void;
+  setNotice: SetNotice;
   submittedQuery: string;
 }) {
   const [search] = useResource<SearchPage>(cache, searchKey(submittedQuery), SEARCH_FALLBACK);
@@ -63,7 +64,7 @@ export function useSearchData({
         return { ...entry, data: { items, continuation: next.continuation } };
       });
     } catch (error) {
-      if (token.isCurrent()) setNotice(`Search continuation failed: ${errorMessage(error)}`);
+      if (token.isCurrent()) setNotice(`Search continuation failed: ${errorMessage(error)}`, "error");
     } finally {
       token.finish();
       setSearchMoreLoading(false);

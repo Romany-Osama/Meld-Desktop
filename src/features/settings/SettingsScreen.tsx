@@ -6,6 +6,8 @@ import { PlaybackCachePanel } from "../../PlaybackCachePanel";
 import { SessionStatus, SpotifyProfile, SpotifySessionStatus } from "../../types";
 import { UpdatePanel } from "../../UpdatePanel";
 import { lyricProviderSettingKeys } from "../lyrics/providers";
+import type { SetNotice } from "../../app/notifications";
+import type { Destructive } from "../../app/destructive";
 
 export type SettingsScreenProps = {
   audioQuality: AudioQuality;
@@ -18,7 +20,8 @@ export type SettingsScreenProps = {
   moveLyricsProvider: (provider: string, direction: -1 | 1) => Promise<void>;
   sessionStatus: SessionStatus;
   setAudioQualitySetting: (value: AudioQuality) => Promise<void>;
-  setNotice: Dispatch<SetStateAction<string>>;
+  setNotice: SetNotice;
+  destructive: Destructive;
   setSetting: (key: string, value: boolean) => Promise<void>;
   setSettingsOpen: Dispatch<SetStateAction<boolean>>;
   setSettingsPage: Dispatch<
@@ -44,6 +47,7 @@ export function SettingsScreen({
   sessionStatus,
   setAudioQualitySetting,
   setNotice,
+  destructive,
   setSetting,
   setSettingsOpen,
   setSettingsPage,
@@ -144,7 +148,7 @@ export function SettingsScreen({
                         setNotice(`Meld Desktop backup created at ${path}.`);
                       } catch (error) {
                         if (!String(error).toLowerCase().includes("cancelled"))
-                          setNotice(`Backup could not be created: ${errorMessage(error)}`);
+                          setNotice(`Backup could not be created: ${errorMessage(error)}`, "error");
                       }
                     }}
                   >
@@ -158,7 +162,7 @@ export function SettingsScreen({
                         setNotice(`Backup restored from ${path}. Restart Meld Desktop to reload the restored library.`);
                       } catch (error) {
                         if (!String(error).toLowerCase().includes("cancelled"))
-                          setNotice(`Backup could not be restored: ${errorMessage(error)}`);
+                          setNotice(`Backup could not be restored: ${errorMessage(error)}`, "error");
                       }
                     }}
                   >
@@ -172,7 +176,7 @@ export function SettingsScreen({
                 </p>
               </div>
             )}
-            {settingsPage === "storage" && <PlaybackCachePanel onNotice={setNotice} />}
+            {settingsPage === "storage" && <PlaybackCachePanel onNotice={setNotice} destructive={destructive} />}
             {settingsPage === "about" && (
               <div className="settings-group">
                 <h3>About Meld Desktop</h3>
@@ -340,15 +344,21 @@ export function SettingsScreen({
                     </label>
                     <button
                       className="secondary-button"
-                      onClick={async () => {
-                        try {
-                          await invoke("search_history_clear");
-                          await loadSearchHistory();
-                          setNotice("Meld search history cleared.");
-                        } catch (error) {
-                          setNotice(`Search history could not be cleared: ${errorMessage(error)}`);
-                        }
-                      }}
+                      onClick={() =>
+                        void destructive({
+                          severity: "permanent",
+                          key: "search-history-clear",
+                          confirm: {
+                            title: "Clear search history?",
+                            message: "Every saved search is removed from Meld.",
+                            confirmLabel: "Clear searches",
+                          },
+                          commit: () => invoke("search_history_clear"),
+                          refresh: loadSearchHistory,
+                          success: "Meld search history cleared.",
+                          failure: "Search history could not be cleared",
+                        })
+                      }
                     >
                       Clear search history
                     </button>
