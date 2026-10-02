@@ -6,15 +6,9 @@ on:
     tags: ["v*"]
   # Dry run from main: builds every asset and uploads them as a workflow artifact without publishing.
   workflow_dispatch:
-  # Changes to the release pipeline itself are exercised end to end (without publishing).
+  # Every pull request reports the required "Release dry run" check. The full build and Windows smoke run only when
+  # the PR touches the release pipeline (RELEASE_PIPELINE_PATHS in scripts/lib/release.mjs); otherwise the gate passes.
   pull_request:
-    paths:
-      - .github/workflows/release.yml
-      - scripts/release-assets.mjs
-      - scripts/lib/release.mjs
-      - scripts/smoke/**
-      - packaging/**
-      - src-tauri/tauri.conf.json
 
 permissions:
   contents: read
@@ -24,8 +18,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  changes:
+    name: Detect release-pipeline changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pipeline: ${{ steps.detect.outputs.pipeline }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then echo "pipeline=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename' > changed-files.txt
+          echo "pipeline=$(node scripts/release-assets.mjs touches-pipeline changed-files.txt)" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build release assets
+    needs: changes
+    if: needs.changes.outputs.pipeline == 'true'
     runs-on: windows-latest
     timeout-minutes: 90
     defaults:
@@ -79,6 +98,9 @@ jobs:
           npm run check:versions
           npm run check:security
           npm run check:ui
+          npm run check:tooling
+          npm run lint
+          npm run format:check
           npm run test:scripts
           npm test
           npm run typecheck
@@ -181,3 +203,21 @@ jobs:
           tag=$(cat release-tag.txt)
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "Meld Desktop ${tag#v}" --notes-file release-notes.md release-assets/*
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+  dry-run:
+    # Required status check on main (R6-075). Always reports, so PRs that do not touch the pipeline are not blocked.
+    name: Release dry run
+    needs: [changes, build, smoke]
+    if: always() && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          PIPELINE: ${{ needs.changes.outputs.pipeline }}
+          BUILD: ${{ needs.build.result }}
+          SMOKE: ${{ needs.smoke.result }}
+        run: node scripts/release-assets.mjs dry-run-verdict

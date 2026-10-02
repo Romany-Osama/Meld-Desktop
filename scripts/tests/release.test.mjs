@@ -9,6 +9,8 @@ import {
   sha256SumsLine,
   spdx,
   thirdPartyNotices,
+  dryRunVerdict,
+  touchesReleasePipeline,
 } from "../lib/release.mjs";
 
 const changelog =
@@ -93,4 +95,28 @@ test("vendored solver sources are declared with SPDX licenses and existing files
   }
   const bom = cycloneDx({ appName: "A", appVersion: "1", crates: [], npmPackages: [], vendored: list, timestamp: "t" });
   assert.ok(bom.components.some((c) => c.name === "meriyah" && c.purl.startsWith("pkg:generic/meriyah@6.1.4")));
+});
+
+test("only release-pipeline files trigger the full dry run on a pull request (R6-075)", () => {
+  assert.equal(touchesReleasePipeline(["src/App.tsx", "docs/plan/PROGRESS.md"]), false);
+  assert.equal(touchesReleasePipeline([".github/workflows/release.yml"]), true);
+  assert.equal(touchesReleasePipeline(["scripts/smoke/windows-smoke.ps1"]), true);
+  assert.equal(touchesReleasePipeline(["packaging/README-portable.txt"]), true);
+  assert.equal(touchesReleasePipeline(["src-tauri/tauri.conf.json"]), true);
+  assert.equal(touchesReleasePipeline(["src-tauri/tauri.conf.json.bak", "packaging-notes.md"]), false);
+  assert.equal(touchesReleasePipeline([]), false);
+});
+
+test("the always-reported dry-run gate passes only when the needed jobs did", () => {
+  const ok = { changes: "success", pipelineTouched: true, build: "success", smoke: "success" };
+  assert.equal(dryRunVerdict(ok).ok, true);
+  assert.equal(dryRunVerdict({ ...ok, pipelineTouched: false, build: "skipped", smoke: "skipped" }).ok, true);
+  assert.equal(dryRunVerdict({ ...ok, build: "failure", smoke: "skipped" }).ok, false);
+  assert.equal(dryRunVerdict({ ...ok, smoke: "cancelled" }).ok, false);
+  assert.equal(dryRunVerdict({ ...ok, changes: "failure", pipelineTouched: false }).ok, false);
+  assert.equal(
+    dryRunVerdict({ ...ok, build: "skipped", smoke: "skipped" }).ok,
+    false,
+    "touched but skipped is a failure",
+  );
 });
