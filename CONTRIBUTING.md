@@ -39,6 +39,10 @@ cargo test --locked
 
 Line endings are LF everywhere except PowerShell scripts (CRLF), enforced by `.gitattributes` and `npm run check:tooling`. The one-off Prettier reformat is listed in `.git-blame-ignore-revs`; run `git config blame.ignoreRevsFile .git-blame-ignore-revs` to skip it in `git blame`.
 
+## Required checks on `main`
+
+A PR can merge only when `Lint and format`, `Dependency audit`, `Windows build and tests` and `Release dry run` pass on a branch that is up to date with `main`; this applies to admins too. The full release build and Windows smoke run only for PRs that touch the release pipeline. The list lives in `scripts/lib/branch-protection.mjs`; check or apply it with `GH_TOKEN=… node scripts/branch-protection.mjs [--apply]` (needs an admin token). See DECISIONS D-022.
+
 ## Versioning
 
 `package.json` is the single version source. Bump with `node scripts/bump-version.mjs <x.y.z>` — it updates `package.json`, `package-lock.json`, `Cargo.toml` and `Cargo.lock`; `tauri.conf.json` reads `../package.json`. See `CHANGELOG.md` and `docs/plan/MASTER-PLAN.md` §7.
