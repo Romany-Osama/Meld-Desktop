@@ -5,6 +5,16 @@ import "./App.css";
 import { UpdatePanel, useStartupUpdateCheck } from "./UpdatePanel";
 import { PlaybackCachePanel } from "./PlaybackCachePanel";
 import { FINAL_STREAM_ERROR, isLocalStream, recoveryNotice, recoveryReason } from "./lib/streamRecovery";
+import { type AudioQuality, parseAudioQuality, streamRequest } from "./lib/audioQuality";
+import { appendNewPlayable, arrangeQueue, moveItem, removeAt, shuffleAfterCurrent } from "./lib/queue";
+import {
+  playbackEffectKey,
+  resumeStartPosition,
+  shouldAutoplay,
+  startOccurrence,
+  withRefreshedPayload,
+} from "./lib/playbackSession";
+import { restoreQueue, restoreSession } from "./lib/persistentPlayback";
 
 type NavKey = "home" | "search_input" | "library" | "history" | "stats";
 type ItemKind = "song" | "episode" | "album" | "playlist" | "artist" | "podcast";
@@ -166,7 +176,6 @@ type PersistentPlayback = {
 type LibrarySongFilter = "liked" | "library" | "uploaded" | "downloaded" | "top";
 type LibrarySort = "created" | "name" | "artist" | "playtime";
 type PlaylistSort = "created" | "name" | "count";
-type AudioQuality = "auto" | "high" | "low";
 
 const navigation: { key: NavKey; label: string; icon: string }[] = [
   { key: "home", label: "Home", icon: "⌂" },
@@ -1261,8 +1270,8 @@ function App() {
         setSleepTimerMinutes(Math.min(120, Math.max(5, Math.round(storedSleepTimerDefault / 5) * 5)));
       }
       const storedAudioQuality = entries.find((entry) => entry.key === "audioQuality")?.value;
-      if (storedAudioQuality === "auto" || storedAudioQuality === "high" || storedAudioQuality === "low")
-        setAudioQuality(storedAudioQuality);
+      const parsedAudioQuality = parseAudioQuality(storedAudioQuality);
+      if (parsedAudioQuality) setAudioQuality(parsedAudioQuality);
       const storedVolume = Number(entries.find((entry) => entry.key === "playerVolume")?.value);
       if (Number.isFinite(storedVolume) && storedVolume >= 0 && storedVolume <= 1) setVolume(storedVolume);
       const rememberShuffle = entries.find((entry) => entry.key === "rememberShuffleAndRepeat")?.value !== "false";
@@ -1414,28 +1423,11 @@ function App() {
     currentIndex: number,
     originalQueueSize: number,
     shuffleActive = shuffleEnabled,
-  ) => {
-    if (!shuffleActive || items.length < 2 || currentIndex < 0 || currentIndex >= items.length)
-      return { items, index: currentIndex };
-    const shuffle = (values: number[]) => {
-      for (let index = values.length - 1; index > 0; index -= 1) {
-        const swapIndex = Math.floor(Math.random() * (index + 1));
-        [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
-      }
-      return values;
-    };
-    const original = shuffle(
-      [...Array(Math.min(originalQueueSize, items.length)).keys()].filter((index) => index !== currentIndex),
-    );
-    const added = shuffle(
-      [...Array(items.length).keys()].filter((index) => index >= originalQueueSize && index !== currentIndex),
-    );
-    const order =
-      settings.shufflePlaylistFirst && original.length > 0 && added.length > 0
-        ? [currentIndex, ...original, ...added]
-        : [currentIndex, ...shuffle([...Array(items.length).keys()].filter((index) => index !== currentIndex))];
-    return { items: order.map((index) => items[index]), index: 0 };
-  };
+  ) =>
+    arrangeQueue(items, currentIndex, originalQueueSize, {
+      shuffle: shuffleActive,
+      playlistFirst: !!settings.shufflePlaylistFirst,
+    });
 
   const maybeAutoDownloadOnLike = (item: YtItem, liked: boolean) => {
     if (settings.autoDownloadOnLike !== true || !liked || !item.videoId || item.localPath) return;
@@ -1455,17 +1447,8 @@ function App() {
     }
   };
 
-  const shuffleQueueAfterCurrent = (items: YtItem[], currentId: string | null) => {
-    if (!shuffleEnabled || !currentId) return items;
-    const currentPosition = items.findIndex((item) => item.id === currentId);
-    if (currentPosition < 0 || currentPosition >= items.length - 1) return items;
-    const tail = items.slice(currentPosition + 1);
-    for (let index = tail.length - 1; index > 0; index -= 1) {
-      const swapIndex = Math.floor(Math.random() * (index + 1));
-      [tail[index], tail[swapIndex]] = [tail[swapIndex], tail[index]];
-    }
-    return [...items.slice(0, currentPosition + 1), ...tail];
-  };
+  const shuffleQueueAfterCurrent = (items: YtItem[], currentId: string | null) =>
+    shuffleEnabled ? shuffleAfterCurrent(items, currentId) : items;
 
   const toggleSelectedItem = (item: YtItem) => {
     setSelectedItems((current) =>
@@ -2694,35 +2677,23 @@ function App() {
   };
 
   const removeQueueItem = (index: number) => {
-    if (index < 0 || index >= queueItems.length) return;
-    const nextItems = queueItems.filter((_, itemIndex) => itemIndex !== index);
-    if (nextItems.length === 0) {
+    const removed = removeAt(queueItems, queueIndex, index);
+    if (!removed) return;
+    if (removed.items.length === 0) {
       clearQueue();
       return;
     }
-    const wasCurrent = index === queueIndex;
-    const nextIndex =
-      queueIndex > index ? queueIndex - 1 : wasCurrent ? Math.min(index, nextItems.length - 1) : queueIndex;
-    setQueueItems(nextItems);
-    setQueueIndex(nextIndex);
-    if (wasCurrent) void playItem(nextItems[nextIndex], nextItems, nextIndex, null, autoMixEnabledRef.current);
+    setQueueItems(removed.items);
+    setQueueIndex(removed.index);
+    if (removed.wasCurrent)
+      void playItem(removed.items[removed.index], removed.items, removed.index, null, autoMixEnabledRef.current);
   };
 
   const moveQueueItem = (from: number, to: number) => {
-    if (from < 0 || to < 0 || from >= queueItems.length || to >= queueItems.length || from === to) return;
-    const nextItems = [...queueItems];
-    const [moved] = nextItems.splice(from, 1);
-    nextItems.splice(to, 0, moved);
-    const nextIndex =
-      queueIndex === from
-        ? to
-        : queueIndex > from && queueIndex <= to
-          ? queueIndex - 1
-          : queueIndex >= to && queueIndex < from
-            ? queueIndex + 1
-            : queueIndex;
-    setQueueItems(nextItems);
-    setQueueIndex(nextIndex);
+    const moved = moveItem(queueItems, queueIndex, from, to);
+    if (!moved) return;
+    setQueueItems(moved.items);
+    setQueueIndex(moved.index);
   };
 
   const flushPlaytime = async () => {
@@ -2785,19 +2756,17 @@ function App() {
       setQueueContinuation(null);
       setQueueContinuationKind(null);
       setQueueIndex(sourceIndex);
-      setPlayer({
-        item,
-        payload: {
-          videoId: item.id,
-          title: item.title,
-          artist: item.subtitle,
-          streamUrl: convertFileSrc(item.localPath),
-          mimeType: "audio/*",
-          bitrate: 0,
-          expiresInSeconds: 0,
-        },
-        session: ++playbackSessionRef.current,
+      const occurrence = startOccurrence(playbackSessionRef.current, item, {
+        videoId: item.id,
+        title: item.title,
+        artist: item.subtitle,
+        streamUrl: convertFileSrc(item.localPath),
+        mimeType: "audio/*",
+        bitrate: 0,
+        expiresInSeconds: 0,
       });
+      playbackSessionRef.current = occurrence.session;
+      setPlayer(occurrence);
       void beginPlaytime(item);
       return;
     }
@@ -2860,14 +2829,12 @@ function App() {
     setQueueContinuationKind(nextContinuation ? sourceContinuationKind : null);
     setQueueIndex(nextIndex);
     try {
-      const payload = await invoke<PlayerPayload>("ytm_player", {
-        videoId: item.videoId,
-        playlistId: item.playlistId ?? item.playPlaylistId ?? null,
-        audioQuality,
-      });
+      const payload = await invoke<PlayerPayload>("ytm_player", streamRequest(item, audioQuality));
       if (requestId !== playRequestIdRef.current) return;
       streamResolvedAtRef.current = Date.now();
-      setPlayer({ item, payload, session: ++playbackSessionRef.current });
+      const occurrence = startOccurrence(playbackSessionRef.current, item, payload);
+      playbackSessionRef.current = occurrence.session;
+      setPlayer(occurrence);
       if (keepInlineLyrics) void openLyrics(item);
       void beginPlaytime(item);
     } catch (error) {
@@ -2894,21 +2861,16 @@ function App() {
     resumePlayingRef.current = false;
     const start = () => {
       if (activePlayerIdRef.current !== playerId) return;
-      if (
-        wasResuming &&
-        resumePosition !== null &&
-        Number.isFinite(resumePosition) &&
-        resumePosition > 0 &&
-        (!Number.isFinite(audio.duration) || resumePosition < audio.duration - 1)
-      ) {
+      const startAt = resumeStartPosition(wasResuming, resumePosition, audio.duration);
+      if (startAt !== null) {
         try {
-          audio.currentTime = resumePosition;
-          setPlaybackSeconds(resumePosition);
+          audio.currentTime = startAt;
+          setPlaybackSeconds(startAt);
         } catch {
           /* Metadata may still be unavailable. */
         }
       }
-      if (!wasResuming || resumePlaying) {
+      if (shouldAutoplay(wasResuming, resumePlaying)) {
         void audio
           .play()
           .then(() => {
@@ -2927,10 +2889,10 @@ function App() {
     if (audio.readyState >= 1) start();
     else audio.addEventListener("loadedmetadata", start, { once: true });
     return () => audio.removeEventListener("loadedmetadata", start);
-    // Keyed on the playback session, not the whole player object: recoverStream() and metadata refreshes update
-    // `player` for the SAME session and must not reset playback to 0 (PLAY-031, PLAY-035).
+    // Keyed on the occurrence (song id + session), not the whole player object: recoverStream() and metadata
+    // refreshes update `player` for the SAME occurrence and must not reset playback to 0 (PLAY-031, PLAY-035).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player?.session]);
+  }, [playbackEffectKey(player)]);
 
   // Stream URLs from ytm_player expire (expiresInSeconds) - a song paused longer than that, or one whose
   // queue neighbor sits paused for a long time, hits a dead URL when playback resumes. onError below tries
@@ -2959,15 +2921,11 @@ function App() {
         await invoke("ytm_report_stream_failure", { videoId: item.videoId, streamUrl: failedUrl }).catch(
           () => undefined,
         );
-      const payload = await invoke<PlayerPayload>("ytm_player", {
-        videoId: item.videoId,
-        playlistId: item.playlistId ?? item.playPlaylistId ?? null,
-        audioQuality,
-      });
+      const payload = await invoke<PlayerPayload>("ytm_player", streamRequest(item, audioQuality));
       // The user may have started another track while the fresh URL was resolving (last click wins).
       if (playbackSessionRef.current !== session) return false;
       streamResolvedAtRef.current = Date.now();
-      setPlayer((current) => (current && current.session === session ? { ...current, payload } : current));
+      setPlayer((current) => withRefreshedPayload(current, session, payload));
       if (audioRef.current) {
         audioRef.current.src = mediaSrc(payload.streamUrl) ?? payload.streamUrl;
         audioRef.current.currentTime = resumeAt;
@@ -3008,70 +2966,28 @@ function App() {
     persistentSessionLoadedRef.current = true;
     persistentSessionSkipWriteRef.current = true;
     try {
-      const stored = JSON.parse(localStorage.getItem("meld:persistentQueue") ?? "null") as {
-        items?: YtItem[];
-        index?: number;
-        continuation?: string | null;
-        continuationKind?: "next" | "playlist" | null;
-      } | null;
-      const storedSession = JSON.parse(
-        localStorage.getItem("meld:persistentPlayback") ?? "null",
-      ) as PersistentPlayback | null;
-      const items = Array.isArray(stored?.items)
-        ? stored.items.filter(
-            (item) =>
-              item && typeof item.id === "string" && typeof item.title === "string" && typeof item.kind === "string",
-          )
-        : [];
-      if (items.length > 0) {
-        setQueueItems(items);
-        setQueueIndex(typeof stored?.index === "number" ? Math.min(Math.max(stored.index, -1), items.length - 1) : -1);
-        const storedContinuation = typeof stored?.continuation === "string" ? stored.continuation : null;
-        setQueueContinuation(storedContinuation);
-        setQueueContinuationKind(
-          storedContinuation ? (stored?.continuationKind === "playlist" ? "playlist" : "next") : null,
-        );
+      const queue = restoreQueue<YtItem>(JSON.parse(localStorage.getItem("meld:persistentQueue") ?? "null"));
+      const items = queue?.items ?? [];
+      if (queue) {
+        setQueueItems(queue.items);
+        setQueueIndex(queue.index);
+        setQueueContinuation(queue.continuation);
+        setQueueContinuationKind(queue.continuationKind);
         setNotice(`Restored ${items.length} item${items.length === 1 ? "" : "s"} in the Meld queue.`);
       }
-      const sessionItems =
-        Array.isArray(storedSession?.items) && storedSession.items.length > 0
-          ? storedSession.items.filter(
-              (item) =>
-                item && typeof item.id === "string" && typeof item.title === "string" && typeof item.kind === "string",
-            )
-          : items;
-      const sessionIndex =
-        typeof storedSession?.index === "number"
-          ? Math.min(Math.max(Math.trunc(storedSession.index), 0), Math.max(sessionItems.length - 1, 0))
-          : -1;
-      const sessionItem =
-        storedSession?.item && typeof storedSession.item.id === "string"
-          ? storedSession.item
-          : sessionIndex >= 0
-            ? sessionItems[sessionIndex]
-            : null;
-      if (sessionItem && sessionItems.length > 0) {
-        const resolvedIndex = Math.max(
-          0,
-          sessionItems.findIndex((item) => item.id === sessionItem.id),
-        );
-        const sessionContinuation = typeof storedSession?.continuation === "string" ? storedSession.continuation : null;
-        const sessionKind = sessionContinuation
-          ? storedSession?.continuationKind === "playlist"
-            ? "playlist"
-            : "next"
-          : "next";
-        setQueueItems(sessionItems);
-        setQueueIndex(resolvedIndex);
-        setQueueContinuation(sessionContinuation);
-        setQueueContinuationKind(sessionContinuation ? sessionKind : null);
-        resumePositionRef.current =
-          typeof storedSession?.position === "number" && Number.isFinite(storedSession.position)
-            ? Math.max(0, storedSession.position)
-            : null;
-        resumePlayingRef.current = storedSession?.playing !== false;
+      const session = restoreSession<YtItem>(
+        JSON.parse(localStorage.getItem("meld:persistentPlayback") ?? "null"),
+        items,
+      );
+      if (session) {
+        setQueueItems(session.items);
+        setQueueIndex(session.index);
+        setQueueContinuation(session.continuation);
+        setQueueContinuationKind(session.continuationKind);
+        resumePositionRef.current = session.position;
+        resumePlayingRef.current = session.playing;
         resumePendingRef.current = true;
-        void playItem(sessionItem, sessionItems, resolvedIndex, sessionContinuation, false, sessionKind);
+        void playItem(session.item, session.items, session.index, session.continuation, false, session.kind);
       }
     } catch {
       localStorage.removeItem("meld:persistentQueue");
@@ -3466,9 +3382,7 @@ function App() {
             : await invoke<QueuePage>("ytm_queue_continuation", { continuation });
         const pageItems: YtItem[] =
           continuationKind === "playlist" ? (next as PlaylistContinuationPage).songs : (next as QueuePage).items;
-        const additions = pageItems.filter(
-          (value) => value.videoId && !items.some((current) => current.id === value.id),
-        );
+        const additions = appendNewPlayable(items, pageItems);
         items = [...items, ...additions];
         continuation = next.continuation ?? null;
         setQueueItems(items);
