@@ -1,8 +1,8 @@
 // Security regression guards for tauri.conf.json and capabilities (TR-C3, S5-013, S5-037).
 export const ALLOWED_ASSET_SCOPE = [
-  "$APPDATA/Meld Desktop/downloads/**",
-  "$APPDATA/Meld Desktop/player-cache/**",
-  "$APPDATA/Meld Desktop/artwork/**",
+  "$DATA/Meld Desktop/downloads/**",
+  "$DATA/Meld Desktop/player-cache/**",
+  "$DATA/Meld Desktop/artwork/**",
 ];
 
 export function parseCsp(csp) {

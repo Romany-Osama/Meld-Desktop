@@ -24,9 +24,9 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$APPDATA/Meld Desktop/downloads/**",
-          "$APPDATA/Meld Desktop/player-cache/**",
-          "$APPDATA/Meld Desktop/artwork/**"
+          "$DATA/Meld Desktop/downloads/**",
+          "$DATA/Meld Desktop/player-cache/**",
+          "$DATA/Meld Desktop/artwork/**"
         ]
       }
     }
