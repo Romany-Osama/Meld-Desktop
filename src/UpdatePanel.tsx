@@ -1,3 +1,4 @@
+import { errorMessage } from "./lib/util";
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
@@ -12,7 +13,7 @@ import {
   type UpdateSummary,
 } from "./lib/updates";
 
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+const message = (error: unknown) => errorMessage(error);
 
 /** Settings → About: current version, manual update check and explicit install (plan §7.6). */
 export function UpdatePanel() {

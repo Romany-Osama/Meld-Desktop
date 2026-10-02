@@ -8,10 +8,10 @@ pub async fn spotify_playlist_tracks(
     playlist_id: String,
     offset: Option<i64>,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<SpotifyTrackPage, String> {
+) -> IpcResult<SpotifyTrackPage> {
     let playlist_id = playlist_id.trim();
     if playlist_id.is_empty() {
-        return Err("Spotify playlist id is required".to_owned());
+        return Err(IpcError::from("Spotify playlist id is required".to_owned()));
     }
     let token = spotify_token(&state)?;
     let offset = offset.unwrap_or(0).max(0);
@@ -35,11 +35,13 @@ pub async fn spotify_remove_from_playlist(
     playlist_id: String,
     uid: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let playlist_id = playlist_id.trim();
     let uid = uid.trim();
     if playlist_id.is_empty() || uid.is_empty() {
-        return Err("Spotify playlist or track uid is empty".to_owned());
+        return Err(IpcError::from(
+            "Spotify playlist or track uid is empty".to_owned(),
+        ));
     }
     let token = spotify_token(&state)?;
     let variables =
@@ -54,7 +56,7 @@ pub async fn spotify_move_in_playlist(
     uids: Vec<String>,
     before_uid: Option<String>,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let playlist_id = playlist_id.trim();
     let uids: Vec<String> = uids
         .into_iter()
@@ -62,7 +64,9 @@ pub async fn spotify_move_in_playlist(
         .filter(|value| !value.is_empty())
         .collect();
     if playlist_id.is_empty() || uids.is_empty() {
-        return Err("Spotify playlist id and item uid are required".to_owned());
+        return Err(IpcError::from(
+            "Spotify playlist id and item uid are required".to_owned(),
+        ));
     }
     let token = spotify_token(&state)?;
     let variables = json!({ "playlistUri": format!("spotify:playlist:{playlist_id}"), "uids": uids, "newPosition": { "moveType": if before_uid.is_some() { "BEFORE_UID" } else { "BOTTOM_OF_PLAYLIST" }, "fromUid": before_uid } });
@@ -75,11 +79,13 @@ pub async fn spotify_rename_playlist(
     playlist_id: String,
     new_name: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let playlist_id = playlist_id.trim();
     let new_name = new_name.trim();
     if playlist_id.is_empty() || new_name.is_empty() {
-        return Err("Spotify playlist id and name are required".to_owned());
+        return Err(IpcError::from(
+            "Spotify playlist id and name are required".to_owned(),
+        ));
     }
     let token = spotify_token(&state)?;
     let variables =
@@ -91,7 +97,7 @@ pub async fn spotify_rename_playlist(
 #[tauri::command]
 pub async fn spotify_liked_tracks(
     state: tauri::State<'_, RuntimeState>,
-) -> Result<SpotifyLikedTracks, String> {
+) -> IpcResult<SpotifyLikedTracks> {
     let token = spotify_token(&state)?;
     let response = spotify_graphql_post(
         "fetchLibraryTracks",
@@ -106,7 +112,7 @@ pub async fn spotify_liked_tracks(
 pub async fn spotify_library_node(
     folder_uri: Option<String>,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<SpotifyLibraryNode, String> {
+) -> IpcResult<SpotifyLibraryNode> {
     let token = spotify_token(&state)?;
     let variables = json!({ "filters": ["Playlists"], "order": Value::Null, "textFilter": "", "features": ["LIKED_SONGS", "YOUR_EPISODES_V2", "PRERELEASES", "EVENTS"], "limit": 100, "offset": 0, "flatten": false, "expandedFolders": [], "folderUri": folder_uri, "includeFoldersWhenFlattening": true });
     let response = spotify_graphql_post("libraryV3", variables, &token).await?;
@@ -116,7 +122,7 @@ pub async fn spotify_library_node(
 #[tauri::command]
 pub async fn spotify_playlists(
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Vec<SpotifyPlaylistItem>, String> {
+) -> IpcResult<Vec<SpotifyPlaylistItem>> {
     let token = spotify_token(&state)?;
     let variables = json!({ "filters": ["Playlists"], "order": Value::Null, "textFilter": "", "features": ["LIKED_SONGS", "YOUR_EPISODES_V2", "PRERELEASES", "EVENTS"], "limit": 50, "offset": 0, "flatten": true, "expandedFolders": [], "folderUri": Value::Null, "includeFoldersWhenFlattening": false });
     let response = spotify_graphql_post("libraryV3", variables, &token).await?;
@@ -127,18 +133,19 @@ pub async fn spotify_playlists(
 pub fn spotify_match_for_youtube(
     youtube_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Option<SpotifyTrackMatch>, String> {
+) -> IpcResult<Option<SpotifyTrackMatch>> {
     let db = state
         .db
         .lock()
         .map_err(|_| "database state poisoned".to_owned())?;
-    db.query_row(
-        "SELECT spotify_id, title, artist FROM spotify_match WHERE youtube_id = ?1 LIMIT 1",
-        params![youtube_id.trim()],
-        spotify_match_from_row,
-    )
-    .optional()
-    .map_err(|error| format!("Spotify match lookup failed: {error}"))
+    Ok(db
+        .query_row(
+            "SELECT spotify_id, title, artist FROM spotify_match WHERE youtube_id = ?1 LIMIT 1",
+            params![youtube_id.trim()],
+            spotify_match_from_row,
+        )
+        .optional()
+        .map_err(|error| format!("Spotify match lookup failed: {error}"))?)
 }
 
 #[tauri::command]
@@ -148,11 +155,13 @@ pub fn spotify_override_youtube(
     title: String,
     artist: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let spotify_id = spotify_id.trim();
     let youtube_id = youtube_id.trim();
     if spotify_id.is_empty() || youtube_id.is_empty() {
-        return Err("Spotify or YouTube match ID is empty".to_owned());
+        return Err(IpcError::from(
+            "Spotify or YouTube match ID is empty".to_owned(),
+        ));
     }
     let db = state
         .db
@@ -169,7 +178,7 @@ pub async fn spotify_resolve_youtube(
     artist: String,
     duration_sec: i64,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Option<SpotifyTrackMatch>, String> {
+) -> IpcResult<Option<SpotifyTrackMatch>> {
     if let Some(youtube_id) = youtube_id
         .as_deref()
         .map(str::trim)
@@ -240,11 +249,13 @@ pub async fn spotify_add_to_playlist(
     playlist_id: String,
     track_uri: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let playlist_id = playlist_id.trim();
     let track_uri = track_uri.trim();
     if playlist_id.is_empty() || track_uri.is_empty() {
-        return Err("Spotify playlist or track URI is empty".to_owned());
+        return Err(IpcError::from(
+            "Spotify playlist or track URI is empty".to_owned(),
+        ));
     }
     let token = spotify_token(&state)?;
     let variables = json!({ "playlistUri": format!("spotify:playlist:{playlist_id}"), "playlistItemUris": [track_uri], "newPosition": { "moveType": "BOTTOM_OF_PLAYLIST", "fromUid": Value::Null } });
@@ -253,9 +264,7 @@ pub async fn spotify_add_to_playlist(
 }
 
 #[tauri::command]
-pub async fn spotify_profile(
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<SpotifyProfile, String> {
+pub async fn spotify_profile(state: tauri::State<'_, RuntimeState>) -> IpcResult<SpotifyProfile> {
     let token = spotify_token(&state)?;
     let response = spotify_graphql_post("profileAttributes", json!({}), &token).await?;
     let profile = response
@@ -272,7 +281,7 @@ pub async fn spotify_profile(
         .unwrap_or(uri)
         .to_owned();
     if id.is_empty() {
-        return Err("Spotify profile id was empty".to_owned());
+        return Err(IpcError::from("Spotify profile id was empty".to_owned()));
     }
     Ok(SpotifyProfile {
         id,

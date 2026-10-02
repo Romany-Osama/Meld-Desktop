@@ -39,6 +39,7 @@ const VISITOR_PREFIX: &str = "Cg";
 
 mod download_resume;
 mod ipc;
+pub(crate) use ipc::error::{IpcError, IpcResult};
 mod player_cache;
 mod resolver;
 mod secrets;

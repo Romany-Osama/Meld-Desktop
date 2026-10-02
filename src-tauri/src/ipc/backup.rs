@@ -4,12 +4,12 @@
 use crate::*;
 
 #[tauri::command]
-pub fn backup_create(state: tauri::State<'_, RuntimeState>) -> Result<String, String> {
+pub fn backup_create(state: tauri::State<'_, RuntimeState>) -> IpcResult<String> {
     let output_path = FileDialog::new()
         .set_title("Create Meld Desktop backup")
         .add_filter("Meld Desktop backup", &["backup"])
         .save_file()
-        .ok_or_else(|| "Backup cancelled".to_owned())?;
+        .ok_or_else(|| IpcError::cancelled("Backup cancelled"))?;
     let temp_db = output_path.with_extension("sqlite3.part");
     let _ = fs::remove_file(&temp_db);
     let db = state
@@ -72,16 +72,16 @@ pub fn backup_create(state: tauri::State<'_, RuntimeState>) -> Result<String, St
         Ok(())
     })();
     let _ = fs::remove_file(&temp_db);
-    result.map(|_| output_path.to_string_lossy().to_string())
+    Ok(result.map(|_| output_path.to_string_lossy().to_string())?)
 }
 
 #[tauri::command]
-pub fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, String> {
+pub fn backup_restore(state: tauri::State<'_, RuntimeState>) -> IpcResult<String> {
     let input_path = FileDialog::new()
         .set_title("Restore Meld Desktop backup")
         .add_filter("Meld Desktop backup", &["backup"])
         .pick_file()
-        .ok_or_else(|| "Restore cancelled".to_owned())?;
+        .ok_or_else(|| IpcError::cancelled("Restore cancelled"))?;
     let file =
         fs::File::open(&input_path).map_err(|error| format!("backup open failed: {error}"))?;
     let temp_db = database_path().with_extension("restore.part");
@@ -95,21 +95,25 @@ pub fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, S
         Ok(bytes) => bytes,
         Err(error) => {
             let _ = fs::remove_file(&temp_db);
-            return Err(error);
+            return Err(IpcError::from(error));
         }
     };
     let imported_settings: Vec<SettingEntry> = match serde_json::from_slice(&settings_bytes) {
         Ok(value) => value,
         Err(error) => {
             let _ = fs::remove_file(&temp_db);
-            return Err(format!("backup settings are invalid: {error}"));
+            return Err(IpcError::from(format!(
+                "backup settings are invalid: {error}"
+            )));
         }
     };
     let candidate = match Connection::open(&temp_db) {
         Ok(connection) => connection,
         Err(error) => {
             let _ = fs::remove_file(&temp_db);
-            return Err(format!("backup database validation failed: {error}"));
+            return Err(IpcError::from(format!(
+                "backup database validation failed: {error}"
+            )));
         }
     };
     let integrity: String =
@@ -118,23 +122,27 @@ pub fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, S
             Err(error) => {
                 drop(candidate);
                 let _ = fs::remove_file(&temp_db);
-                return Err(format!("backup database integrity check failed: {error}"));
+                return Err(IpcError::from(format!(
+                    "backup database integrity check failed: {error}"
+                )));
             }
         };
     if integrity != "ok" {
         drop(candidate);
         let _ = fs::remove_file(&temp_db);
-        return Err(format!(
+        return Err(IpcError::from(format!(
             "backup database integrity check failed: {integrity}"
-        ));
+        )));
     }
     let required_tables: i64 = match candidate.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('songs', 'settings', 'history', 'downloads')", [], |row| row.get(0)) {
         Ok(value) => value,
-        Err(error) => { drop(candidate); let _ = fs::remove_file(&temp_db); return Err(format!("backup database schema validation failed: {error}")); }
+        Err(error) => { drop(candidate); let _ = fs::remove_file(&temp_db); return Err(IpcError::from(format!("backup database schema validation failed: {error}"))); }
     };
     if required_tables != 4 {
         let _ = fs::remove_file(&temp_db);
-        return Err("backup database is missing required Meld tables".to_owned());
+        return Err(IpcError::from(
+            "backup database is missing required Meld tables".to_owned(),
+        ));
     }
     candidate
         .execute("DELETE FROM settings", [])
@@ -171,7 +179,9 @@ pub fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, S
         if let Ok(old_connection) = Connection::open(&db_path) {
             *db = old_connection;
         }
-        return Err(format!("database restore swap failed: {error}"));
+        return Err(IpcError::from(format!(
+            "database restore swap failed: {error}"
+        )));
     }
     match Connection::open(&db_path) {
         Ok(restored) => {
@@ -185,7 +195,9 @@ pub fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, S
             if let Ok(old_connection) = Connection::open(&db_path) {
                 *db = old_connection;
             }
-            Err(format!("restored database reopen failed: {error}"))
+            Err(IpcError::from(format!(
+                "restored database reopen failed: {error}"
+            )))
         }
     }
 }

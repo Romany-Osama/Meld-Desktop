@@ -1,3 +1,4 @@
+import { isIpcErrorCode } from "../../lib/ipcError";
 import { invoke } from "@tauri-apps/api/core";
 import { Dispatch, SetStateAction } from "react";
 import { AudioQuality } from "../../lib/audioQuality";
@@ -147,7 +148,7 @@ export function SettingsScreen({
                         const path = await invoke<string>("backup_create");
                         setNotice(`Meld Desktop backup created at ${path}.`);
                       } catch (error) {
-                        if (!String(error).toLowerCase().includes("cancelled"))
+                        if (!isIpcErrorCode(error, "cancelled"))
                           setNotice(`Backup could not be created: ${errorMessage(error)}`, "error");
                       }
                     }}
@@ -161,7 +162,7 @@ export function SettingsScreen({
                         const path = await invoke<string>("backup_restore");
                         setNotice(`Backup restored from ${path}. Restart Meld Desktop to reload the restored library.`);
                       } catch (error) {
-                        if (!String(error).toLowerCase().includes("cancelled"))
+                        if (!isIpcErrorCode(error, "cancelled"))
                           setNotice(`Backup could not be restored: ${errorMessage(error)}`, "error");
                       }
                     }}

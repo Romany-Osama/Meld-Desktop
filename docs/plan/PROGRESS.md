@@ -73,7 +73,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] S5-004 (P0) Adopt Tauri v2 app-command permissions — build.rs AppManifest + permissions/<owner>.toml sets granted to main (D-041); checks.test.mjs (permission sets), cargo build validates grants
 - [x] S5-005 (P0) Keep remote login windows IPC-less — and test it — check:security rejects capabilities for login windows, window patterns, remote URLs (D-041); checks.test.mjs (login windows)
 - [ ] S5-006 (P0) Typed, validated IPC payloads
-- [ ] S5-007 (P0) Structured error type instead of `Result<_, String>`
+- [x] S5-007 (P0) Structured error type instead of `Result<_, String>` — `IpcError {code,message,retryable,detail?}` for every command, raw SQL/paths/URLs/bodies stripped (D-042); ipc::error::tests::*, ipc::error::contract::no_command_returns_a_string_error, src/lib/ipcError.test.ts
 - [ ] S5-008 (P0) Cap response sizes and list lengths returned over IPC
 - [ ] S5-009 (P0) Cancellation for long commands
 - [ ] S5-010 (P0) Event channel contract

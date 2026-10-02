@@ -102,7 +102,7 @@ export function usePlayer({ audioQuality, setNotice, settings }: PlayerDeps) {
       }
       return true;
     } catch (error) {
-      if (playbackSessionRef.current === session) setNotice(String(error));
+      if (playbackSessionRef.current === session) setNotice(errorMessage(error));
       return false;
     }
   };

@@ -20,6 +20,7 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 - Back and Escape close one layer at a time, topmost first: a dialog, then the menu, Settings, the lyrics, queue or expanded player, then an open page. Escape used to close Settings before a dialog opened from it.
 
 ### Fixed
+- Error messages no longer show database text, file paths or web addresses from YouTube Music, Spotify or the lyrics providers; they say what failed.
 - A song that is in a playlist, the queue or the history more than once can be selected one copy at a time; ticking one copy no longer ticks the other. Playing the second copy from your library or an album page starts at that copy.
 - If one page or panel fails to display (for example after an unexpected answer from YouTube Music), only that part shows an error with Try again and Close. The rest of Meld keeps working and the song keeps playing.
 - Opening a page while another one was still loading (or searching again before the first results arrived) could replace the new page with the old one when its answer came in late. Only the page you opened last is shown now.

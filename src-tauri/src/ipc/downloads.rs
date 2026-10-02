@@ -7,7 +7,7 @@ use crate::*;
 pub fn download_info(
     song_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Option<DownloadInfo>, String> {
+) -> IpcResult<Option<DownloadInfo>> {
     let id = song_id.trim();
     let db = state
         .db
@@ -26,16 +26,16 @@ pub fn download_info(
             params![retained_bytes, "download interrupted; retry to resume", id],
         )
         .map_err(|error| format!("download recovery state failed: {error}"))?;
-        return read_download_info(&db, id);
+        return Ok(read_download_info(&db, id)?);
     }
     Ok(Some(info))
 }
 
 #[tauri::command]
-pub fn download_cancel(song_id: String) -> Result<(), String> {
+pub fn download_cancel(song_id: String) -> IpcResult<()> {
     let id = song_id.trim();
     if id.is_empty() {
-        return Err("download song id is empty".to_owned());
+        return Err(IpcError::from("download song id is empty".to_owned()));
     }
     let map = download_cancel_map()
         .lock()
@@ -44,25 +44,26 @@ pub fn download_cancel(song_id: String) -> Result<(), String> {
         flag.store(true, Ordering::Release);
         Ok(())
     } else {
-        Err("download is not currently active".to_owned())
+        Err(IpcError::from(
+            "download is not currently active".to_owned(),
+        ))
     }
 }
 
 #[tauri::command]
-pub fn download_remove(
-    song_id: String,
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+pub fn download_remove(song_id: String, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let id = song_id.trim();
     if id.is_empty() {
-        return Err("download song id is empty".to_owned());
+        return Err(IpcError::from("download song id is empty".to_owned()));
     }
     if download_cancel_map()
         .lock()
         .map_err(|_| "download cancellation state poisoned".to_owned())?
         .contains_key(id)
     {
-        return Err("cancel the active download before removing its cache".to_owned());
+        return Err(IpcError::from(
+            "cancel the active download before removing its cache".to_owned(),
+        ));
     }
     let db = state
         .db
@@ -93,7 +94,7 @@ pub async fn download_start(
     audio_quality: Option<String>,
     app: tauri::AppHandle,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let video_id = item
         .video_id
         .as_deref()
@@ -102,7 +103,9 @@ pub async fn download_start(
         .ok_or_else(|| "offline download requires a source videoId".to_owned())?;
     let song_id = item.id.trim().to_owned();
     if song_id.is_empty() {
-        return Err("offline download song id is empty".to_owned());
+        return Err(IpcError::from(
+            "offline download song id is empty".to_owned(),
+        ));
     }
     let cancel = Arc::new(AtomicBool::new(false));
     {
@@ -110,7 +113,7 @@ pub async fn download_start(
             .lock()
             .map_err(|_| "download cancellation state poisoned".to_owned())?;
         if map.contains_key(&song_id) {
-            return Err("download is already active".to_owned());
+            return Err(IpcError::from("download is already active".to_owned()));
         }
         map.insert(song_id.clone(), cancel.clone());
     }
@@ -268,11 +271,11 @@ pub async fn download_start(
             emit_download(&app, &info);
         }
     }
-    result.map(|_| ())
+    Ok(result.map(|_| ())?)
 }
 
 #[tauri::command]
-pub fn library_downloads(state: tauri::State<'_, RuntimeState>) -> Result<Vec<LocalItem>, String> {
+pub fn library_downloads(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<LocalItem>> {
     let db = state
         .db
         .lock()

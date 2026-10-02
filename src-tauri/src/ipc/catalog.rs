@@ -7,10 +7,10 @@ use crate::*;
 pub async fn ytm_refetch(
     video_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Option<YtItem>, String> {
+) -> IpcResult<Option<YtItem>> {
     let id = video_id.trim();
     if id.is_empty() {
-        return Err("refetch video id is empty".to_owned());
+        return Err(IpcError::from("refetch video id is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let session = auth_session(&state)?;
@@ -24,10 +24,10 @@ pub async fn ytm_browse(
     browse_id: String,
     params: Option<String>,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<DetailPage, String> {
+) -> IpcResult<DetailPage> {
     let id = browse_id.trim();
     if id.is_empty() {
-        return Err("browse id is empty".to_owned());
+        return Err(IpcError::from("browse id is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let request_session = browse_session(&state, auth_session(&state)?)?;
@@ -47,11 +47,13 @@ pub async fn ytm_browse_continuation(
     browse_id: String,
     continuation: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<DetailPage, String> {
+) -> IpcResult<DetailPage> {
     let id = browse_id.trim();
     let token = continuation.trim();
     if id.is_empty() || token.is_empty() {
-        return Err("browse continuation arguments are empty".to_owned());
+        return Err(IpcError::from(
+            "browse continuation arguments are empty".to_owned(),
+        ));
     }
     let visitor_data = visitor(&state).await?;
     let request_session = browse_session(&state, auth_session(&state)?)?;
@@ -67,14 +69,16 @@ pub async fn ytm_detail(
     kind: String,
     browse_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<DetailPage, String> {
+) -> IpcResult<DetailPage> {
     let id = browse_id.trim();
     if id.is_empty() {
-        return Err("detail browse id is empty".to_owned());
+        return Err(IpcError::from("detail browse id is empty".to_owned()));
     }
     let normalized_kind = kind.trim().to_lowercase();
     if !matches!(normalized_kind.as_str(), "album" | "artist" | "podcast") {
-        return Err(format!("unsupported detail kind: {normalized_kind}"));
+        return Err(IpcError::invalid(format!(
+            "unsupported detail kind: {normalized_kind}"
+        )));
     }
     let cached_podcast_detail = if normalized_kind == "podcast" {
         let db = state
@@ -93,8 +97,8 @@ pub async fn ytm_detail(
     };
     if auth_session(&state)?.is_none() {
         if let Some(serialized) = cached_podcast_detail.as_deref() {
-            return serde_json::from_str(serialized)
-                .map_err(|error| format!("cached podcast detail decode failed: {error}"));
+            return Ok(serde_json::from_str(serialized)
+                .map_err(|error| format!("cached podcast detail decode failed: {error}"))?);
         }
     }
     let visitor_data = visitor(&state).await?;
@@ -104,9 +108,9 @@ pub async fn ytm_detail(
         Ok(response) => response,
         Err(error) => {
             if let Some(serialized) = cached_podcast_detail.as_deref() {
-                return serde_json::from_str(serialized).map_err(|decode_error| format!("cached podcast detail decode failed after network error: {decode_error}"));
+                return Ok(serde_json::from_str(serialized).map_err(|decode_error| format!("cached podcast detail decode failed after network error: {decode_error}"))?);
             }
-            return Err(error);
+            return Err(IpcError::from(error));
         }
     };
     let page = parse_detail(&response, &normalized_kind, Some(id));
@@ -124,7 +128,7 @@ pub async fn ytm_detail(
 }
 
 #[tauri::command]
-pub async fn ytm_home(state: tauri::State<'_, RuntimeState>) -> Result<HomePage, String> {
+pub async fn ytm_home(state: tauri::State<'_, RuntimeState>) -> IpcResult<HomePage> {
     let visitor_data = visitor(&state).await?;
     let request_session = browse_session(&state, auth_session(&state)?)?;
     let data_sync_id = request_session
@@ -132,7 +136,7 @@ pub async fn ytm_home(state: tauri::State<'_, RuntimeState>) -> Result<HomePage,
         .map(|value| value.data_sync_id.as_str());
     let response = match post("browse", json!({ "context": context(&visitor_data, request_session.is_some(), data_sync_id), "browseId": "FEmusic_home" }), request_session.as_ref()).await {
         Ok(response) => response,
-        Err(error) => return cached_home(&state).map_or(Err(error), |mut page| { page.continuation = None; Ok(page) }),
+        Err(error) => return cached_home(&state).map_or(Err(IpcError::from(error)), |mut page| { page.continuation = None; Ok(page) }),
     };
     let page = parse_home(&response);
     if !page.sections.is_empty() {
@@ -145,10 +149,10 @@ pub async fn ytm_home(state: tauri::State<'_, RuntimeState>) -> Result<HomePage,
 pub async fn ytm_home_continuation(
     continuation: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<HomePage, String> {
+) -> IpcResult<HomePage> {
     let token = continuation.trim();
     if token.is_empty() {
-        return Err("home continuation is empty".to_owned());
+        return Err(IpcError::from("home continuation is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let request_session = browse_session(&state, auth_session(&state)?)?;
@@ -163,7 +167,7 @@ pub async fn ytm_home_continuation(
 pub async fn ytm_search(
     query: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<SearchPage, String> {
+) -> IpcResult<SearchPage> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
         return Ok(SearchPage {
@@ -184,10 +188,10 @@ pub async fn ytm_search(
 pub async fn ytm_search_continuation(
     continuation: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<SearchPage, String> {
+) -> IpcResult<SearchPage> {
     let token = continuation.trim();
     if token.is_empty() {
-        return Err("search continuation is empty".to_owned());
+        return Err(IpcError::from("search continuation is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let request_session = browse_session(&state, auth_session(&state)?)?;
@@ -209,14 +213,16 @@ pub async fn ytm_detail_continuation(
     kind: String,
     continuation: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<DetailPage, String> {
+) -> IpcResult<DetailPage> {
     let normalized_kind = kind.trim().to_lowercase();
     if !matches!(normalized_kind.as_str(), "album" | "artist" | "podcast") {
-        return Err(format!("unsupported detail kind: {normalized_kind}"));
+        return Err(IpcError::invalid(format!(
+            "unsupported detail kind: {normalized_kind}"
+        )));
     }
     let token = continuation.trim();
     if token.is_empty() {
-        return Err("detail continuation is empty".to_owned());
+        return Err(IpcError::from("detail continuation is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let request_session = browse_session(&state, auth_session(&state)?)?;
@@ -232,13 +238,15 @@ pub fn ytm_podcast_cache_detail_page(
     browse_id: String,
     page: DetailPage,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let id = browse_id.trim();
     if id.is_empty() {
-        return Err("podcast browse id is empty".to_owned());
+        return Err(IpcError::from("podcast browse id is empty".to_owned()));
     }
     if page.kind != "podcast" {
-        return Err("podcast detail cache received a non-podcast page".to_owned());
+        return Err(IpcError::from(
+            "podcast detail cache received a non-podcast page".to_owned(),
+        ));
     }
     let db = state
         .db
@@ -292,10 +300,10 @@ pub fn ytm_podcast_cache_detail_page(
 pub async fn ytm_playlist(
     playlist_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<PlaylistPage, String> {
+) -> IpcResult<PlaylistPage> {
     let id = playlist_id.trim_start_matches("VL").to_owned();
     if id.is_empty() {
-        return Err("playlist id is empty".to_owned());
+        return Err(IpcError::from("playlist id is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let request_session = browse_session(&state, auth_session(&state)?)?;
@@ -310,10 +318,10 @@ pub async fn ytm_playlist(
 pub async fn ytm_playlist_continuation(
     continuation: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<PlaylistContinuationPage, String> {
+) -> IpcResult<PlaylistContinuationPage> {
     let token = continuation.trim();
     if token.is_empty() {
-        return Err("playlist continuation is empty".to_owned());
+        return Err(IpcError::from("playlist continuation is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let request_session = browse_session(&state, auth_session(&state)?)?;
@@ -325,10 +333,7 @@ pub async fn ytm_playlist_continuation(
 }
 
 #[tauri::command]
-pub fn search_history_add(
-    query: String,
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+pub fn search_history_add(query: String, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let query = query.trim();
     if query.is_empty() {
         return Ok(());
@@ -342,7 +347,7 @@ pub fn search_history_add(
 }
 
 #[tauri::command]
-pub fn search_history_items(state: tauri::State<'_, RuntimeState>) -> Result<Vec<String>, String> {
+pub fn search_history_items(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<String>> {
     let db = state
         .db
         .lock()
@@ -353,12 +358,13 @@ pub fn search_history_items(state: tauri::State<'_, RuntimeState>) -> Result<Vec
     let rows = statement
         .query_map([], |row| row.get::<_, String>(0))
         .map_err(|error| format!("search history rows failed: {error}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("search history row decode failed: {error}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("search history row decode failed: {error}"))?)
 }
 
 #[tauri::command]
-pub fn search_history_clear(state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+pub fn search_history_clear(state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let db = state
         .db
         .lock()

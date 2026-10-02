@@ -1,3 +1,4 @@
+import { ipcErrorMessage } from "./ipcError";
 // Fisher–Yates. `array.sort(() => Math.random() - 0.5)` is biased and engine-dependent.
 export function shuffled<T>(values: readonly T[]): T[] {
   const result = [...values];
@@ -8,7 +9,7 @@ export function shuffled<T>(values: readonly T[]): T[] {
   return result;
 }
 export function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  return ipcErrorMessage(error);
 }
 export function noticeSummary(message: string) {
   if (message.length <= 180) return message;

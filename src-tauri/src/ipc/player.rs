@@ -11,7 +11,7 @@ pub fn ytm_report_stream_failure(
     video_id: String,
     stream_url: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let id = video_id.trim();
     if id.is_empty() {
         return Ok(());
@@ -47,7 +47,7 @@ pub fn ytm_report_stream_failure(
 
 /// Copyable, redacted report of the last resolution for a song (PLAY-006).
 #[tauri::command]
-pub fn ytm_playback_report(video_id: String) -> Result<String, String> {
+pub fn ytm_playback_report(video_id: String) -> IpcResult<String> {
     let id = video_id.trim();
     let attempts = resolver_attempts()
         .lock()
@@ -82,7 +82,7 @@ pub async fn ytm_next(
     params: Option<String>,
     continuation: Option<String>,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<QueuePage, String> {
+) -> IpcResult<QueuePage> {
     let visitor_data = visitor(&state).await?;
     let session = auth_session(&state)?;
     let data_sync_id = session.as_ref().map(|value| value.data_sync_id.as_str());
@@ -95,10 +95,10 @@ pub async fn ytm_next(
 pub async fn ytm_related(
     browse_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Vec<YtItem>, String> {
+) -> IpcResult<Vec<YtItem>> {
     let id = browse_id.trim();
     if id.is_empty() {
-        return Err("related browse id is empty".to_owned());
+        return Err(IpcError::from("related browse id is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let request_session = browse_session(&state, auth_session(&state)?)?;
@@ -113,10 +113,10 @@ pub async fn ytm_related(
 pub async fn ytm_queue_continuation(
     continuation: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<QueuePage, String> {
+) -> IpcResult<QueuePage> {
     let token = continuation.trim();
     if token.is_empty() {
-        return Err("queue continuation is empty".to_owned());
+        return Err(IpcError::from("queue continuation is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let session = auth_session(&state)?;
@@ -126,9 +126,7 @@ pub async fn ytm_queue_continuation(
 }
 
 #[tauri::command]
-pub fn player_cache_usage(
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<PlayerCacheUsage, String> {
+pub fn player_cache_usage(state: tauri::State<'_, RuntimeState>) -> IpcResult<PlayerCacheUsage> {
     let db = state
         .db
         .lock()
@@ -149,7 +147,7 @@ pub fn player_cache_usage(
 
 /// Empties the playback cache. Offline downloads are not touched.
 #[tauri::command]
-pub fn player_cache_clear(state: tauri::State<'_, RuntimeState>) -> Result<usize, String> {
+pub fn player_cache_clear(state: tauri::State<'_, RuntimeState>) -> IpcResult<usize> {
     if let Ok(jobs) = player_cache_jobs().lock() {
         jobs.cancel_all();
     }
@@ -184,7 +182,7 @@ pub fn player_cache_clear(state: tauri::State<'_, RuntimeState>) -> Result<usize
 }
 
 #[tauri::command]
-pub fn library_player_cache(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
+pub fn library_player_cache(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state
         .db
         .lock()
@@ -237,10 +235,10 @@ pub fn library_player_cache(state: tauri::State<'_, RuntimeState>) -> Result<Vec
 pub fn player_cache_remove(
     song_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let id = song_id.trim();
     if id.is_empty() {
-        return Err("player cache song id is empty".to_owned());
+        return Err(IpcError::from("player cache song id is empty".to_owned()));
     }
     if let Ok(jobs) = player_cache_jobs().lock() {
         jobs.cancel(id);
@@ -276,10 +274,10 @@ pub async fn ytm_player(
     playlist_id: Option<String>,
     audio_quality: Option<String>,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<PlayerPayload, String> {
+) -> IpcResult<PlayerPayload> {
     let id = video_id.trim().to_owned();
     if id.is_empty() {
-        return Err("video id is empty".to_owned());
+        return Err(IpcError::from("video id is empty".to_owned()));
     }
     let requested_quality = normalize_audio_quality(audio_quality.as_deref());
     player_cache_blocked()
