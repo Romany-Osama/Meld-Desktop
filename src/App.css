@@ -3018,3 +3018,27 @@ h2 {
 .lyrics-provider-picker select:disabled {
   opacity: 0.65;
 }
+
+/* U4-014: fallback of a region whose render failed. */
+.error-boundary {
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid rgba(255, 107, 107, 0.4);
+  border-radius: 12px;
+  background: rgba(255, 107, 107, 0.08);
+}
+.error-boundary p {
+  margin: 0;
+  color: var(--muted, #aaa);
+  overflow-wrap: anywhere;
+}
+.error-boundary-page {
+  margin: 24px;
+}
+.error-boundary-bar {
+  grid-auto-flow: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+}

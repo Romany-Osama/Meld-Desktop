@@ -19,6 +19,7 @@ import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
 import {
   checkCapabilities,
   checkDestructivePolicy,
+  checkErrorBoundaries,
   checkFeatureModules,
   checkScreenSplit,
   checkServerState,
@@ -297,4 +298,17 @@ test("ui: removals follow one destructive-action policy (U4-012, U4-013)", () =>
   assert.deepEqual(checkDestructivePolicy(direct, ""), ["remove_history does not go through destructive()"]);
   const missing = (path) => (path === "src/app/destructive.ts" ? null : read(path));
   assert.deepEqual(checkDestructivePolicy(missing, ""), ["src/app/destructive.ts is missing"]);
+});
+
+test("ui: pages, overlays and player controls have their own error boundary (U4-014)", () => {
+  const read = (path) => (existsSync(path) ? readFileSync(path, "utf8") : null);
+  assert.deepEqual(checkErrorBoundaries(read), []);
+  const unwrapped = (path) =>
+    path === "src/App.tsx" ? read(path).replace(/<ErrorBoundary[^\n]*\n\s*(<DetailScreen\n)/, "$1") : read(path);
+  assert.deepEqual(checkErrorBoundaries(unwrapped), ["DetailScreen is not inside an <ErrorBoundary>"]);
+  const audioInBar = (path) =>
+    path === "src/features/player/PlayerBar.tsx" ? read(path) + "\n// <audio ref={audioRef} />" : read(path);
+  assert.deepEqual(checkErrorBoundaries(audioInBar), [
+    "PlayerBar.tsx renders <audio>; keep it in PlayerAudio outside the boundary",
+  ]);
 });

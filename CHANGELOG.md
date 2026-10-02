@@ -19,6 +19,7 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 - Back and Escape close one layer at a time, topmost first: a dialog, then the menu, Settings, the lyrics, queue or expanded player, then an open page. Escape used to close Settings before a dialog opened from it.
 
 ### Fixed
+- If one page or panel fails to display (for example after an unexpected answer from YouTube Music), only that part shows an error with Try again and Close. The rest of Meld keeps working and the song keeps playing.
 - Opening a page while another one was still loading (or searching again before the first results arrived) could replace the new page with the old one when its answer came in late. Only the page you opened last is shown now.
 - Pasting a YouTube Music playlist link (`music.youtube.com/playlist?list=…`) opened an empty album instead of the playlist, and an album's `/browse/` link was opened as an artist. Both now open the right page, and Back returns to the page you pasted the link on.
 - **Offline downloads failed with "audio cache response failed: HTTP status client error (403 Forbidden)".** YouTube's media servers now serve only the first ~1 MB of stream links from the ANDROID_VR 1.65 client (the first one Meld tries) and refuse the rest. Playing could start and recover; downloading the whole file could not. Meld now checks every new stream link by reading a small piece past the first megabyte. A refused link is skipped straight away for another YouTube source, and that source is tried last for the next 30 minutes.

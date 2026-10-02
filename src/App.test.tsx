@@ -343,3 +343,25 @@ it("asks before a permanent removal and reports the result in the notification c
   expect(screen.getByText("Meld playback history cleared.")).toBeTruthy();
   expect(screen.queryByRole("alert")).toBeNull();
 });
+
+it("keeps the shell working when a page fails to render (U4-014)", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  // A malformed answer makes the album page throw while rendering.
+  overrides.ytm_detail = async () => ({
+    kind: "album",
+    title: "Broken",
+    subtitle: "",
+    items: null,
+    browseId: "MPREb_x",
+  });
+  const { default: App } = await import("./App");
+  const { container } = await act(async () => render(<App />));
+  const click = async (element: HTMLElement) => act(async () => void fireEvent.click(element));
+  await click(screen.getByTitle("Open album"));
+  expect(screen.getByRole("alert").textContent).toContain("This page could not be shown.");
+  // The rest of the app still answers: closing the broken page and navigating work.
+  await click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.queryByRole("alert")).toBeNull();
+  await click(screen.getByRole("button", { name: /Library/ }));
+  expect(container.querySelector("main")?.getAttribute("data-route")).toBe("/library/mix");
+});
