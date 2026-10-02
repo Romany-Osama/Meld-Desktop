@@ -116,3 +116,29 @@ export function thirdPartyNotices({ appName, packages }) {
   }
   return `${lines.filter((line, index, all) => !(line === "" && all[index - 1] === "")).join("\n")}\n`;
 }
+
+/** Files whose change must run the full release dry run on a pull request (build, smoke, publish skipped). */
+export const RELEASE_PIPELINE_PATHS = [
+  ".github/workflows/release.yml",
+  "scripts/release-assets.mjs",
+  "scripts/lib/release.mjs",
+  "scripts/smoke/",
+  "packaging/",
+  "src-tauri/tauri.conf.json",
+];
+
+/** True when a pull request touching `files` must run the release dry run. Entries ending in "/" are folders. */
+export function touchesReleasePipeline(files) {
+  return files.some((file) =>
+    RELEASE_PIPELINE_PATHS.some((path) => (path.endsWith("/") ? file.startsWith(path) : file === path)),
+  );
+}
+
+/** Verdict of the always-reported "Release dry run" gate from the results of its needed jobs. */
+export function dryRunVerdict({ changes, pipelineTouched, build, smoke }) {
+  if (changes !== "success") return { ok: false, reason: `change detection ${changes}` };
+  if (!pipelineTouched) return { ok: true, reason: "release pipeline untouched; dry run not needed" };
+  if (build !== "success") return { ok: false, reason: `release build ${build}` };
+  if (smoke !== "success") return { ok: false, reason: `Windows smoke ${smoke}` };
+  return { ok: true, reason: "release build and Windows smoke passed" };
+}

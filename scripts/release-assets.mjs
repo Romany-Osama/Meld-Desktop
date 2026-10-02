@@ -5,6 +5,8 @@
 //   metadata <out-dir>                          sbom.cdx.json + THIRD-PARTY-NOTICES.txt (Windows target)
 //   latest <version> <base-url> <setup> <setup.sig> <portable> <portable.sig> <notes> <out>
 //   sums <out> <file>...                        SHA256SUMS.txt
+//   touches-pipeline <file-list>                "true"/"false": does a PR's changed-file list need the dry run
+//   dry-run-verdict                             gate result from CHANGES, PIPELINE, BUILD, SMOKE env values
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -12,9 +14,11 @@ import {
   changelogSection,
   checkTag,
   cycloneDx,
+  dryRunVerdict,
   latestJson,
   sha256SumsLine,
   thirdPartyNotices,
+  touchesReleasePipeline,
 } from "./lib/release.mjs";
 
 const [command, ...args] = process.argv.slice(2);
@@ -83,6 +87,23 @@ function vendoredPackages() {
 }
 
 switch (command) {
+  case "touches-pipeline": {
+    const files = readFileSync(args[0], "utf8").split(/\r?\n/).filter(Boolean);
+    console.log(String(touchesReleasePipeline(files)));
+    break;
+  }
+  case "dry-run-verdict": {
+    const env = process.env;
+    const verdict = dryRunVerdict({
+      changes: env.CHANGES,
+      pipelineTouched: env.PIPELINE === "true",
+      build: env.BUILD,
+      smoke: env.SMOKE,
+    });
+    console.log(`release dry run: ${verdict.reason}`);
+    if (!verdict.ok) process.exit(1);
+    break;
+  }
   case "notes": {
     writeFileSync(args[1], `${changelogSection(readFileSync("CHANGELOG.md", "utf8"), args[0])}\n`);
     break;

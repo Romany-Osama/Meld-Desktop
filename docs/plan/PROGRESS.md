@@ -37,8 +37,8 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [ ] S5-097 (P0) Branch protection — partial: main requires CI; review requirement and signed tags pending (solo maintainer)
 - [x] R6-073 (P0) Add GitHub Actions CI — .github/workflows/ci.yml
 - [x] R6-074 (P0) Windows runner as the primary target — windows-latest job
-- [ ] R6-075 (P0) Required checks
-- [ ] TR-H9 (P0) No automated release gate or CI
+- [x] R6-075 (P0) Required checks — main protected by 4 required checks, strict, admins included (D-022); branch-protection.test.mjs, release.test.mjs (dry-run gate)
+- [x] TR-H9 (P0) No automated release gate or CI — CI jobs + always-reported Release dry run on every PR (D-022); release.test.mjs
 - [x] TR-M11 (P0) Public issue tracking disabled — Issues enabled, templates, SECURITY.md
 - [x] TR-M12 (P0) Release binaries committed into Git history — checks.test.mjs tracked files
 - [x] TR-M13 (P0) Release naming/version history inconsistent — CHANGELOG corrected; D-008 open for tags
