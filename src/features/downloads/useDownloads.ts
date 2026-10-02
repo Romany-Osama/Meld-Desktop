@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { listenEvent } from "../../lib/events";
 import { useCallback, useEffect, useState } from "react";
 import { AudioQuality } from "../../lib/audioQuality";
@@ -32,7 +32,7 @@ export function useDownloads({ audioQuality, setNotice, settings, destructive }:
   const showMenuDownload = useCallback((songId: string | null) => {
     setMenuDownload(null);
     if (!songId) return;
-    void invoke<DownloadInfo | null>("download_info", { songId })
+    void call("download_info", { songId })
       .then(setMenuDownload)
       .catch(() => setMenuDownload(null));
   }, []);
@@ -51,14 +51,14 @@ export function useDownloads({ audioQuality, setNotice, settings, destructive }:
       lyricsCached: false,
     });
     setNotice(`Downloading “${item.title}” for offline playback…`);
-    void invoke("download_start", { item, audioQuality })
+    void call("download_start", { item, audioQuality })
       .then(() => setNotice(`Offline download ready for “${item.title}”.`, "success"))
       .catch((error) => setNotice(`Offline download failed: ${errorMessage(error)}`, "error"));
   };
 
   const cancelDownload = async (item: YtItem) => {
     try {
-      await invoke("download_cancel", { songId: item.id });
+      await call("download_cancel", { songId: item.id });
       setNotice(`Cancelling offline download for “${item.title}”…`);
     } catch (error) {
       setNotice(`Could not cancel download: ${errorMessage(error)}`, "error");
@@ -76,7 +76,7 @@ export function useDownloads({ audioQuality, setNotice, settings, destructive }:
         confirmLabel: "Remove download",
       },
       commit: async () => {
-        await invoke("download_remove", { songId: item.id });
+        await call("download_remove", { songId: item.id });
         setMenuDownload((current) => (current?.songId === item.id ? null : current));
       },
       success: `Removed offline download for “${item.title}”.`,
@@ -86,7 +86,7 @@ export function useDownloads({ audioQuality, setNotice, settings, destructive }:
   /** Starts downloads for every item with a remote source; returns how many were started. */
   const downloadItems = (items: YtItem[]) => {
     const downloadable = items.filter((item) => item.videoId && !item.localPath);
-    downloadable.forEach((item) => void invoke("download_start", { item }).catch(() => undefined));
+    downloadable.forEach((item) => void call("download_start", { item }).catch(() => undefined));
     setNotice(
       downloadable.length > 0
         ? `Started offline download for ${downloadable.length} selected item${downloadable.length === 1 ? "" : "s"}.`
@@ -107,7 +107,7 @@ export function useDownloads({ audioQuality, setNotice, settings, destructive }:
         confirmLabel: "Remove downloads",
       },
       commit: async () => {
-        for (const item of items) await invoke("download_remove", { songId: item.id });
+        for (const item of items) await call("download_remove", { songId: item.id });
       },
       success: `Removed offline download for ${count}.`,
       failure: "Selected offline download removal failed",
@@ -117,7 +117,7 @@ export function useDownloads({ audioQuality, setNotice, settings, destructive }:
 
   const maybeAutoDownloadOnLike = (item: YtItem, liked: boolean) => {
     if (settings.autoDownloadOnLike !== true || !liked || !item.videoId || item.localPath) return;
-    void invoke("download_start", { item, audioQuality }).catch(() => undefined);
+    void call("download_start", { item, audioQuality }).catch(() => undefined);
   };
 
   return {

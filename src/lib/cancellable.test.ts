@@ -17,7 +17,7 @@ describe("invokeCancellable", () => {
       command === "request_cancel" ? Promise.resolve(true) : new Promise((done) => (resolve = done)),
     );
     const controller = new AbortController();
-    const pending = invokeCancellable<string>("ytm_search", { query: "x" }, controller.signal);
+    const pending = invokeCancellable("ytm_search", { query: "x" }, controller.signal);
     const [, args] = invoke.mock.calls[0] as [string, { query: string; requestId: string }];
     expect(args.query).toBe("x");
     expect(args.requestId).toMatch(/^[A-Za-z0-9_-]+$/);
@@ -37,10 +37,10 @@ describe("invokeCancellable", () => {
 
   it("calls plainly without a signal and stops listening after completion", async () => {
     invoke.mockResolvedValue("ok");
-    await expect(invokeCancellable("fetch_lyrics", { title: "t" })).resolves.toBe("ok");
-    expect(invoke).toHaveBeenCalledWith("fetch_lyrics", { title: "t" });
+    await expect(invokeCancellable("fetch_lyrics", { title: "t", artist: "a", duration: -1 })).resolves.toBe("ok");
+    expect(invoke).toHaveBeenCalledWith("fetch_lyrics", { title: "t", artist: "a", duration: -1 });
     const controller = new AbortController();
-    await invokeCancellable("fetch_lyrics", { title: "t" }, controller.signal);
+    await invokeCancellable("fetch_lyrics", { title: "t", artist: "a", duration: -1 }, controller.signal);
     controller.abort();
     expect(invoke).not.toHaveBeenCalledWith("request_cancel", expect.anything());
   });

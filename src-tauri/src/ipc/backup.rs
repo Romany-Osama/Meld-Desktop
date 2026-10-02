@@ -4,6 +4,7 @@
 use crate::*;
 
 #[tauri::command]
+#[specta::specta]
 pub fn backup_create(state: tauri::State<'_, RuntimeState>) -> IpcResult<String> {
     let output_path = FileDialog::new()
         .set_title("Create Meld Desktop backup")
@@ -76,6 +77,7 @@ pub fn backup_create(state: tauri::State<'_, RuntimeState>) -> IpcResult<String>
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn backup_restore(state: tauri::State<'_, RuntimeState>) -> IpcResult<String> {
     let input_path = FileDialog::new()
         .set_title("Restore Meld Desktop backup")

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { useState, useEffect } from "react";
 import { parseLink } from "../../app/links";
 import { errorMessage } from "../../lib/util";
@@ -41,7 +41,7 @@ export function useItemMenu({ setNotice }: ItemMenuDeps) {
     }
     let activeRequest = true;
     setYoutubeMatchPreview({ status: "loading", data: null });
-    void invoke<YtItem | null>("ytm_refetch", { videoId: parsed.videoId })
+    void call("ytm_refetch", { videoId: parsed.videoId })
       .then((item) => {
         if (!activeRequest) return;
         setYoutubeMatchPreview(
@@ -62,7 +62,7 @@ export function useItemMenu({ setNotice }: ItemMenuDeps) {
     if (!match || !preview?.videoId) return;
     try {
       const artist = preview.artists.map((value) => value.name).join(", ") || preview.subtitle || "";
-      await invoke("spotify_override_youtube", {
+      await call("spotify_override_youtube", {
         spotifyId: match.id,
         youtubeId: preview.videoId,
         title: preview.title,

@@ -4,6 +4,7 @@
 use crate::*;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_lyrics(
     title: Text,
     artist: Text,
@@ -47,6 +48,7 @@ async fn fetch_lyrics_body(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_lyrics_fresh(
     title: Text,
     artist: Text,
@@ -90,6 +92,7 @@ async fn fetch_lyrics_fresh_body(
 }
 
 #[tauri::command]
+#[specta::specta]
 #[allow(clippy::too_many_arguments)] // Tauri maps named JS arguments; a struct would change the IPC shape
 pub async fn fetch_lyrics_from_provider(
     title: Text,

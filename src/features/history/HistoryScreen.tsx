@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { Dispatch, SetStateAction } from "react";
 import { InlineLikeButton } from "../../components/InlineLikeButton";
 import { ItemCard } from "../../components/ItemCard";
@@ -113,7 +113,7 @@ export function HistoryScreen({
                         message: "Every song in Meld's playback history is removed. Stats lose these plays too.",
                         confirmLabel: "Clear history",
                       },
-                      commit: () => invoke("history_clear"),
+                      commit: () => call("history_clear"),
                       refresh: loadHistory,
                       success: "Meld playback history cleared.",
                       failure: "History could not be cleared",

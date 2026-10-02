@@ -25,9 +25,9 @@ export function checkUiInvariants(appSource) {
   return problems;
 }
 
-/** Commands registered in generate_handler![...] of lib.rs. */
+/** Commands registered in collect_commands![...] (S5-011; formerly generate_handler!) of lib.rs. */
 export function registeredCommands(libSource) {
-  const match = libSource.match(/generate_handler!\[([^\]]*)\]/);
+  const match = libSource.match(/(?:generate_handler|collect_commands)!\[([^\]]*)\]/);
   return match
     ? match[1]
         .split(",")

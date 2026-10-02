@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import type { RemoteHistoryPage, StatsPayload, YtItem } from "../../types";
 import type { StatsPeriod } from "../../app/routes";
 import type { ResourceCache } from "../../data/resourceCache";
@@ -33,7 +33,7 @@ export function useHistoryData({
   const [stats] = useResource<StatsPayload>(cache, statsKey(statsPeriod), STATS_FALLBACK);
 
   const loadHistory = async () => {
-    await cache.load(historyKey("local"), () => invoke<YtItem[]>("history_items"), { scope: "history", empty: [] });
+    await cache.load(historyKey("local"), () => call("history_items"), { scope: "history", empty: [] });
   };
 
   const loadRemoteHistory = async () => {
@@ -45,14 +45,14 @@ export function useHistoryData({
       });
       return;
     }
-    await cache.load(historyKey("remote"), () => invoke<RemoteHistoryPage>("ytm_history"), {
+    await cache.load(historyKey("remote"), () => call("ytm_history"), {
       scope: "history",
       empty: { sections: [] },
     });
   };
 
   const loadStats = async (period: StatsPeriod = statsPeriod) => {
-    await cache.load(statsKey(period), () => invoke<StatsPayload>("library_stats", { period }), {
+    await cache.load<StatsPayload>(statsKey(period), () => call("library_stats", { period }), {
       scope: "stats",
       empty: emptyStats(period),
     });

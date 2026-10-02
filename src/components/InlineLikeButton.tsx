@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/ipc";
 import type { AudioQuality } from "../lib/audioQuality";
-import type { LibraryItemState, SessionStatus, YtItem } from "../types";
+import type { YtItem } from "../types";
 
 export function InlineLikeButton({
   item,
@@ -17,7 +17,7 @@ export function InlineLikeButton({
 
   useEffect(() => {
     let active = true;
-    void invoke<LibraryItemState>("library_item_state", { id: item.id })
+    void call("library_item_state", { id: item.id })
       .then((state) => {
         if (active) setLiked(state.liked);
       })
@@ -32,14 +32,14 @@ export function InlineLikeButton({
     setBusy(true);
     try {
       const nextLiked = !liked;
-      await invoke("library_toggle_liked", { item, liked: nextLiked });
+      await call("library_toggle_liked", { item, liked: nextLiked });
       setLiked(nextLiked);
       if (autoDownloadOnLike && nextLiked && item.videoId)
-        void invoke("download_start", { item, audioQuality }).catch(() => undefined);
+        void call("download_start", { item, audioQuality }).catch(() => undefined);
       if (item.videoId) {
         try {
-          const session = await invoke<SessionStatus>("session_status");
-          if (session.authenticated) await invoke("ytm_toggle_like", { videoId: item.videoId, liked: nextLiked, item });
+          const session = await call("session_status");
+          if (session.authenticated) await call("ytm_toggle_like", { videoId: item.videoId, liked: nextLiked, item });
         } catch {
           // Meld keeps the local favorite when the optional signed-in sync is unavailable.
         }

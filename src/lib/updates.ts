@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./ipc";
 
 export type UpdateSummary = {
   version: string;
@@ -32,6 +32,6 @@ export function formatProgress(progress: UpdateProgress | null): string {
   return `${mb(progress.downloaded)} MB`;
 }
 
-export const checkForUpdate = () => invoke<UpdateSummary | null>("app_update_check");
-export const installUpdate = () => invoke<void>("app_update_install");
-export const openReleasesPage = () => invoke<void>("app_open_releases_page");
+export const checkForUpdate = () => call("app_update_check");
+export const installUpdate = () => call("app_update_install");
+export const openReleasesPage = () => call("app_open_releases_page");

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { useState, useRef, useMemo, useEffect, RefObject } from "react";
 import { errorMessage } from "../../lib/util";
 import { invokeCancellable } from "../../lib/cancellable";
@@ -37,7 +37,7 @@ export function useLyrics({ setNotice, settings }: LyricsDeps) {
     const previous = lyricsProviderOrder;
     setLyricsProviderOrder(nextOrder);
     try {
-      await invoke("settings_set", { key: "lyricsProviderOrder", value: nextOrder.join(",") });
+      await call("settings_set", { key: "lyricsProviderOrder", value: nextOrder.join(",") });
     } catch (error) {
       setLyricsProviderOrder(previous);
       setNotice(`Lyrics provider order could not be saved: ${errorMessage(error)}`, "error");
@@ -73,7 +73,7 @@ export function useLyrics({ setNotice, settings }: LyricsDeps) {
         id: item.videoId ?? item.id,
         ...(provider === "auto" ? {} : { provider }),
       };
-      const data = await invokeCancellable<LyricsPayload>(command, args, request.signal);
+      const data = await invokeCancellable(command, args, request.signal);
       if (request.signal.aborted) return;
       setLyricsProviderSelection(data.provider);
       setLyrics({ status: "ready", data });

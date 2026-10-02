@@ -15,7 +15,7 @@ pub const RELEASES_URL: &str = "https://github.com/Romany-Osama/Meld-Desktop/rel
 /// Number of pre-update database backups kept.
 pub const KEEP_PRE_UPDATE_BACKUPS: usize = 3;
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSummary {
     pub version: String,
@@ -26,7 +26,7 @@ pub struct UpdateSummary {
     pub portable: bool,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct UpdateProgress {
     downloaded: u64,
@@ -87,6 +87,7 @@ pub fn prune_pre_update_backups(backups_dir: &Path, keep: usize) -> Result<(), S
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn app_update_check(app: AppHandle) -> crate::IpcResult<Option<UpdateSummary>> {
     let updater = app
         .updater()
@@ -107,6 +108,7 @@ pub async fn app_update_check(app: AppHandle) -> crate::IpcResult<Option<UpdateS
 /// Downloads the signed update, verifies it (the plugin rejects a bad signature), backs up the database and
 /// starts the installer, which closes and restarts Meld Desktop. Only called after the user clicks Install.
 #[tauri::command]
+#[specta::specta]
 pub async fn app_update_install(app: AppHandle) -> crate::IpcResult<()> {
     if is_portable() {
         return Err(crate::IpcError::from(
@@ -156,6 +158,7 @@ pub async fn app_update_install(app: AppHandle) -> crate::IpcResult<()> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn app_open_releases_page() -> crate::IpcResult<()> {
     #[cfg(windows)]
     {

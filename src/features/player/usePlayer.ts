@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioQuality, streamRequest } from "../../lib/audioQuality";
 import { mediaSrc } from "../../lib/media";
@@ -40,7 +40,7 @@ export function usePlayer({ audioQuality, setNotice, settings }: PlayerDeps) {
     session.pendingMs = 0;
     session.flushing = true;
     try {
-      await invoke("history_record_playtime", { historyId: session.historyId, playTimeMs: amount });
+      await call("history_record_playtime", { historyId: session.historyId, playTimeMs: amount });
     } catch {
       session.pendingMs += amount;
     } finally {
@@ -82,11 +82,9 @@ export function usePlayer({ audioQuality, setNotice, settings }: PlayerDeps) {
     const localSource = isLocalStream(failedUrl);
     setNotice(recoveryNotice(reason, streamRecoveryRef.current.attempts, localSource));
     try {
-      if (reason === "rejected" || localSource)
-        await invoke("ytm_report_stream_failure", { videoId: item.videoId, streamUrl: failedUrl }).catch(
-          () => undefined,
-        );
-      const payload = await invoke<PlayerPayload>("ytm_player", streamRequest(item, audioQuality));
+      if ((reason === "rejected" || localSource) && item.videoId)
+        await call("ytm_report_stream_failure", { videoId: item.videoId, streamUrl: failedUrl }).catch(() => undefined);
+      const payload = await call("ytm_player", streamRequest(item, audioQuality));
       // The user may have started another track while the fresh URL was resolving (last click wins).
       if (playbackSessionRef.current !== session) return false;
       streamResolvedAtRef.current = Date.now();
@@ -167,7 +165,7 @@ export function usePlayer({ audioQuality, setNotice, settings }: PlayerDeps) {
     }
     setVolume(value);
     if (audio) audio.volume = value;
-    void invoke("settings_set", { key: "playerVolume", value: String(value) }).catch(() => undefined);
+    void call("settings_set", { key: "playerVolume", value: String(value) }).catch(() => undefined);
   };
 
   const formatTime = (seconds: number) => {

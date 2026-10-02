@@ -4,6 +4,7 @@
 use crate::*;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_refetch(
     video_id: VideoId,
     state: tauri::State<'_, RuntimeState>,
@@ -21,6 +22,7 @@ pub async fn ytm_refetch(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_browse(
     browse_id: YtId,
     params: Opt<Token>,
@@ -60,6 +62,7 @@ async fn ytm_browse_body(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_browse_continuation(
     browse_id: YtId,
     continuation: Token,
@@ -84,6 +87,7 @@ pub async fn ytm_browse_continuation(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_detail(
     kind: Keyword,
     browse_id: YtId,
@@ -163,6 +167,7 @@ async fn ytm_detail_body(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_home(state: tauri::State<'_, RuntimeState>) -> IpcResult<HomePage> {
     let visitor_data = visitor(&state).await?;
     let request_session = browse_session(&state, auth_session(&state)?)?;
@@ -181,6 +186,7 @@ pub async fn ytm_home(state: tauri::State<'_, RuntimeState>) -> IpcResult<HomePa
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_home_continuation(
     continuation: Token,
     state: tauri::State<'_, RuntimeState>,
@@ -200,6 +206,7 @@ pub async fn ytm_home_continuation(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_search(
     query: Text,
     state: tauri::State<'_, RuntimeState>,
@@ -235,6 +242,7 @@ async fn ytm_search_body(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_search_continuation(
     continuation: Token,
     state: tauri::State<'_, RuntimeState>,
@@ -273,6 +281,7 @@ async fn ytm_search_continuation_body(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_detail_continuation(
     kind: Keyword,
     continuation: Token,
@@ -300,6 +309,7 @@ pub async fn ytm_detail_continuation(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ytm_podcast_cache_detail_page(
     browse_id: YtId,
     page: DetailPage,
@@ -364,6 +374,7 @@ pub fn ytm_podcast_cache_detail_page(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_playlist(
     playlist_id: YtId,
     state: tauri::State<'_, RuntimeState>,
@@ -396,6 +407,7 @@ async fn ytm_playlist_body(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_playlist_continuation(
     continuation: Token,
     state: tauri::State<'_, RuntimeState>,
@@ -415,6 +427,7 @@ pub async fn ytm_playlist_continuation(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn search_history_add(query: Text, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let query = query.into_inner();
     let query = query.trim();
@@ -430,6 +443,7 @@ pub fn search_history_add(query: Text, state: tauri::State<'_, RuntimeState>) ->
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn search_history_items(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<String>> {
     let db = state
         .db
@@ -447,6 +461,7 @@ pub fn search_history_items(state: tauri::State<'_, RuntimeState>) -> IpcResult<
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn search_history_clear(state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let db = state
         .db

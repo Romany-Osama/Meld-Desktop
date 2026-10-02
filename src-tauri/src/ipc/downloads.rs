@@ -4,6 +4,7 @@
 use crate::*;
 
 #[tauri::command]
+#[specta::specta]
 pub fn download_info(
     song_id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
@@ -33,6 +34,7 @@ pub fn download_info(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn download_cancel(song_id: LibraryId) -> IpcResult<()> {
     let song_id = song_id.into_inner();
     let id = song_id.trim();
@@ -53,6 +55,7 @@ pub fn download_cancel(song_id: LibraryId) -> IpcResult<()> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn download_remove(song_id: LibraryId, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let song_id = song_id.into_inner();
     let id = song_id.trim();
@@ -92,6 +95,7 @@ pub fn download_remove(song_id: LibraryId, state: tauri::State<'_, RuntimeState>
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn download_start(
     item: YtItem,
     audio_quality: Opt<Keyword>,
@@ -279,6 +283,7 @@ pub async fn download_start(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_downloads(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<LocalItem>> {
     let db = state
         .db

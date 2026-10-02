@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { call, type CommandName } from "../../lib/ipc";
 import type { YtItem } from "../../types";
 import type { LibraryMode } from "../../app/routes";
 import type { ResourceCache } from "../../data/resourceCache";
@@ -10,7 +11,8 @@ const LIBRARY_FALLBACK = { status: "idle" as const, data: [] as YtItem[] };
 /** Library modes whose items come from one command. */
 export type LibraryItemsMode = Exclude<LibraryMode, "playlists" | "podcasts">;
 
-const COMMANDS: Partial<Record<LibraryItemsMode, string>> = {
+// Typed as command names (S5-011), so a renamed backend command fails tsc here too.
+const COMMANDS: Partial<Record<LibraryItemsMode, CommandName>> = {
   local: "library_local_files",
   songs: "library_songs",
   liked: "library_liked_songs",
@@ -21,7 +23,7 @@ const COMMANDS: Partial<Record<LibraryItemsMode, string>> = {
   artists: "library_artists",
 };
 
-const PODCAST_COMMANDS: Record<PodcastFilter, string> = {
+const PODCAST_COMMANDS: Record<PodcastFilter, CommandName> = {
   episodes: "library_saved_podcasts",
   channels: "ytm_podcast_channels",
   downloaded: "library_downloaded_podcasts",
@@ -53,10 +55,10 @@ export function useLibraryData({
       async () => {
         if (mode === "mix") {
           const [playlists, songs, albums, artists] = await Promise.all([
-            invoke<(YtItem & { songCount?: number; savedAt?: number })[]>("library_playlists"),
-            invoke<YtItem[]>("library_mix_songs"),
-            invoke<YtItem[]>("library_albums"),
-            invoke<YtItem[]>("library_artists"),
+            call("library_playlists"),
+            call("library_mix_songs"),
+            call("library_albums"),
+            call("library_artists"),
           ]);
           cache.set(libraryMixSongsKey, { status: "ready", data: songs });
           return [...playlists, ...albums, ...artists].filter(
@@ -64,9 +66,7 @@ export function useLibraryData({
           );
         }
         const command = COMMANDS[mode];
-        return command
-          ? invoke<YtItem[]>(command)
-          : invoke<YtItem[]>("library_top_songs", { period: topPeriod, limit: topSize });
+        return command ? invoke<YtItem[]>(command) : call("library_top_songs", { period: topPeriod, limit: topSize });
       },
       { scope: "library", empty: [] },
     );

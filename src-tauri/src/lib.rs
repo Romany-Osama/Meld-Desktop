@@ -279,7 +279,7 @@ struct AuthSession {
     account_avatar: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SessionStatus {
     authenticated: bool,
@@ -439,14 +439,14 @@ fn now_millis() -> i64 {
         .unwrap_or_default()
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct Artist {
     name: String,
     id: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct YtItem {
     id: String,
@@ -462,6 +462,7 @@ struct YtItem {
     play_playlist_id: Option<String>,
     play_video_id: Option<String>,
     params: Option<String>,
+    #[serde(default)]
     explicit: bool,
     music_video_type: Option<String>,
     history_remove_token: Option<String>,
@@ -469,7 +470,7 @@ struct YtItem {
     album_title: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct LibraryPlaylistItem {
     #[serde(flatten)]
@@ -478,7 +479,7 @@ struct LibraryPlaylistItem {
     saved_at: i64,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct StatsRow {
     item: YtItem,
@@ -486,7 +487,7 @@ struct StatsRow {
     minutes: i64,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct StatsGroup {
     id: String,
@@ -496,7 +497,7 @@ struct StatsGroup {
     plays: i64,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct StatsPayload {
     period: String,
@@ -508,7 +509,7 @@ struct StatsPayload {
     albums: Vec<StatsGroup>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct LocalItem {
     id: String,
@@ -648,7 +649,7 @@ fn local_item_from_path(path: &Path, artwork_dir: &Path) -> Option<LocalItem> {
     })
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct HomeSection {
     title: String,
@@ -660,21 +661,21 @@ struct HomeSection {
     items: Vec<YtItem>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct HomePage {
     sections: Vec<HomeSection>,
     continuation: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SearchPage {
     items: Vec<YtItem>,
     continuation: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct PlaylistPage {
     playlist: YtItem,
@@ -682,14 +683,14 @@ struct PlaylistPage {
     continuation: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct PlaylistContinuationPage {
     songs: Vec<YtItem>,
     continuation: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct DetailPage {
     kind: String,
@@ -701,7 +702,7 @@ struct DetailPage {
     browse_id: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct PlayerPayload {
     video_id: String,
@@ -716,14 +717,14 @@ struct PlayerPayload {
     source_client: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SettingEntry {
     key: String,
     value: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct QueuePage {
     title: Option<String>,
@@ -734,14 +735,14 @@ struct QueuePage {
     related_params: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct RemoteHistorySection {
     title: String,
     songs: Vec<YtItem>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct RemoteHistoryPage {
     sections: Vec<RemoteHistorySection>,
@@ -1919,7 +1920,7 @@ fn prewarm_player_js() {
     });
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct DownloadInfo {
     song_id: String,
@@ -2280,7 +2281,7 @@ fn clean_media_dirs(
     Ok((deleted, evicted))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct PlayerCacheUsage {
     bytes: i64,
@@ -3800,7 +3801,7 @@ fn upsert_synced_song(
     upsert_catalog_mappings(db, item, mode, timestamp)
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct YouTubeSyncResult {
     liked_songs: usize,
@@ -3995,7 +3996,7 @@ fn parse_playlist_continuation(response: &Value) -> PlaylistContinuationPage {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct LrcLibTrack {
     track_name: String,
@@ -4005,14 +4006,14 @@ struct LrcLibTrack {
     synced_lyrics: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct LyricLine {
     time_ms: i64,
     text: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct LyricsPayload {
     provider: String,
@@ -4023,18 +4024,18 @@ struct LyricsPayload {
     lines: Vec<LyricLine>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 struct BetterLyricsResponse {
     ttml: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 struct LyricsPlusLine {
     time: i64,
     text: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 struct LyricsPlusResponse {
     lyrics: Option<Vec<LyricsPlusLine>>,
 }
@@ -5617,7 +5618,7 @@ async fn spotify_graphql_post(
     ))
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SpotifyProfile {
     id: String,
@@ -5641,7 +5642,7 @@ fn spotify_token(state: &tauri::State<'_, RuntimeState>) -> Result<String, Strin
     Ok(token)
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SpotifyPlaylistItem {
     id: String,
@@ -5651,7 +5652,7 @@ struct SpotifyPlaylistItem {
     owner: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SpotifyFolderItem {
     uri: String,
@@ -5659,7 +5660,7 @@ struct SpotifyFolderItem {
     total_children: i64,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SpotifyLibraryNode {
     folders: Vec<SpotifyFolderItem>,
@@ -5667,7 +5668,7 @@ struct SpotifyLibraryNode {
     total_count: i64,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SpotifyTrackItem {
     id: String,
@@ -5680,14 +5681,14 @@ struct SpotifyTrackItem {
     duration_ms: i64,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SpotifyLikedTracks {
     tracks: Vec<SpotifyTrackItem>,
     total_count: i64,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SpotifyTrackPage {
     tracks: Vec<SpotifyTrackItem>,
@@ -5696,7 +5697,7 @@ struct SpotifyTrackPage {
     limit: i64,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SpotifyTrackMatch {
     id: String,
@@ -6211,7 +6212,7 @@ async fn save_spotify_session_internal(
     Ok(expiry)
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct SpotifySessionStatus {
     authenticated: bool,
@@ -6256,7 +6257,7 @@ fn forget_spotify_session(db: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct LibraryItemState {
     liked: bool,
@@ -6467,6 +6468,120 @@ fn clear_guest_session(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Every command the webview can call (S5-003). Also the source of the generated TypeScript
+/// bindings in src/ipc/bindings.ts (S5-011, `ipc::bindings`).
+pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
+    tauri_specta::Builder::<tauri::Wry>::new()
+        .error_handling(tauri_specta::ErrorHandlingMode::Throw)
+        .commands(tauri_specta::collect_commands![
+            updates::app_update_check,
+            updates::app_update_install,
+            updates::app_open_releases_page,
+            ipc::system::request_cancel,
+            ipc::library::ytm_history,
+            ipc::library::ytm_remove_from_history,
+            ipc::spotify::spotify_profile,
+            ipc::spotify::spotify_library_node,
+            ipc::spotify::spotify_playlists,
+            ipc::spotify::spotify_playlist_tracks,
+            ipc::spotify::spotify_remove_from_playlist,
+            ipc::spotify::spotify_move_in_playlist,
+            ipc::spotify::spotify_rename_playlist,
+            ipc::spotify::spotify_liked_tracks,
+            ipc::spotify::spotify_match_for_youtube,
+            ipc::spotify::spotify_override_youtube,
+            ipc::spotify::spotify_resolve_youtube,
+            ipc::spotify::spotify_add_to_playlist,
+            ipc::library::ytm_delete_uploaded_song,
+            ipc::catalog::ytm_refetch,
+            ipc::library::ytm_toggle_episode_saved,
+            ipc::library::local_files_pick,
+            ipc::library::library_local_files,
+            ipc::downloads::library_downloads,
+            ipc::player::library_player_cache,
+            ipc::library::ytm_toggle_podcast_saved,
+            ipc::downloads::download_start,
+            ipc::downloads::download_info,
+            ipc::downloads::download_cancel,
+            ipc::downloads::download_remove,
+            ipc::player::player_cache_remove,
+            ipc::player::player_cache_usage,
+            ipc::player::player_cache_clear,
+            ipc::library::ytm_podcast_channels,
+            ipc::library::library_saved_podcasts,
+            ipc::library::ytm_refresh_saved_podcasts,
+            ipc::library::library_downloaded_podcasts,
+            ipc::library::library_albums,
+            ipc::library::library_artists,
+            ipc::catalog::ytm_home,
+            ipc::catalog::ytm_home_continuation,
+            ipc::catalog::ytm_search,
+            ipc::catalog::ytm_search_continuation,
+            ipc::library::sync_youtube_library,
+            ipc::library::ytm_add_to_playlist,
+            ipc::library::ytm_remove_from_playlist,
+            ipc::library::ytm_create_playlist,
+            ipc::catalog::ytm_playlist,
+            ipc::catalog::ytm_playlist_continuation,
+            ipc::catalog::ytm_browse,
+            ipc::catalog::ytm_browse_continuation,
+            ipc::catalog::ytm_detail,
+            ipc::catalog::ytm_detail_continuation,
+            ipc::catalog::ytm_podcast_cache_detail_page,
+            ipc::player::ytm_next,
+            ipc::player::ytm_related,
+            ipc::player::ytm_queue_continuation,
+            ipc::player::ytm_player,
+            ipc::player::ytm_report_stream_failure,
+            ipc::player::ytm_playback_report,
+            ipc::library::history_add,
+            ipc::library::history_record_playtime,
+            ipc::library::history_items,
+            ipc::library::history_clear,
+            ipc::library::library_top_songs,
+            ipc::library::library_stats,
+            ipc::catalog::search_history_add,
+            ipc::catalog::search_history_items,
+            ipc::catalog::search_history_clear,
+            ipc::library::ytm_toggle_like,
+            ipc::lyrics::fetch_lyrics,
+            ipc::lyrics::fetch_lyrics_fresh,
+            ipc::lyrics::fetch_lyrics_from_provider,
+            ipc::library::library_toggle_liked,
+            ipc::library::library_edit_item,
+            ipc::library::library_refetch_item,
+            ipc::library::ytm_toggle_library,
+            ipc::settings::settings_get,
+            ipc::settings::settings_set,
+            ipc::backup::backup_create,
+            ipc::backup::backup_restore,
+            ipc::library::library_save_item,
+            ipc::library::library_remove_item,
+            ipc::library::library_songs,
+            ipc::library::library_mix_songs,
+            ipc::library::library_liked_songs,
+            ipc::library::library_uploaded_songs,
+            ipc::library::library_playlists,
+            ipc::library::library_create_playlist,
+            ipc::library::library_add_to_playlist,
+            ipc::library::library_remove_from_playlist,
+            ipc::library::library_playlist_songs,
+            ipc::library::library_item_state,
+            ipc::library::library_artist_state,
+            ipc::library::library_toggle_artist_bookmarked,
+            ipc::library::speed_dial_toggle,
+            ipc::library::speed_dial_items,
+            ipc::account::open_google_login,
+            ipc::account::account_refresh_profile,
+            ipc::account::account_logout,
+            ipc::account::clear_local_library_keep_downloads,
+            ipc::account::session_status,
+            ipc::account::open_spotify_login,
+            ipc::account::spotify_session_status,
+            ipc::account::spotify_logout
+        ])
+}
+
 pub fn run() {
     tauri::Builder::default()
         // Must be the first plugin registered: it needs to intercept a second launch before anything else in
@@ -6510,7 +6625,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![updates::app_update_check, updates::app_update_install, updates::app_open_releases_page, ipc::system::request_cancel, ipc::library::ytm_history, ipc::library::ytm_remove_from_history, ipc::spotify::spotify_profile, ipc::spotify::spotify_library_node, ipc::spotify::spotify_playlists, ipc::spotify::spotify_playlist_tracks, ipc::spotify::spotify_remove_from_playlist, ipc::spotify::spotify_move_in_playlist, ipc::spotify::spotify_rename_playlist, ipc::spotify::spotify_liked_tracks, ipc::spotify::spotify_match_for_youtube, ipc::spotify::spotify_override_youtube, ipc::spotify::spotify_resolve_youtube, ipc::spotify::spotify_add_to_playlist, ipc::library::ytm_delete_uploaded_song, ipc::catalog::ytm_refetch, ipc::library::ytm_toggle_episode_saved, ipc::library::local_files_pick, ipc::library::library_local_files, ipc::downloads::library_downloads, ipc::player::library_player_cache, ipc::library::ytm_toggle_podcast_saved, ipc::downloads::download_start, ipc::downloads::download_info, ipc::downloads::download_cancel, ipc::downloads::download_remove, ipc::player::player_cache_remove, ipc::player::player_cache_usage, ipc::player::player_cache_clear, ipc::library::ytm_podcast_channels, ipc::library::library_saved_podcasts, ipc::library::ytm_refresh_saved_podcasts, ipc::library::library_downloaded_podcasts, ipc::library::library_albums, ipc::library::library_artists, ipc::catalog::ytm_home, ipc::catalog::ytm_home_continuation, ipc::catalog::ytm_search, ipc::catalog::ytm_search_continuation, ipc::library::sync_youtube_library, ipc::library::ytm_add_to_playlist, ipc::library::ytm_remove_from_playlist, ipc::library::ytm_create_playlist, ipc::catalog::ytm_playlist, ipc::catalog::ytm_playlist_continuation, ipc::catalog::ytm_browse, ipc::catalog::ytm_browse_continuation, ipc::catalog::ytm_detail, ipc::catalog::ytm_detail_continuation, ipc::catalog::ytm_podcast_cache_detail_page, ipc::player::ytm_next, ipc::player::ytm_related, ipc::player::ytm_queue_continuation, ipc::player::ytm_player, ipc::player::ytm_report_stream_failure, ipc::player::ytm_playback_report, ipc::library::history_add, ipc::library::history_record_playtime, ipc::library::history_items, ipc::library::history_clear, ipc::library::library_top_songs, ipc::library::library_stats, ipc::catalog::search_history_add, ipc::catalog::search_history_items, ipc::catalog::search_history_clear, ipc::library::ytm_toggle_like, ipc::lyrics::fetch_lyrics, ipc::lyrics::fetch_lyrics_fresh, ipc::lyrics::fetch_lyrics_from_provider, ipc::library::library_toggle_liked, ipc::library::library_edit_item, ipc::library::library_refetch_item, ipc::library::ytm_toggle_library, ipc::settings::settings_get, ipc::settings::settings_set, ipc::backup::backup_create, ipc::backup::backup_restore, ipc::library::library_save_item, ipc::library::library_remove_item, ipc::library::library_songs, ipc::library::library_mix_songs, ipc::library::library_liked_songs, ipc::library::library_uploaded_songs, ipc::library::library_playlists, ipc::library::library_create_playlist, ipc::library::library_add_to_playlist, ipc::library::library_remove_from_playlist, ipc::library::library_playlist_songs, ipc::library::library_item_state, ipc::library::library_artist_state, ipc::library::library_toggle_artist_bookmarked, ipc::library::speed_dial_toggle, ipc::library::speed_dial_items, ipc::account::open_google_login, ipc::account::account_refresh_profile, ipc::account::account_logout, ipc::account::clear_local_library_keep_downloads, ipc::account::session_status, ipc::account::open_spotify_login, ipc::account::spotify_session_status, ipc::account::spotify_logout])
+        .invoke_handler(specta_builder().invoke_handler())
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, event| {

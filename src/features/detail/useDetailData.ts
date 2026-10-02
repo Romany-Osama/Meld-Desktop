@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
+import { call } from "../../lib/ipc";
 import { invokeCancellable } from "../../lib/cancellable";
-import { invoke } from "@tauri-apps/api/core";
 import type { DetailPage } from "../../types";
 import type { ResourceCache } from "../../data/resourceCache";
 import { useResource } from "../../data/useResource";
@@ -16,14 +16,10 @@ const DETAIL_FALLBACK = {
 /** Fetches one album, artist, podcast or browse page. */
 export async function fetchDetail(ref: DetailRef, signal?: AbortSignal): Promise<DetailPage> {
   if (ref.kind === "browse") {
-    const data = await invokeCancellable<DetailPage>(
-      "ytm_browse",
-      { browseId: ref.browseId, params: ref.params ?? null },
-      signal,
-    );
+    const data = await invokeCancellable("ytm_browse", { browseId: ref.browseId, params: ref.params ?? null }, signal);
     return { ...data, browseId: data.browseId ?? ref.browseId };
   }
-  const data = await invokeCancellable<DetailPage>("ytm_detail", { kind: ref.kind, browseId: ref.browseId }, signal);
+  const data = await invokeCancellable("ytm_detail", { kind: ref.kind, browseId: ref.browseId }, signal);
   return { ...data, browseId: data.browseId ?? ref.browseId };
 }
 
@@ -64,18 +60,19 @@ export function useDetailData({
   const loadDetailMore = async () => {
     if (!key || !detail || detail.status !== "ready" || !detail.data.continuation || detailMoreLoading) return;
     const page = detail.data;
+    const continuation = detail.data.continuation;
     const token = cache.begin(`${key}:more`, "detail-more");
     setDetailMoreLoading(true);
     try {
       const next =
         page.kind === "browse"
-          ? await invoke<DetailPage>("ytm_browse_continuation", {
+          ? await call("ytm_browse_continuation", {
               browseId: page.browseId ?? "",
-              continuation: page.continuation,
+              continuation,
             })
-          : await invoke<DetailPage>("ytm_detail_continuation", { kind: page.kind, continuation: page.continuation });
+          : await call("ytm_detail_continuation", { kind: page.kind, continuation });
       if (page.kind === "podcast" && page.browseId)
-        await invoke("ytm_podcast_cache_detail_page", { browseId: page.browseId, page: next });
+        await call("ytm_podcast_cache_detail_page", { browseId: page.browseId, page: next });
       if (!token.isCurrent()) return;
       // Merged into the page it was requested for, even if another page is open by now.
       cache.set<DetailPage>(key, (entry) => {
@@ -116,7 +113,7 @@ export function useDetailData({
         current = false;
       };
     }
-    void invoke<boolean>("library_artist_state", { artistId })
+    void call("library_artist_state", { artistId })
       .then((value) => {
         if (current) setDetailArtistSubscribed(value);
       })

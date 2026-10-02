@@ -4,6 +4,7 @@
 use crate::*;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn spotify_playlist_tracks(
     playlist_id: SpotifyId,
     offset: Option<i64>,
@@ -32,6 +33,7 @@ pub async fn spotify_playlist_tracks(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn spotify_remove_from_playlist(
     playlist_id: SpotifyId,
     uid: SpotifyId,
@@ -54,6 +56,7 @@ pub async fn spotify_remove_from_playlist(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn spotify_move_in_playlist(
     playlist_id: SpotifyId,
     uids: Vec<SpotifyId>,
@@ -84,6 +87,7 @@ pub async fn spotify_move_in_playlist(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn spotify_rename_playlist(
     playlist_id: SpotifyId,
     new_name: Name,
@@ -106,6 +110,7 @@ pub async fn spotify_rename_playlist(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn spotify_liked_tracks(
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<SpotifyLikedTracks> {
@@ -120,6 +125,7 @@ pub async fn spotify_liked_tracks(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn spotify_library_node(
     folder_uri: Opt<SpotifyUri>,
     state: tauri::State<'_, RuntimeState>,
@@ -132,6 +138,7 @@ pub async fn spotify_library_node(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn spotify_playlists(
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<Vec<SpotifyPlaylistItem>> {
@@ -142,6 +149,7 @@ pub async fn spotify_playlists(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn spotify_match_for_youtube(
     youtube_id: VideoId,
     state: tauri::State<'_, RuntimeState>,
@@ -162,6 +170,7 @@ pub fn spotify_match_for_youtube(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn spotify_override_youtube(
     spotify_id: LibraryId,
     youtube_id: VideoId,
@@ -189,6 +198,7 @@ pub fn spotify_override_youtube(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn spotify_resolve_youtube(
     youtube_id: Opt<VideoId>,
     title: Text,
@@ -267,6 +277,7 @@ pub async fn spotify_resolve_youtube(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn spotify_add_to_playlist(
     playlist_id: SpotifyId,
     track_uri: SpotifyUri,
@@ -288,6 +299,7 @@ pub async fn spotify_add_to_playlist(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn spotify_profile(state: tauri::State<'_, RuntimeState>) -> IpcResult<SpotifyProfile> {
     let token = spotify_token(&state)?;
     let response = spotify_graphql_post("profileAttributes", json!({}), &token).await?;

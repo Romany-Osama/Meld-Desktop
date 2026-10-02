@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { invokeCancellable } from "../../lib/cancellable";
 import type { PlaylistPage, YtItem } from "../../types";
 import type { ResourceCache } from "../../data/resourceCache";
@@ -17,10 +17,10 @@ export const playlistIdOf = (item: YtItem) => item.browseId ?? item.id;
 async function fetchPlaylist(item: YtItem, signal?: AbortSignal): Promise<PlaylistPage> {
   const playlistId = playlistIdOf(item);
   if (playlistId.startsWith("LOCAL_")) {
-    const songs = await invoke<YtItem[]>("library_playlist_songs", { playlistId });
+    const songs = await call("library_playlist_songs", { playlistId });
     return { playlist: item, songs };
   }
-  return invokeCancellable<PlaylistPage>("ytm_playlist", { playlistId }, signal);
+  return invokeCancellable("ytm_playlist", { playlistId }, signal);
 }
 
 /** Server state of the open playlist (U4-008). Which playlist is open (`openPlaylist`) is the caller's view state. */
@@ -61,7 +61,7 @@ export function usePlaylistData({
     const continuation = playlist.data.continuation;
     const token = cache.begin(`${key}:more`, "playlist-more");
     try {
-      const next = await invoke<{ songs: YtItem[]; continuation?: string | null }>("ytm_playlist_continuation", {
+      const next = await call("ytm_playlist_continuation", {
         continuation,
       });
       if (!token.isCurrent()) return;

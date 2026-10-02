@@ -82,8 +82,9 @@ fn spotify_uri_char(character: char) -> bool {
 macro_rules! payload {
     ($(#[$meta:meta])* $name:ident, $label:literal, $rule:expr, trim = $trim:literal) => {
         $(#[$meta])*
-        #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
         #[serde(try_from = "String", into = "String")]
+        #[specta(transparent)]
         pub struct $name(String);
 
         impl $name {
@@ -177,6 +178,16 @@ payload!(
 /// pass `T`'s validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Opt<T>(pub Option<T>);
+
+/// In the generated bindings an `Opt<T>` is `T | null` (an optional argument), like `Option<T>`.
+impl<T: specta::Type> specta::Type for Opt<T> {
+    fn inline(
+        type_map: &mut specta::TypeCollection,
+        generics: specta::Generics,
+    ) -> specta::datatype::DataType {
+        <Option<T> as specta::Type>::inline(type_map, generics)
+    }
+}
 
 impl<T> Default for Opt<T> {
     fn default() -> Self {

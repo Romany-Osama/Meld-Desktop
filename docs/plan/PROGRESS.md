@@ -77,7 +77,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] S5-008 (P0) Cap response sizes and list lengths returned over IPC — continuation walks bounded by `collect_continuations` (500 pages / 50 000 items), limit/offset clamps (D-044); ipc::limits::tests::*, ipc::limits::contract::library_walks_use_the_bounded_helper
 - [x] S5-009 (P0) Cancellation for long commands — `requestId` + `request_cancel` for search, browse/detail/playlist loads, library sync and lyrics; route changes abort via ResourceCache signals, sync has a Cancel action (D-045); ipc::cancel::tests::*, src/lib/cancellable.test.ts
 - [x] S5-010 (P0) Event channel contract — docs/events.md + `events.rs` (`AppEvent`, `emit`) + `src/lib/events.ts` (`listenEvent`, versions); sign-in error events v2 = IpcError (D-046); events::tests::*, src/lib/events.test.ts
-- [ ] S5-011 (P0) Generate TypeScript bindings from Rust
+- [x] S5-011 (P0) Generate TypeScript bindings from Rust — tauri-specta generates `src/ipc/bindings.ts` (types + `CommandMap`), typed `call()` for every command, registration via `collect_commands!` (D-047); ipc::bindings::*, src/lib/ipc.test.ts
 - [ ] S5-012 (P0) IPC contract tests
 - [ ] TR-M14 (P1) No durable API boundary
 

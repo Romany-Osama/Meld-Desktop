@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { Dispatch, SetStateAction, useState, useMemo, useCallback } from "react";
 import { errorMessage } from "../../lib/util";
 import { SessionStatus, YtItem, PlaylistSort } from "../../types";
@@ -28,7 +28,7 @@ export function usePlaylists({ sessionStatus, setNotice, clearSelected, setSelec
 
   const loadLocalPlaylists = async () => {
     try {
-      setLocalPlaylists(await invoke<(YtItem & { songCount?: number; savedAt?: number })[]>("library_playlists"));
+      setLocalPlaylists(await call("library_playlists"));
     } catch (error) {
       setNotice(`Playlists could not be loaded: ${errorMessage(error)}`, "error");
     }
@@ -40,7 +40,7 @@ export function usePlaylists({ sessionStatus, setNotice, clearSelected, setSelec
       return;
     }
     try {
-      const result = await invoke<{ playlists: number }>("sync_youtube_library", { mode: "playlists" });
+      const result = await call("sync_youtube_library", { mode: "playlists" });
       await loadLocalPlaylists();
       setNotice(`YouTube Music playlist sync finished: ${result.playlists} playlists.`);
     } catch (error) {
@@ -61,9 +61,9 @@ export function usePlaylists({ sessionStatus, setNotice, clearSelected, setSelec
     if (!title) return;
     try {
       if (createSyncedPlaylist) {
-        await invoke("ytm_create_playlist", { title });
+        await call("ytm_create_playlist", { title });
       } else {
-        await invoke("library_create_playlist", { title });
+        await call("library_create_playlist", { title });
       }
       await loadLocalPlaylists();
       setCreatePlaylistOpen(false);
@@ -84,7 +84,7 @@ export function usePlaylists({ sessionStatus, setNotice, clearSelected, setSelec
       let skippedCount = 0;
       if (playlistId.startsWith("LOCAL_")) {
         for (const item of items) {
-          const added = await invoke<boolean>("library_add_to_playlist", { playlistId, item });
+          const added = await call("library_add_to_playlist", { playlistId, item });
           if (added) addedCount += 1;
           else skippedCount += 1;
         }
@@ -94,7 +94,7 @@ export function usePlaylists({ sessionStatus, setNotice, clearSelected, setSelec
             setNotice(`“${item.title}” has no source videoId required for a playlist add.`, "warning");
             return;
           }
-          await invoke("ytm_add_to_playlist", { playlistId, videoId: item.videoId });
+          await call("ytm_add_to_playlist", { playlistId, videoId: item.videoId });
           addedCount += 1;
         }
       }
