@@ -15,7 +15,7 @@ pub async fn spotify_playlist_tracks(
         return Err(IpcError::from("Spotify playlist id is required".to_owned()));
     }
     let token = spotify_token(&state)?;
-    let offset = offset.unwrap_or(0).max(0);
+    let offset = clamp_spotify_offset(offset);
     let limit = 100_i64;
     let variables = json!({ "uri": format!("spotify:playlist:{playlist_id}"), "offset": offset, "limit": limit, "enableWatchFeedEntrypoint": false });
     let response = spotify_graphql_post("fetchPlaylist", variables, &token).await?;

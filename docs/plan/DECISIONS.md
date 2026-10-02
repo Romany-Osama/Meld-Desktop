@@ -253,3 +253,10 @@ Architecture and scope decisions, newest last. Each entry: context, decision, ev
 - **Errors:** Tauri rejects a failed argument with the string ``invalid args `x` for command `y`: <reason>``; `src/lib/ipcError.ts` maps it to `invalid_argument` (D-042).
 - **Not covered here:** struct payloads (`item: YtItem`, Spotify track objects) keep serde's structural checks; their field limits come with S5-008 (size caps) and S5-012 (contract tests).
 - **Tests:** `ipc::payload::tests::*` (every type, injection characters, the existing id shapes, blank optionals), `ipc::payload::contract::no_command_takes_a_free_string_argument`.
+
+## D-044 — Bounded continuation walks and list arguments (S5-008)
+- **Context:** the four "fetch everything" walks used by library sync (`fetch_all_library_playlists`, `fetch_all_library_items`, `fetch_all_library_songs`, `fetch_all_playlist_songs`) were `loop`s that stopped only when YouTube Music stopped sending a new continuation token.
+- **Decision:** one helper, `ipc::limits::collect_continuations`, walks the pages: de-duplicates by key, stops on a repeated token, and stops at `MAX_CONTINUATION_PAGES` (500 pages after the first) or `MAX_COLLECTED_ITEMS` (50 000). A stop by a cap is logged with the counts; the items collected so far are kept (the sync result keeps them rather than failing the whole sync). 500 pages is far above a normal library (25–100 items a page) and still finishes.
+- **List arguments:** `library_top_songs` `limit` uses `clamp_limit` (1–500); the Spotify playlist `offset` uses `clamp_spotify_offset` (0–100 000); list arguments such as Spotify uids are capped at 1 000 (D-043).
+- **Responses:** the UI-driven paginated commands (home, search, browse, detail, playlist continuations) already return one page per call; local library lists are bounded by the library itself. Byte caps on upstream bodies are left to PLAY/R6 network work.
+- **Tests:** `ipc::limits::tests::*` (endless chain stops at the page cap, item cap stops fetching, repeated token, failure, clamps), `ipc::limits::contract::library_walks_use_the_bounded_helper`.
