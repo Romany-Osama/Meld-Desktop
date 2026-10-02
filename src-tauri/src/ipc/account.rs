@@ -6,7 +6,7 @@ use crate::*;
 #[tauri::command]
 pub async fn account_refresh_profile(
     state: tauri::State<'_, RuntimeState>,
-) -> Result<SessionStatus, String> {
+) -> IpcResult<SessionStatus> {
     let Some(session) = auth_session(&state)? else {
         return Ok(SessionStatus {
             authenticated: false,
@@ -23,7 +23,9 @@ pub async fn account_refresh_profile(
     )
     .await?;
     let Some((name, email, channel_handle, avatar)) = account_info_from_response(&response) else {
-        return Err("Google profile refresh returned no active account header".to_owned());
+        return Err(IpcError::from(
+            "Google profile refresh returned no active account header".to_owned(),
+        ));
     };
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     for (key, value) in [
@@ -47,7 +49,7 @@ pub async fn account_refresh_profile(
 }
 
 #[tauri::command]
-pub async fn open_google_login(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn open_google_login(app: tauri::AppHandle) -> IpcResult<()> {
     if app.get_webview_window("google-login").is_some() {
         return Ok(());
     }
@@ -111,7 +113,7 @@ pub async fn open_google_login(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn spotify_session_status(
     state: tauri::State<'_, RuntimeState>,
-) -> Result<SpotifySessionStatus, String> {
+) -> IpcResult<SpotifySessionStatus> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let token = secrets::get(&db, "spotifyAccessToken").ok().flatten();
     let expiry =
@@ -124,7 +126,7 @@ pub fn spotify_session_status(
 }
 
 #[tauri::command]
-pub async fn open_spotify_login(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn open_spotify_login(app: tauri::AppHandle) -> IpcResult<()> {
     if app.get_webview_window("spotify-login").is_some() {
         return Ok(());
     }
@@ -211,7 +213,7 @@ pub async fn open_spotify_login(app: tauri::AppHandle) -> Result<(), String> {
 pub fn spotify_logout(
     app: tauri::AppHandle,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     forget_spotify_session(&db).map_err(|e| format!("Spotify logout failed: {e}"))?;
     // Without this, the Spotify login window's WebView2 cookies survive logout, so reopening the login page
@@ -224,9 +226,7 @@ pub fn spotify_logout(
 }
 
 #[tauri::command]
-pub fn clear_local_library_keep_downloads(
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+pub fn clear_local_library_keep_downloads(state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let db = state
         .db
         .lock()
@@ -265,7 +265,7 @@ pub fn clear_local_library_keep_downloads(
 pub fn account_logout(
     app: tauri::AppHandle,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     *state
         .visitor_data
         .lock()
@@ -289,7 +289,7 @@ pub fn account_logout(
 }
 
 #[tauri::command]
-pub fn session_status(state: tauri::State<'_, RuntimeState>) -> Result<SessionStatus, String> {
+pub fn session_status(state: tauri::State<'_, RuntimeState>) -> IpcResult<SessionStatus> {
     match auth_session(&state)? {
         Some(session) => Ok(SessionStatus {
             authenticated: true,

@@ -1,3 +1,4 @@
+import { errorMessage } from "./lib/util";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CACHE_LIMIT_CHOICES_MB, limitLabel, usageSummary, type PlayerCacheUsage } from "./lib/cacheUsage";
@@ -13,7 +14,7 @@ export function PlaybackCachePanel({ onNotice, destructive }: { onNotice: SetNot
     try {
       setUsage(await invoke<PlayerCacheUsage>("player_cache_usage"));
     } catch (error) {
-      onNotice(`Playback cache size could not be read: ${String(error)}`, "error");
+      onNotice(`Playback cache size could not be read: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -27,7 +28,7 @@ export function PlaybackCachePanel({ onNotice, destructive }: { onNotice: SetNot
       await invoke("settings_set", { key: "playerCacheLimitMb", value: String(limitMb) });
       await refresh();
     } catch (error) {
-      onNotice(`Playback cache limit could not be saved: ${String(error)}`, "error");
+      onNotice(`Playback cache limit could not be saved: ${errorMessage(error)}`, "error");
     } finally {
       setBusy(false);
     }

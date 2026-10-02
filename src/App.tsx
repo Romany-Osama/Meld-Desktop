@@ -1094,7 +1094,7 @@ function App() {
       await navigator.clipboard.writeText(`${report}\nSource: ${player?.payload.sourceClient ?? "cache or unknown"}`);
       setNotice("Playback report copied.");
     } catch (error) {
-      setNotice(`Could not copy the playback report: ${String(error)}`, "error");
+      setNotice(`Could not copy the playback report: ${errorMessage(error)}`, "error");
     }
   };
 

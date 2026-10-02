@@ -7,10 +7,10 @@ use crate::*;
 pub async fn ytm_delete_uploaded_song(
     entity_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<bool, String> {
+) -> IpcResult<bool> {
     let entity_id = entity_id.trim();
     if entity_id.is_empty() {
-        return Err("uploaded entity id is empty".to_owned());
+        return Err(IpcError::from("uploaded entity id is empty".to_owned()));
     }
     let session = auth_session(&state)?.ok_or_else(|| {
         "Deleting an uploaded song requires a connected YouTube Music account".to_owned()
@@ -34,7 +34,9 @@ pub async fn ytm_delete_uploaded_song(
         })
         .unwrap_or(true);
     if !processed {
-        return Err("YouTube Music did not confirm uploaded song deletion".to_owned());
+        return Err(IpcError::from(
+            "YouTube Music did not confirm uploaded song deletion".to_owned(),
+        ));
     }
     let db = state
         .db
@@ -49,9 +51,7 @@ pub async fn ytm_delete_uploaded_song(
 }
 
 #[tauri::command]
-pub async fn ytm_podcast_channels(
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<Vec<YtItem>, String> {
+pub async fn ytm_podcast_channels(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let local = {
         let db = state
             .db
@@ -82,29 +82,27 @@ pub async fn ytm_podcast_channels(
 }
 
 #[tauri::command]
-pub fn library_saved_podcasts(
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<Vec<YtItem>, String> {
+pub fn library_saved_podcasts(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state
         .db
         .lock()
         .map_err(|_| "database state poisoned".to_owned())?;
-    saved_podcast_rows(&db)
+    Ok(saved_podcast_rows(&db)?)
 }
 
 #[tauri::command]
 pub async fn sync_youtube_library(
     mode: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<YouTubeSyncResult, String> {
+) -> IpcResult<YouTubeSyncResult> {
     let mode = mode.trim().to_lowercase();
     if !matches!(
         mode.as_str(),
         "liked" | "library" | "uploaded" | "playlists"
     ) {
-        return Err(
+        return Err(IpcError::from(
             "YouTube library sync mode must be liked, library, uploaded, or playlists".to_owned(),
-        );
+        ));
     }
     let session = auth_session(&state)?
         .ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
@@ -165,9 +163,7 @@ pub async fn sync_youtube_library(
 }
 
 #[tauri::command]
-pub async fn ytm_history(
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<RemoteHistoryPage, String> {
+pub async fn ytm_history(state: tauri::State<'_, RuntimeState>) -> IpcResult<RemoteHistoryPage> {
     let visitor_data = visitor(&state).await?;
     let session = auth_session(&state)?
         .ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
@@ -187,10 +183,10 @@ pub async fn ytm_history(
 pub async fn library_refetch_item(
     id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Option<YtItem>, String> {
+) -> IpcResult<Option<YtItem>> {
     let video_id = id.trim();
     if video_id.is_empty() {
-        return Err("refetch item id is empty".to_owned());
+        return Err(IpcError::from("refetch item id is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let session = auth_session(&state)?;
@@ -208,10 +204,7 @@ pub async fn library_refetch_item(
 }
 
 #[tauri::command]
-pub fn library_save_item(
-    item: YtItem,
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+pub fn library_save_item(item: YtItem, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let is_video = item
         .music_video_type
@@ -262,11 +255,13 @@ pub fn library_edit_item(
     title: String,
     artist: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let id = item_id.trim();
     let title = title.trim();
     if id.is_empty() || title.is_empty() {
-        return Err("song edit requires a non-empty item id and title".to_owned());
+        return Err(IpcError::from(
+            "song edit requires a non-empty item id and title".to_owned(),
+        ));
     }
     let db = state
         .db
@@ -277,7 +272,9 @@ pub fn library_edit_item(
         .map_err(|error| format!("song edit transaction failed: {error}"))?;
     let updated = tx.execute("UPDATE songs SET title = ?1, subtitle = CASE WHEN ?2 <> '' THEN ?2 ELSE subtitle END WHERE id = ?3", params![title, artist.trim(), id]).map_err(|error| format!("song edit failed: {error}"))?;
     if updated == 0 {
-        return Err("song edit target was not found in the local Meld database".to_owned());
+        return Err(IpcError::from(
+            "song edit target was not found in the local Meld database".to_owned(),
+        ));
     }
     if !artist.trim().is_empty() {
         if let Some(artist_id) = tx
@@ -306,9 +303,9 @@ pub fn library_toggle_liked(
     item: YtItem,
     liked: bool,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     if item.id.trim().is_empty() {
-        return Err("liked item id is empty".to_owned());
+        return Err(IpcError::from("liked item id is empty".to_owned()));
     }
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let now = now_seconds();
@@ -328,14 +325,14 @@ pub fn library_toggle_liked(
 pub async fn ytm_remove_from_history(
     token: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let token = token.trim();
     if token.is_empty() {
-        return Err("history feedback token is empty".to_owned());
+        return Err(IpcError::from("history feedback token is empty".to_owned()));
     }
     let session = auth_session(&state)?
         .ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
-    send_feedback(&session, token.to_owned()).await
+    Ok(send_feedback(&session, token.to_owned()).await?)
 }
 
 #[tauri::command]
@@ -344,10 +341,10 @@ pub async fn ytm_toggle_like(
     liked: bool,
     item: Option<YtItem>,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let id = video_id.trim();
     if id.is_empty() {
-        return Err("video id is empty".to_owned());
+        return Err(IpcError::from("video id is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let session = auth_session(&state)?
@@ -359,7 +356,9 @@ pub async fn ytm_toggle_like(
     };
     let response = post(endpoint, json!({ "context": context(&visitor_data, true, Some(&session.data_sync_id)), "target": { "videoId": id } }), Some(&session)).await?;
     if response.get("feedbackResponses").is_none() && response.get("actions").is_none() {
-        return Err("YouTube Music did not return a valid like response".to_owned());
+        return Err(IpcError::from(
+            "YouTube Music did not return a valid like response".to_owned(),
+        ));
     }
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     if let Some(item) = item {
@@ -382,10 +381,10 @@ pub async fn ytm_toggle_library(
     video_id: String,
     add_to_library: bool,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let id = video_id.trim();
     if id.is_empty() {
-        return Err("video id is empty".to_owned());
+        return Err(IpcError::from("video id is empty".to_owned()));
     }
     let visitor_data = visitor(&state).await?;
     let session = auth_session(&state)?
@@ -403,14 +402,14 @@ pub async fn ytm_toggle_library(
     .ok_or_else(|| {
         "YouTube Music did not expose the requested library operation for this song".to_owned()
     })?;
-    send_feedback(&session, token).await
+    Ok(send_feedback(&session, token).await?)
 }
 
 #[tauri::command]
 pub fn library_item_state(
     id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<LibraryItemState, String> {
+) -> IpcResult<LibraryItemState> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let pinned = db
         .query_row(
@@ -444,7 +443,7 @@ pub fn speed_dial_toggle(
     item: YtItem,
     pinned: bool,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     if pinned {
         let item_type = match item.kind.as_str() {
@@ -452,7 +451,12 @@ pub fn speed_dial_toggle(
             "album" => "ALBUM",
             "artist" => "ARTIST",
             "playlist" => "PLAYLIST",
-            _ => return Err(format!("unsupported Speed Dial item kind: {}", item.kind)),
+            _ => {
+                return Err(IpcError::from(format!(
+                    "unsupported Speed Dial item kind: {}",
+                    item.kind
+                )))
+            }
         };
         db.execute("INSERT INTO speed_dial (id, secondary_id, title, subtitle, thumbnail, item_type, explicit, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(id) DO UPDATE SET secondary_id=excluded.secondary_id, title=excluded.title, subtitle=excluded.subtitle, thumbnail=excluded.thumbnail, item_type=excluded.item_type, explicit=excluded.explicit", params![item.id, item.playlist_id, item.title, item.subtitle, item.thumbnail, item_type, if item.explicit { 1 } else { 0 }, now_seconds()]).map_err(|error| format!("Speed Dial pin failed: {error}"))?;
     } else {
@@ -463,7 +467,7 @@ pub fn speed_dial_toggle(
 }
 
 #[tauri::command]
-pub fn speed_dial_items(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
+pub fn speed_dial_items(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT id, secondary_id, title, COALESCE(subtitle, ''), thumbnail, item_type, explicit FROM speed_dial ORDER BY created_at DESC").map_err(|error| format!("Speed Dial query failed: {error}"))?;
     let rows = statement
@@ -499,15 +503,13 @@ pub fn speed_dial_items(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtI
             })
         })
         .map_err(|error| format!("Speed Dial rows failed: {error}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("Speed Dial row decode failed: {error}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Speed Dial row decode failed: {error}"))?)
 }
 
 #[tauri::command]
-pub fn library_remove_item(
-    id: String,
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+pub fn library_remove_item(id: String, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute("UPDATE songs SET in_library = 0 WHERE id = ?1", params![id])
         .map_err(|e| format!("library remove failed: {e}"))?;
@@ -516,7 +518,7 @@ pub fn library_remove_item(
 }
 
 #[tauri::command]
-pub fn history_add(item: YtItem, state: tauri::State<'_, RuntimeState>) -> Result<i64, String> {
+pub fn history_add(item: YtItem, state: tauri::State<'_, RuntimeState>) -> IpcResult<i64> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let is_video = item
         .music_video_type
@@ -536,14 +538,14 @@ pub fn history_record_playtime(
     history_id: i64,
     play_time_ms: i64,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    record_playtime(&db, history_id, play_time_ms)
-        .map_err(|error| format!("history playtime update failed: {error}"))
+    Ok(record_playtime(&db, history_id, play_time_ms)
+        .map_err(|error| format!("history playtime update failed: {error}"))?)
 }
 
 #[tauri::command]
-pub fn history_clear(state: tauri::State<'_, RuntimeState>) -> Result<(), String> {
+pub fn history_clear(state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute("DELETE FROM history", [])
         .map_err(|e| format!("history clear failed: {e}"))?;
@@ -555,7 +557,7 @@ pub fn history_clear(state: tauri::State<'_, RuntimeState>) -> Result<(), String
 pub fn library_stats(
     period: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<StatsPayload, String> {
+) -> IpcResult<StatsPayload> {
     let period = period.trim().to_lowercase();
     let cutoff = match period.as_str() {
         "day" => now_seconds() - 86_400,
@@ -563,7 +565,7 @@ pub fn library_stats(
         "month" => now_seconds() - 2_592_000,
         "year" => now_seconds() - 31_536_000,
         "all" => 0,
-        _ => return Err("unsupported stats period".to_owned()),
+        _ => return Err(IpcError::from("unsupported stats period".to_owned())),
     };
     let db = state
         .db
@@ -657,7 +659,7 @@ pub fn library_stats(
 }
 
 #[tauri::command]
-pub fn history_items(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
+pub fn history_items(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.browse_id, s.playlist_id, s.video_id, s.set_video_id, s.explicit, s.music_video_type FROM history h INNER JOIN songs s ON s.id = h.song_id ORDER BY h.played_at DESC, h.id DESC LIMIT 200").map_err(|e| format!("history query failed: {e}"))?;
     let rows = statement
@@ -684,15 +686,16 @@ pub fn history_items(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem
             })
         })
         .map_err(|e| format!("history rows failed: {e}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("history row decode failed: {e}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("history row decode failed: {e}"))?)
 }
 
 #[tauri::command]
 pub fn local_files_pick(
     app: tauri::AppHandle,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Vec<LocalItem>, String> {
+) -> IpcResult<Vec<LocalItem>> {
     let paths = FileDialog::new()
         .set_title("Import audio files into Meld Desktop")
         .add_filter(
@@ -740,7 +743,7 @@ pub fn local_files_pick(
 #[tauri::command]
 pub fn library_downloaded_podcasts(
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Vec<LocalItem>, String> {
+) -> IpcResult<Vec<LocalItem>> {
     let db = state
         .db
         .lock()
@@ -784,9 +787,7 @@ pub fn library_downloaded_podcasts(
 }
 
 #[tauri::command]
-pub fn library_local_files(
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<Vec<LocalItem>, String> {
+pub fn library_local_files(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<LocalItem>> {
     let db = state
         .db
         .lock()
@@ -836,8 +837,9 @@ pub fn library_local_files(
             })
         })
         .map_err(|error| format!("local files rows failed: {error}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("local files row decode failed: {error}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("local files row decode failed: {error}"))?)
 }
 
 #[tauri::command]
@@ -845,7 +847,7 @@ pub fn library_top_songs(
     period: String,
     limit: i64,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Vec<YtItem>, String> {
+) -> IpcResult<Vec<YtItem>> {
     let db = state
         .db
         .lock()
@@ -883,12 +885,13 @@ pub fn library_top_songs(
             })
         })
         .map_err(|error| format!("top songs rows failed: {error}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("top songs row decode failed: {error}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("top songs row decode failed: {error}"))?)
 }
 
 #[tauri::command]
-pub fn library_songs(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
+pub fn library_songs(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT id, kind, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, explicit, music_video_type FROM songs WHERE in_library = 1 ORDER BY saved_at DESC").map_err(|e| format!("library query failed: {e}"))?;
     let rows = statement
@@ -915,12 +918,13 @@ pub fn library_songs(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem
             })
         })
         .map_err(|e| format!("library rows failed: {e}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("library row decode failed: {e}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("library row decode failed: {e}"))?)
 }
 
 #[tauri::command]
-pub fn library_mix_songs(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
+pub fn library_mix_songs(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state
         .db
         .lock()
@@ -950,12 +954,13 @@ pub fn library_mix_songs(state: tauri::State<'_, RuntimeState>) -> Result<Vec<Yt
             })
         })
         .map_err(|e| format!("library mix song rows failed: {e}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("library mix song row decode failed: {e}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("library mix song row decode failed: {e}"))?)
 }
 
 #[tauri::command]
-pub fn library_liked_songs(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
+pub fn library_liked_songs(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT id, kind, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, explicit, music_video_type FROM songs WHERE liked = 1 ORDER BY COALESCE(liked_date, saved_at) DESC").map_err(|e| format!("liked songs query failed: {e}"))?;
     let rows = statement
@@ -982,14 +987,13 @@ pub fn library_liked_songs(state: tauri::State<'_, RuntimeState>) -> Result<Vec<
             })
         })
         .map_err(|e| format!("liked songs rows failed: {e}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("liked songs row decode failed: {e}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("liked songs row decode failed: {e}"))?)
 }
 
 #[tauri::command]
-pub fn library_uploaded_songs(
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<Vec<YtItem>, String> {
+pub fn library_uploaded_songs(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT id, kind, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, explicit, music_video_type FROM songs WHERE uploaded = 1 ORDER BY saved_at DESC").map_err(|e| format!("uploaded songs query failed: {e}"))?;
     let rows = statement
@@ -1016,12 +1020,13 @@ pub fn library_uploaded_songs(
             })
         })
         .map_err(|e| format!("uploaded song rows failed: {e}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("uploaded song row decode failed: {e}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("uploaded song row decode failed: {e}"))?)
 }
 
 #[tauri::command]
-pub fn library_albums(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
+pub fn library_albums(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT a.id, a.title, a.thumbnail, a.playlist_id, COUNT(sa.song_id) FROM albums a INNER JOIN song_albums sa ON sa.album_id = a.id INNER JOIN songs s ON s.id = sa.song_id WHERE s.in_library = 1 GROUP BY a.id, a.title, a.thumbnail, a.playlist_id ORDER BY a.saved_at DESC").map_err(|error| format!("albums query failed: {error}"))?;
     let rows = statement
@@ -1048,12 +1053,13 @@ pub fn library_albums(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtIte
             })
         })
         .map_err(|error| format!("albums rows failed: {error}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("album row decode failed: {error}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("album row decode failed: {error}"))?)
 }
 
 #[tauri::command]
-pub fn library_artists(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
+pub fn library_artists(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT a.id, a.name, a.thumbnail, a.channel_id, COUNT(CASE WHEN s.in_library = 1 THEN sa.song_id END) FROM artists a LEFT JOIN song_artists sa ON sa.artist_id = a.id LEFT JOIN songs s ON s.id = sa.song_id WHERE a.bookmarked_at IS NOT NULL OR s.in_library = 1 GROUP BY a.id, a.name, a.thumbnail, a.channel_id ORDER BY a.bookmarked_at DESC, a.saved_at DESC").map_err(|error| format!("artists query failed: {error}"))?;
     let rows = statement
@@ -1080,14 +1086,15 @@ pub fn library_artists(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtIt
             })
         })
         .map_err(|error| format!("artists rows failed: {error}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("artist row decode failed: {error}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("artist row decode failed: {error}"))?)
 }
 
 #[tauri::command]
 pub fn library_playlists(
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Vec<LibraryPlaylistItem>, String> {
+) -> IpcResult<Vec<LibraryPlaylistItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT p.id, p.title, p.subtitle, p.thumbnail, p.kind, p.saved_at, COUNT(ps.song_id) FROM playlists p LEFT JOIN playlist_songs ps ON ps.playlist_id = p.id GROUP BY p.id, p.title, p.subtitle, p.thumbnail, p.kind, p.saved_at ORDER BY p.saved_at DESC").map_err(|e| format!("playlists query failed: {e}"))?;
     let rows = statement
@@ -1118,29 +1125,31 @@ pub fn library_playlists(
             })
         })
         .map_err(|e| format!("playlists rows failed: {e}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("playlist row decode failed: {e}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("playlist row decode failed: {e}"))?)
 }
 
 #[tauri::command]
 pub fn library_artist_state(
     artist_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<bool, String> {
+) -> IpcResult<bool> {
     let artist_id = artist_id.trim();
     if artist_id.is_empty() {
-        return Err("artist id is empty".to_owned());
+        return Err(IpcError::from("artist id is empty".to_owned()));
     }
     let db = state
         .db
         .lock()
         .map_err(|_| "database state poisoned".to_owned())?;
-    db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM artists WHERE id = ?1 AND bookmarked_at IS NOT NULL)",
-        params![artist_id],
-        |row| row.get::<_, bool>(0),
-    )
-    .map_err(|error| format!("artist bookmark state failed: {error}"))
+    Ok(db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM artists WHERE id = ?1 AND bookmarked_at IS NOT NULL)",
+            params![artist_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("artist bookmark state failed: {error}"))?)
 }
 
 #[tauri::command]
@@ -1151,11 +1160,11 @@ pub async fn library_toggle_artist_bookmarked(
     channel_id: Option<String>,
     bookmarked: bool,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let artist_id = artist_id.trim();
     let name = name.trim();
     if artist_id.is_empty() || name.is_empty() {
-        return Err("artist id or name is empty".to_owned());
+        return Err(IpcError::from("artist id or name is empty".to_owned()));
     }
     let channel_id = channel_id
         .as_deref()
@@ -1183,9 +1192,7 @@ pub async fn library_toggle_artist_bookmarked(
 }
 
 #[tauri::command]
-pub async fn ytm_refresh_saved_podcasts(
-    state: tauri::State<'_, RuntimeState>,
-) -> Result<i64, String> {
+pub async fn ytm_refresh_saved_podcasts(state: tauri::State<'_, RuntimeState>) -> IpcResult<i64> {
     let ids = {
         let db = state
             .db
@@ -1228,10 +1235,10 @@ pub async fn ytm_toggle_episode_saved(
     set_video_id: Option<String>,
     item: Option<YtItem>,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let video_id = video_id.trim();
     if video_id.is_empty() {
-        return Err("episode video id is empty".to_owned());
+        return Err(IpcError::from("episode video id is empty".to_owned()));
     }
     let session = auth_session(&state)?
         .ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
@@ -1288,11 +1295,11 @@ pub async fn ytm_toggle_podcast_saved(
     author: Option<String>,
     thumbnail: Option<String>,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let podcast_id = podcast_id.trim();
     let playlist_id = podcast_id.strip_prefix("MPSP").unwrap_or(podcast_id).trim();
     if podcast_id.is_empty() || playlist_id.is_empty() {
-        return Err("podcast playlist id is empty".to_owned());
+        return Err(IpcError::from("podcast playlist id is empty".to_owned()));
     }
     let session = auth_session(&state)?
         .ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
@@ -1319,11 +1326,11 @@ pub async fn ytm_add_to_playlist(
     playlist_id: String,
     video_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let playlist_id = playlist_id.trim().trim_start_matches("VL");
     let video_id = video_id.trim();
     if playlist_id.is_empty() || video_id.is_empty() {
-        return Err("playlist or video id is empty".to_owned());
+        return Err(IpcError::from("playlist or video id is empty".to_owned()));
     }
     let session = auth_session(&state)?
         .ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
@@ -1337,12 +1344,14 @@ pub async fn ytm_remove_from_playlist(
     video_id: String,
     set_video_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let playlist_id = playlist_id.trim().trim_start_matches("VL");
     let video_id = video_id.trim();
     let set_video_id = set_video_id.trim();
     if playlist_id.is_empty() || video_id.is_empty() || set_video_id.is_empty() {
-        return Err("playlist, video, or setVideoId is empty".to_owned());
+        return Err(IpcError::from(
+            "playlist, video, or setVideoId is empty".to_owned(),
+        ));
     }
     let session = auth_session(&state)?
         .ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
@@ -1354,10 +1363,10 @@ pub async fn ytm_remove_from_playlist(
 pub async fn ytm_create_playlist(
     title: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<YtItem, String> {
+) -> IpcResult<YtItem> {
     let title = title.trim();
     if title.is_empty() {
-        return Err("playlist title is empty".to_owned());
+        return Err(IpcError::from("playlist title is empty".to_owned()));
     }
     let session = auth_session(&state)?
         .ok_or_else(|| "Google/YouTube Music account session is not connected".to_owned())?;
@@ -1397,10 +1406,10 @@ pub async fn ytm_create_playlist(
 pub fn library_create_playlist(
     title: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<YtItem, String> {
+) -> IpcResult<YtItem> {
     let title = title.trim();
     if title.is_empty() {
-        return Err("playlist title is empty".to_owned());
+        return Err(IpcError::from("playlist title is empty".to_owned()));
     }
     let id = format!("LOCAL_{}", now_millis());
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
@@ -1432,10 +1441,10 @@ pub fn library_add_to_playlist(
     playlist_id: String,
     item: YtItem,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<bool, String> {
+) -> IpcResult<bool> {
     let playlist_id = playlist_id.trim();
     if playlist_id.is_empty() || item.id.trim().is_empty() {
-        return Err("playlist or item id is empty".to_owned());
+        return Err(IpcError::from("playlist or item id is empty".to_owned()));
     }
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let already_present: bool = db
@@ -1465,7 +1474,7 @@ pub fn library_remove_from_playlist(
     playlist_id: String,
     song_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<(), String> {
+) -> IpcResult<()> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute(
         "DELETE FROM playlist_songs WHERE playlist_id = ?1 AND song_id = ?2",
@@ -1479,7 +1488,7 @@ pub fn library_remove_from_playlist(
 pub fn library_playlist_songs(
     playlist_id: String,
     state: tauri::State<'_, RuntimeState>,
-) -> Result<Vec<YtItem>, String> {
+) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.browse_id, s.playlist_id, s.video_id, s.set_video_id, s.explicit, s.music_video_type FROM playlist_songs ps INNER JOIN songs s ON s.id = ps.song_id WHERE ps.playlist_id = ?1 ORDER BY ps.position ASC").map_err(|e| format!("playlist songs query failed: {e}"))?;
     let rows = statement
@@ -1506,6 +1515,7 @@ pub fn library_playlist_songs(
             })
         })
         .map_err(|e| format!("playlist songs rows failed: {e}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("playlist songs row decode failed: {e}"))
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("playlist songs row decode failed: {e}"))?)
 }

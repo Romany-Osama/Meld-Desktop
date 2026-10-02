@@ -4,6 +4,7 @@ pub mod account;
 pub mod backup;
 pub mod catalog;
 pub mod downloads;
+pub mod error;
 pub mod library;
 pub mod lyrics;
 pub mod player;

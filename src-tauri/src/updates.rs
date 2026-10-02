@@ -87,7 +87,7 @@ pub fn prune_pre_update_backups(backups_dir: &Path, keep: usize) -> Result<(), S
 }
 
 #[tauri::command]
-pub async fn app_update_check(app: AppHandle) -> Result<Option<UpdateSummary>, String> {
+pub async fn app_update_check(app: AppHandle) -> crate::IpcResult<Option<UpdateSummary>> {
     let updater = app
         .updater()
         .map_err(|error| format!("update check unavailable: {error}"))?;
@@ -107,11 +107,11 @@ pub async fn app_update_check(app: AppHandle) -> Result<Option<UpdateSummary>, S
 /// Downloads the signed update, verifies it (the plugin rejects a bad signature), backs up the database and
 /// starts the installer, which closes and restarts Meld Desktop. Only called after the user clicks Install.
 #[tauri::command]
-pub async fn app_update_install(app: AppHandle) -> Result<(), String> {
+pub async fn app_update_install(app: AppHandle) -> crate::IpcResult<()> {
     if is_portable() {
-        return Err(
+        return Err(crate::IpcError::from(
             "This is the portable version; download the new ZIP from the release page.".to_owned(),
-        );
+        ));
     }
     let updater = app
         .updater()
@@ -153,7 +153,7 @@ pub async fn app_update_install(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn app_open_releases_page() -> Result<(), String> {
+pub fn app_open_releases_page() -> crate::IpcResult<()> {
     #[cfg(windows)]
     {
         std::process::Command::new("explorer")
@@ -164,7 +164,9 @@ pub fn app_open_releases_page() -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        Err(format!("Open {RELEASES_URL} in your browser."))
+        Err(crate::IpcError::from(format!(
+            "Open {RELEASES_URL} in your browser."
+        )))
     }
 }
 
