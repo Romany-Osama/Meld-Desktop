@@ -30,7 +30,6 @@ import {
   StatsPayload,
   YtItem,
 } from "./types";
-import { parseYouTubeUrl } from "./lib/urls";
 import { navigation } from "./app/navigation";
 import { secondaryNavigation } from "./app/navigation";
 import { lyricsProviderNames } from "./features/lyrics/providers";
@@ -61,6 +60,23 @@ import { usePlaylists } from "./features/playlist/usePlaylists";
 import { useQueue } from "./features/queue/useQueue";
 import { usePlayer } from "./features/player/usePlayer";
 import { useDownloads } from "./features/downloads/useDownloads";
+import { EMPTY_HISTORY, HistoryEntry, NavHistory, pushEntry, stepBack, stepForward } from "./app/history";
+import {
+  HistorySource,
+  LibraryMode,
+  librarySongFilterFor,
+  Route,
+  isValidRoute,
+  routeFromView,
+  routeKey,
+  routePath,
+  sameRoute,
+  StatsPeriod,
+  topLevelOf,
+} from "./app/routes";
+import { Layer, LayerState, topmostLayer } from "./app/layers";
+import { LAST_ROUTE_KEY, parseLastRoute, serializeLastRoute } from "./app/lastRoute";
+import { parseLink } from "./app/links";
 
 function App() {
   const { notice, setNotice } = useNotice();
@@ -107,8 +123,10 @@ function App() {
   const { selectedItems, setSelectedItems, selectionMode, setSelectionMode, toggleSelectedItem, closeSelection } =
     useSelection();
   const [active, setActive] = useState<NavKey>("home");
-  const [backStack, setBackStack] = useState<NavKey[]>([]);
-  const [forwardStack, setForwardStack] = useState<NavKey[]>([]);
+  const [navHistory, setNavHistory] = useState<NavHistory>(EMPTY_HISTORY);
+  const pageScrollRef = useRef<HTMLDivElement>(null);
+  // Scroll offset to restore once the page shown by back/forward has rendered (U4-004).
+  const pendingScrollRef = useRef<number | null>(null);
   const [home, setHome] = useState<LoadState<HomePage>>({ status: "loading", data: { sections: [] } });
   const [homeMoreLoading, setHomeMoreLoading] = useState(false);
   const [speedDial, setSpeedDial] = useState<YtItem[]>([]);
@@ -125,9 +143,9 @@ function App() {
   const [library, setLibrary] = useState<LoadState<YtItem[]>>({ status: "idle", data: [] });
   const [libraryMixSongs, setLibraryMixSongs] = useState<YtItem[]>([]);
   const [history, setHistory] = useState<LoadState<YtItem[]>>({ status: "idle", data: [] });
-  const [historySource, setHistorySource] = useState<"local" | "remote">("local");
+  const [historySource, setHistorySource] = useState<HistorySource>("local");
   const [historyQuery, setHistoryQuery] = useState("");
-  const [statsPeriod, setStatsPeriod] = useState<"all" | "day" | "week" | "month" | "year">("all");
+  const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>("all");
   const [stats, setStats] = useState<LoadState<StatsPayload>>({
     status: "idle",
     data: { period: "all", totalPlays: 0, totalMinutes: 0, uniqueSongs: 0, rows: [], artists: [], albums: [] },
@@ -137,20 +155,7 @@ function App() {
     data: { sections: [] },
   });
   const [librarySyncing, setLibrarySyncing] = useState(false);
-  const [libraryMode, setLibraryMode] = useState<
-    | "mix"
-    | "local"
-    | "songs"
-    | "liked"
-    | "uploaded"
-    | "downloads"
-    | "cache"
-    | "top"
-    | "playlists"
-    | "albums"
-    | "artists"
-    | "podcasts"
-  >("mix");
+  const [libraryMode, setLibraryMode] = useState<LibraryMode>("mix");
   const [librarySongFilter, setLibrarySongFilter] = useState<LibrarySongFilter>("liked");
   const [librarySearch, setLibrarySearch] = useState("");
   const [librarySort, setLibrarySort] = useState<LibrarySort>("created");
@@ -190,6 +195,7 @@ function App() {
     hasVisiblePlaylistAutoEntries,
     visiblePlaylists,
     visiblePlaylistPicker,
+    localPlaylists,
   } = usePlaylists({ sessionStatus, setNotice, setSelectedItems, setSelectionMode, settings });
   const [topPeriod, setTopPeriod] = useState<"all" | "day" | "week" | "month" | "year">("all");
   const topSize = 50;
@@ -383,75 +389,130 @@ function App() {
     setInfoItem(null);
   };
 
+  /** The page being shown, as a history entry (route, selected tab, scroll offset). */
+  const currentEntry = (): HistoryEntry => ({
+    route: pageRoute,
+    tab: active,
+    scrollTop: pageScrollRef.current?.scrollTop ?? 0,
+  });
+
+  const pushHistory = () => {
+    pendingScrollRef.current = null;
+    setNavHistory((current) => pushEntry(current, currentEntry()));
+  };
+
   const navigateTo = (next: NavKey) => {
     if (next === active) {
       closeTransientLayers();
       return;
     }
-    setBackStack((current) => [...current, active]);
-    setForwardStack([]);
+    pushHistory();
     closeTransientLayers();
     setActive(next);
+  };
+
+  const restoreEntry = (entry: HistoryEntry) => {
+    pendingScrollRef.current = entry.scrollTop;
+    void showRoute(entry.route, entry.tab);
   };
 
   const navigateBack = () => {
-    const previous = backStack[backStack.length - 1];
-    if (!previous) return;
-    setBackStack((current) => current.slice(0, -1));
-    setForwardStack((current) => [active, ...current]);
-    closeTransientLayers();
-    setActive(previous);
+    const step = stepBack(navHistory, currentEntry());
+    if (!step) return;
+    setNavHistory(step.history);
+    restoreEntry(step.entry);
   };
 
   const navigateForward = () => {
-    const next = forwardStack[0];
-    if (!next) return;
-    setForwardStack((current) => current.slice(1));
-    setBackStack((current) => [...current, active]);
-    closeTransientLayers();
-    setActive(next);
+    const step = stepForward(navHistory, currentEntry());
+    if (!step) return;
+    setNavHistory(step.history);
+    restoreEntry(step.entry);
+  };
+
+  // Which overlays are open (U4-005). Back and Escape close the topmost one; see src/app/layers.ts for the order.
+  const layerState: LayerState = {
+    logoutDialog: logoutDialogOpen,
+    createPlaylist: createPlaylistOpen,
+    playlistPicker: playlistPickerItems !== null,
+    artistPicker: artistPickerItem !== null,
+    youtubeMatch: youtubeMatchItem !== null,
+    spotifyAdd: spotifyAddItem !== null,
+    editItem: editItem !== null,
+    speedDialog: speedDialogOpen,
+    sleepTimer: sleepTimerOpen,
+    info: infoItem !== null,
+    recap: recapOpen,
+    menu: menuItem !== null || playerMenuOpen,
+    settings: settingsOpen,
+    lyrics: lyrics !== null,
+    queue: queueOpen,
+    expandedPlayer: playerExpanded,
+    playlist: playlist !== null,
+    detail: detail !== null,
+    spotifyPlaylist: spotifyOpenPlaylist !== null,
+    spotifyLiked: spotifyLikedOpen,
+  };
+
+  const closeLayer = (layer: Layer) => {
+    switch (layer) {
+      case "logoutDialog":
+        return setLogoutDialogOpen(false);
+      case "createPlaylist":
+        return setCreatePlaylistOpen(false);
+      case "playlistPicker":
+        return setPlaylistPickerItems(null);
+      case "artistPicker":
+        return setArtistPickerItem(null);
+      case "youtubeMatch":
+        return setYoutubeMatchItem(null);
+      case "spotifyAdd":
+        return setSpotifyAddItem(null);
+      case "editItem":
+        return setEditItem(null);
+      case "speedDialog":
+        return setSpeedDialogOpen(false);
+      case "sleepTimer":
+        return setSleepTimerOpen(false);
+      case "info":
+        return setInfoItem(null);
+      case "recap":
+        return setRecapOpen(false);
+      case "menu":
+        setMenuItem(null);
+        return setPlayerMenuOpen(false);
+      case "settings":
+        return setSettingsOpen(false);
+      case "lyrics":
+        return setLyrics(null);
+      case "queue":
+        return setQueueOpen(false);
+      case "expandedPlayer":
+        return setPlayerExpanded(false);
+      case "playlist":
+        return setPlaylist(null);
+      case "detail":
+        return setDetail(null);
+      case "spotifyPlaylist":
+        return setSpotifyOpenPlaylist(null);
+      case "spotifyLiked":
+        return setSpotifyLikedOpen(false);
+    }
+  };
+
+  /** Closes the topmost layer; returns false when nothing was open. */
+  const closeTopmostLayer = () => {
+    const top = topmostLayer(layerState);
+    if (!top) return false;
+    closeLayer(top);
+    return true;
   };
 
   const goBack = () => {
-    if (settingsOpen) {
-      setSettingsOpen(false);
-      return;
-    }
-    if (lyrics) {
-      setLyrics(null);
-      return;
-    }
-    if (playerExpanded) {
-      setPlayerExpanded(false);
-      return;
-    }
-    if (queueOpen) {
-      setQueueOpen(false);
-      return;
-    }
-    if (menuItem) {
-      setMenuItem(null);
-      setPlayerMenuOpen(false);
-      return;
-    }
-    if (detail) {
-      setDetail(null);
-      return;
-    }
-    if (playlist) {
-      setPlaylist(null);
-      return;
-    }
-    if (infoItem) {
-      setInfoItem(null);
-      return;
-    }
-    navigateBack();
+    if (!closeTopmostLayer()) navigateBack();
   };
 
-  const hasTransientLayer = Boolean(
-    settingsOpen || lyrics || playerExpanded || queueOpen || menuItem || detail || playlist || infoItem,
-  );
+  const hasTransientLayer = topmostLayer(layerState) !== null;
 
   const loadHomeMore = async () => {
     if (home.status !== "ready" || !home.data.continuation || homeMoreLoading) return;
@@ -973,43 +1034,40 @@ function App() {
     event.preventDefault();
     const value = query.trim();
     if (!value) return;
-    navigateTo("search_input");
+    // A pasted page link opens that page straight away, so Back returns to where the link was pasted (U4-007).
+    if (parseLink(value)?.kind !== "route") navigateTo("search_input");
+    await searchFor(value);
+  };
+
+  /**
+   * Loads search results for `value` on the search page. Typed searches (`typed`) are recorded in the search history and
+   * open a pasted link; a search shown again from history only shows the link in the box.
+   */
+  const searchFor = async (value: string, typed = true) => {
+    const record = typed;
     setSubmittedQuery(value);
-    if (settings.pauseSearchHistory !== true)
+    if (record && settings.pauseSearchHistory !== true)
       void invoke("search_history_add", { query: value })
         .then(() => loadSearchHistory())
         .catch(() => undefined);
-    const parsedUrl = parseYouTubeUrl(value);
-    if (parsedUrl) {
+    const link = parseLink(value);
+    if (link) {
       setSearch({ status: "idle", data: { items: [], continuation: null } });
-      const item: YtItem =
-        parsedUrl.kind === "video"
-          ? {
-              id: parsedUrl.id,
-              kind: "song",
-              title: "YouTube video",
-              subtitle: value,
-              artists: [],
-              videoId: parsedUrl.id,
-            }
-          : parsedUrl.kind === "album"
-            ? {
-                id: `MPREb_${parsedUrl.id}`,
-                kind: "album",
-                title: "YouTube Music album",
-                subtitle: value,
-                artists: [],
-                browseId: `MPREb_${parsedUrl.id}`,
-              }
-            : {
-                id: parsedUrl.id,
-                kind: parsedUrl.kind,
-                title: parsedUrl.kind === "playlist" ? "YouTube playlist" : "YouTube artist",
-                subtitle: value,
-                artists: [],
-                browseId: parsedUrl.id,
-              };
-      await openItem(item);
+      if (!typed) return;
+      if (link.kind === "video") {
+        await openItem({
+          id: link.videoId,
+          kind: "song",
+          title: "YouTube video",
+          subtitle: value,
+          artists: [],
+          videoId: link.videoId,
+        });
+      } else if (link.kind === "route") {
+        await openRoute(link.route);
+      } else {
+        setNotice(`Spotify ${link.type} links cannot be opened directly. Search for it by name instead.`);
+      }
       return;
     }
     setSearch({ status: "loading", data: { items: [], continuation: null } });
@@ -1919,65 +1977,7 @@ function App() {
       target?.isContentEditable;
     if (typing && !(event.key === "Escape")) return;
     if (event.key === "Escape") {
-      if (settingsOpen) {
-        setSettingsOpen(false);
-        event.preventDefault();
-        return;
-      }
-      if (editItem) {
-        setEditItem(null);
-        event.preventDefault();
-        return;
-      }
-      if (spotifyAddItem) {
-        setSpotifyAddItem(null);
-        event.preventDefault();
-        return;
-      }
-      if (spotifyLikedOpen) {
-        setSpotifyLikedOpen(false);
-        event.preventDefault();
-        return;
-      }
-      if (spotifyOpenPlaylist) {
-        setSpotifyOpenPlaylist(null);
-        event.preventDefault();
-        return;
-      }
-      if (youtubeMatchItem) {
-        setYoutubeMatchItem(null);
-        event.preventDefault();
-        return;
-      }
-      if (sleepTimerOpen) {
-        setSleepTimerOpen(false);
-        event.preventDefault();
-        return;
-      }
-      if (artistPickerItem) {
-        setArtistPickerItem(null);
-        event.preventDefault();
-        return;
-      }
-      if (playlistPickerItems) {
-        setPlaylistPickerItems(null);
-        event.preventDefault();
-        return;
-      }
-      if (createPlaylistOpen) {
-        setCreatePlaylistOpen(false);
-        event.preventDefault();
-        return;
-      }
-      if (logoutDialogOpen) {
-        setLogoutDialogOpen(false);
-        event.preventDefault();
-        return;
-      }
-      if (lyrics || detail || playlist || menuItem || queueOpen || playerExpanded || infoItem) {
-        closeTransientLayers();
-        event.preventDefault();
-      }
+      if (closeTopmostLayer()) event.preventDefault();
       return;
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
@@ -2260,6 +2260,84 @@ function App() {
     }
     setNotice(`Meld could not open this ${item.kind}: the live item did not include a supported navigation endpoint.`);
   };
+  /** Shows `route` on top of `tab` without touching the history (back/forward and `openRoute` use it). */
+  const showRoute = async (route: Route, tab: NavKey) => {
+    closeTransientLayers();
+    setSpotifyOpenPlaylist(null);
+    setSpotifyLikedOpen(false);
+    setActive(topLevelOf(route, tab));
+    switch (route.name) {
+      case "home":
+        return;
+      case "search":
+        setQuery(route.query);
+        if (route.query) await searchFor(route.query, false);
+        else setSubmittedQuery("");
+        return;
+      case "library": {
+        const songFilter = librarySongFilterFor(route.mode);
+        if (songFilter) setLibrarySongFilter(songFilter);
+        setLibraryMode(route.mode);
+        return;
+      }
+      case "history":
+        setHistorySource(route.source);
+        return;
+      case "stats":
+        setStatsPeriod(route.period);
+        return;
+      case "settings":
+        setSettingsPage(route.page);
+        setSettingsOpen(true);
+        return;
+      case "album":
+      case "artist":
+      case "podcast":
+      case "browse":
+        await openItem({
+          id: route.browseId,
+          kind: route.name,
+          title: "",
+          subtitle: "",
+          artists: [],
+          browseId: route.browseId,
+          params: route.name === "browse" ? route.params : undefined,
+        });
+        return;
+      case "playlist": {
+        const known = localPlaylists.find((item) => item.id === route.playlistId);
+        await openLocalPlaylist(
+          known ?? { id: route.playlistId, kind: "playlist", title: "Playlist", subtitle: "", artists: [] },
+        );
+        return;
+      }
+      case "spotify-playlist": {
+        const known =
+          spotifyLibrary.status === "ready"
+            ? spotifyLibrary.data.playlists.find((item) => item.id === route.playlistId)
+            : undefined;
+        await openSpotifyPlaylist(known ?? { id: route.playlistId, name: "Spotify playlist" });
+        return;
+      }
+      case "spotify-liked":
+        openSpotifyLiked();
+        return;
+    }
+  };
+
+  /** Opens a typed route (U4-003) as a new history entry. Returns false for an invalid route. */
+  const openRoute = async (route: Route): Promise<boolean> => {
+    if (!isValidRoute(route)) return false;
+    if (route.name === "settings") {
+      setSettingsPage(route.page);
+      setSettingsOpen(true);
+      return true;
+    }
+    if (!sameRoute(route, pageRoute)) pushHistory();
+    await showRoute(route, active);
+    return true;
+  };
+
   const refreshPodcastDetail = async () => {
     if (
       !detail ||
@@ -2390,6 +2468,49 @@ function App() {
     hideItem,
   ]);
 
+  // The page the user sees, as a typed route (U4-003). Settings is a modal on top of it, not a history entry.
+  const pageRoute = routeFromView({
+    active,
+    submittedQuery,
+    libraryMode,
+    historySource,
+    statsPeriod,
+    settingsPage: null,
+    detail: detail ? { kind: detail.data.kind, browseId: detail.data.browseId } : null,
+    playlistId: playlist ? (playlist.data.playlist.browseId ?? playlist.data.playlist.id) : null,
+    spotifyPlaylistId: spotifyOpenPlaylist?.id ?? null,
+    spotifyLikedOpen,
+  });
+  const currentRoute: Route = settingsOpen ? { name: "settings", page: settingsPage } : pageRoute;
+  const pageRouteKey = routeKey(pageRoute);
+
+  // U4-006: show the last safe page again after a restart, and remember the page being shown.
+  const lastRouteRestoredRef = useRef(false);
+  const restoreLastRoute = useEffectEvent(() => {
+    const saved = parseLastRoute(localStorage.getItem(LAST_ROUTE_KEY));
+    if (saved) void showRoute(saved.route, saved.tab);
+  });
+  useEffect(() => restoreLastRoute(), []);
+  const lastRouteValue = serializeLastRoute(pageRoute, active);
+  useEffect(() => {
+    // The first render still shows Home; storing it would overwrite the page that is being restored.
+    if (!lastRouteRestoredRef.current) {
+      lastRouteRestoredRef.current = true;
+      return;
+    }
+    if (lastRouteValue) localStorage.setItem(LAST_ROUTE_KEY, lastRouteValue);
+    else localStorage.removeItem(LAST_ROUTE_KEY);
+  }, [lastRouteValue]);
+
+  useEffect(() => {
+    const target = pendingScrollRef.current;
+    const element = pageScrollRef.current;
+    if (target === null || !element) return;
+    element.scrollTop = target;
+    // Pages that load their content keep the target until they are tall enough to reach it.
+    if (Math.abs(element.scrollTop - target) < 2) pendingScrollRef.current = null;
+  }, [pageRouteKey, home.status, search.status, library.status, history.status, detail?.status, playlist?.status]);
+
   return (
     <div className={settings.sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
       <aside className="sidebar">
@@ -2448,7 +2569,7 @@ function App() {
         )}
       </aside>
 
-      <main className="main-area">
+      <main className="main-area" data-route={routePath(currentRoute)}>
         <header className="topbar">
           <div className="topbar-title">
             <div>
@@ -2459,7 +2580,7 @@ function App() {
               <button
                 className="topbar-button icon-button"
                 onClick={goBack}
-                disabled={!hasTransientLayer && backStack.length === 0}
+                disabled={!hasTransientLayer && navHistory.back.length === 0}
                 title="Back"
                 aria-label="Back"
               >
@@ -2468,7 +2589,7 @@ function App() {
               <button
                 className="topbar-button icon-button"
                 onClick={navigateForward}
-                disabled={forwardStack.length === 0}
+                disabled={navHistory.forward.length === 0}
                 title="Forward"
                 aria-label="Forward"
               >
@@ -2563,7 +2684,7 @@ function App() {
           </div>
         )}
 
-        <div className="page-scroll">
+        <div className="page-scroll" ref={pageScrollRef}>
           {active === "home" && (
             <HomeScreen
               hideItem={hideItem}
@@ -3650,12 +3771,12 @@ function App() {
         activeLyricRef={activeLyricRef}
         adjustVolumeByWheel={adjustVolumeByWheel}
         audioRef={audioRef}
-        backStack={backStack}
+        backStack={navHistory.back}
         changeLyricsProvider={changeLyricsProvider}
         cycleRepeat={cycleRepeat}
         durationSeconds={durationSeconds}
         formatTime={formatTime}
-        forwardStack={forwardStack}
+        forwardStack={navHistory.forward}
         goBack={goBack}
         hasTransientLayer={hasTransientLayer}
         isPlaying={isPlaying}
@@ -3694,9 +3815,9 @@ function App() {
         activeLyricIndex={activeLyricIndex}
         activeLyricRef={activeLyricRef}
         audioRef={audioRef}
-        backStack={backStack}
+        backStack={navHistory.back}
         changeLyricsProvider={changeLyricsProvider}
-        forwardStack={forwardStack}
+        forwardStack={navHistory.forward}
         goBack={goBack}
         hasTransientLayer={hasTransientLayer}
         lyrics={lyrics}

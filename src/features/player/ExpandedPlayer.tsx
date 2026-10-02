@@ -1,18 +1,19 @@
+import type { HistoryEntry } from "../../app/history";
 import { RefObject, Dispatch, SetStateAction } from "react";
 import { mediaSrc } from "../../lib/media";
-import { NavKey, LoadState, LyricsPayload, YtItem, PlayerPayload, LibraryItemState } from "../../types";
+import { LoadState, LyricsPayload, YtItem, PlayerPayload, LibraryItemState } from "../../types";
 
 export type ExpandedPlayerProps = {
   activeLyricIndex: number;
   activeLyricRef: RefObject<HTMLButtonElement | null>;
   adjustVolumeByWheel: (event: { deltaY: number; preventDefault: () => void }) => void;
   audioRef: RefObject<HTMLAudioElement | null>;
-  backStack: NavKey[];
+  backStack: HistoryEntry[];
   changeLyricsProvider: (provider: string) => Promise<void>;
   cycleRepeat: () => Promise<void>;
   durationSeconds: number;
   formatTime: (seconds: number) => string;
-  forwardStack: NavKey[];
+  forwardStack: HistoryEntry[];
   goBack: () => void;
   hasTransientLayer: boolean;
   isPlaying: boolean;

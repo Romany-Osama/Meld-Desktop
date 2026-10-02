@@ -1,3 +1,4 @@
+import { SettingsPage } from "../../app/routes";
 import { invoke } from "@tauri-apps/api/core";
 import { Dispatch, SetStateAction, useState, useCallback } from "react";
 import { AudioQuality } from "../../lib/audioQuality";
@@ -11,9 +12,7 @@ export type SettingsStateDeps = {
 export function useSettingsState({ setNotice }: SettingsStateDeps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const [settingsPage, setSettingsPage] = useState<
-    "main" | "appearance" | "content" | "player" | "privacy" | "storage" | "integrations" | "about"
-  >("main");
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>("main");
 
   const [audioQuality, setAudioQuality] = useState<AudioQuality>("auto");
 

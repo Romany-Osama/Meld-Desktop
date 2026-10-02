@@ -156,6 +156,7 @@ export function usePlaylists({
   }, [localPlaylists, playlistPickerSearch, playlistPickerSort, playlistPickerSortDescending]);
 
   return {
+    localPlaylists,
     playlistSearch,
     setPlaylistSearch,
     playlistView,
