@@ -21,6 +21,7 @@ import {
   checkCapabilities,
   checkDestructivePolicy,
   checkErrorBoundaries,
+  checkEs2020Lib,
   checkOccurrenceKeys,
   checkFeatureModules,
   checkScreenSplit,
@@ -333,4 +334,11 @@ test("ui: App.tsx composes features and stays under its size cap (TR-M1)", () =>
   assert.deepEqual(checkAppComposition(inline), ["App.tsx renders an inline dialog; move it to a feature"]);
   const grown = (path) => (path === "src/App.tsx" ? read(path) + "\n".repeat(400) : read(path));
   assert.match(checkAppComposition(grown)[0], /the cap is 3200/);
+});
+
+test("source stays inside the ES2020 lib that CI type-checks against", () => {
+  assert.deepEqual(checkEs2020Lib("const last = list[list.length - 1];"), []);
+  assert.deepEqual(checkEs2020Lib("const last = list.at(-1);"), [
+    "Array.prototype.at is not in the ES2020 lib; use index access",
+  ]);
 });

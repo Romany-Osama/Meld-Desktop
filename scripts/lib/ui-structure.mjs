@@ -282,3 +282,11 @@ export function checkAppComposition(readFile) {
   if (/className="detail-overlay"/.test(app)) problems.push("App.tsx renders an inline dialog; move it to a feature");
   return problems;
 }
+
+/**
+ * tsconfig targets the ES2020 lib. Locally @types/node declares Array.prototype.at, so `tsc` passes here and fails
+ * on the Windows CI runner; catch it before pushing. `source` is every file under src, tests included.
+ */
+export function checkEs2020Lib(source) {
+  return /\.at\(\s*-?\d+\s*\)/.test(source) ? ["Array.prototype.at is not in the ES2020 lib; use index access"] : [];
+}
