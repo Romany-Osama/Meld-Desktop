@@ -84,3 +84,10 @@ Architecture and scope decisions, newest last. Each entry: context, decision, ev
 - **Uploads** (`MLPT` context): signed-in clients only, WEB_REMIX first (PLAY-007, partial).
 - **Memory:** the client that served a stream is remembered. If the WebView reports a failure, that client is excluded for that video for 5 minutes (PLAY-005, same TTL as Meld). If every client is excluded, the exclusions are ignored rather than refusing to play. Unavailable, members-only and region-blocked are final and stop the cascade.
 - **Frontend:** at most 2 recoveries per playback session; streams count as expired 60 s early (PLAY-030, PLAY-032).
+
+## D-018 — Prove a stream serves the whole file before using it (PLAY-005, PLAY-013)
+- **Context:** 0.3.0 downloads failed with 403. Live probes on 2026-10-02: ANDROID_VR 1.65.10 URLs answer 206 for ranges inside the first ~800 KB and 403 for anything later (and for `bytes=0-` and plain GETs). VISIONOS 0.1, ANDROID_VR 1.43.32, IOS 21.03.3 and solved WEB_REMIX URLs serve the full file. The audio element only fetched the start before falling back, so playback looked fine while every download failed.
+- **Decision:** After resolving, request 1 KiB at `max(len/2, 1 MiB)` (no probe for files ≤ 1 MiB + 1 KiB). Treat 401/403/404/410 as `StreamForbidden`. Exclude that client for the video (5 min) and demote it for every song for 30 min (`ClientHealth`, stable reorder), then continue the cascade. Network errors and other statuses are inconclusive and do not reject the URL. Cost: one small request per fresh resolve.
+- **Downloads:** always `Range: bytes={offset}-`. On a refused URL, mark it and re-resolve (max 3 requests); on 416 with a partial file, restart from 0. Error strings never contain the URL (`without_url`).
+- **Verified:** the ignored live test now downloads every client's full stream; ANDROID_VR 1.65.10 is rejected by the probe and the other four clients deliver 3,433,755 / 3,433,755 bytes.
+
