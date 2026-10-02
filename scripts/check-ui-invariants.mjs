@@ -2,6 +2,7 @@
 // Source-level UI invariants that must hold until component tests cover them (Phase 1, M1.4).
 import { existsSync, readFileSync } from "node:fs";
 import {
+  checkAppComposition,
   checkCapabilities,
   checkDestructivePolicy,
   checkErrorBoundaries,
@@ -20,6 +21,7 @@ const problems = [
   ...checkDestructivePolicy((path) => (existsSync(path) ? readFileSync(path, "utf8") : null), readUiSource()),
   ...checkErrorBoundaries((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
   ...checkOccurrenceKeys(readUiSource()),
+  ...checkAppComposition((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
   ...checkUiInvariants(readUiSource()),
   ...checkLogoutClearsWebview(readFileSync("src-tauri/src/lib.rs", "utf8")),
 ];

@@ -269,3 +269,16 @@ export function checkOccurrenceKeys(uiSource) {
     problems.push("selection is checked by id; use isSelected(occurrence key)");
   return problems;
 }
+
+/** TR-M1: App.tsx only composes features. The cap goes down as more moves out; it never goes up. */
+export const MAX_APP_LINES = 3200;
+
+/** TR-M1: dialogs and overlays are feature components, not inline JSX in App.tsx; App stays under the cap. */
+export function checkAppComposition(readFile) {
+  const problems = [];
+  const app = readFile("src/App.tsx") ?? "";
+  const lines = app.split("\n").length;
+  if (lines > MAX_APP_LINES) problems.push(`App.tsx has ${lines} lines; the cap is ${MAX_APP_LINES}`);
+  if (/className="detail-overlay"/.test(app)) problems.push("App.tsx renders an inline dialog; move it to a feature");
+  return problems;
+}

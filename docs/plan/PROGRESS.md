@@ -63,7 +63,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] U4-013 (P0) Centralize notifications — src/app/notifications.ts + NoticeStack (D-034); notifications.test.ts, featureModules.test.tsx, App.test.tsx (error with Retry)
 - [x] U4-014 (P0) Add an error boundary per major route and player — src/components/ErrorBoundary.tsx + PlayerAudio (D-036); ErrorBoundary.test.tsx, App.test.tsx (broken album page), checks.test.mjs (error boundaries)
 - [x] U4-015 (P0) Use stable domain IDs plus occurrence IDs — src/lib/identity.ts + occurrence-keyed selection (D-037); identity.test.ts, featureModules.test.tsx (duplicate selection), screens.test.tsx (PlaylistScreen), checks.test.mjs (occurrence keys)
-- [ ] TR-M1 (P1) Monolithic frontend and backend
+- [ ] TR-M1 (P1) Monolithic frontend and backend — partial: App.tsx dialogs moved to features + size cap (D-038, checks.test.mjs app composition); backend split pending (S5-003)
 
 ## Phase 1 · M1.2 Typed IPC and capability model
 

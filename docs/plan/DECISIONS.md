@@ -207,3 +207,9 @@ Architecture and scope decisions, newest last. Each entry: context, decision, ev
 - **Later:** removing a song from a local playlist still sends only the song id to Rust, which removes every copy; that needs an entry id in the local playlist table (backend split, S5-003 onwards).
 - **Guard and tests:** `checkOccurrenceKeys` (`npm run check:ui`) fails on an `${…id}-${index}` key or a selection check by id. `identity.test.ts`; `featureModules.test.tsx` (one copy of a duplicate selected); `screens.test.tsx` (two selectable rows for a duplicate song).
 
+## D-038 — TR-M1 frontend step: dialogs move out of App.tsx
+- **Context:** TR-M1 asks for the §4.1 layout in both halves. After U4-001…U4-015 the screens, data hooks and models are separate, but App.tsx (3,596 lines) still held twelve inline dialogs and the selection bar.
+- **Decision:** each dialog is a feature component with explicit props, extracted mechanically (same JSX, props inferred from what it used): `stats/RecapDialog`, `selection/SelectionBar`, `spotify/SpotifyAddDialog`, `spotify/YoutubeMatchDialog`, `library/EditItemDialog`, `home/SpeedDialDialog`, `player/SleepTimerDialog`, `menu/ArtistPickerDialog`, `menu/ItemInfoDialog`, `playlist/PlaylistPickerDialog`, `playlist/CreatePlaylistDialog`, `accounts/LogoutDialog`. App keeps the open/closed condition and renders `<XDialog …/>`. App.tsx is now about 3,160 lines.
+- **Guard:** `checkAppComposition` (`npm run check:ui`) fails if App.tsx renders an inline `detail-overlay` again or grows past `MAX_APP_LINES` (3,200; lower it as more moves out, never raise it).
+- **Still open (TR-M1 stays unticked):** the menu-action handler, playback (`playItem`, queue continuation) and the library loaders are still App functions; they move into feature hooks next to their state, and the `stores/` + `ipc/` folders arrive with M1.2 (typed IPC). The backend half is S5-003.
+

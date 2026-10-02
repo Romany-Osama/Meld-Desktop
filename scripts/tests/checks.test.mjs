@@ -17,6 +17,7 @@ import {
 } from "../lib/ui-invariants.mjs";
 import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
 import {
+  checkAppComposition,
   checkCapabilities,
   checkDestructivePolicy,
   checkErrorBoundaries,
@@ -322,4 +323,14 @@ test("ui: list keys and selection tell duplicate songs apart (U4-015)", () => {
   assert.deepEqual(checkOccurrenceKeys("checked={selectedItems.some((value) => value.id === item.id)}"), [
     "selection is checked by id; use isSelected(occurrence key)",
   ]);
+});
+
+test("ui: App.tsx composes features and stays under its size cap (TR-M1)", () => {
+  const read = (path) => (existsSync(path) ? readFileSync(path, "utf8") : null);
+  assert.deepEqual(checkAppComposition(read), []);
+  const inline = (path) =>
+    path === "src/App.tsx" ? read(path) + '\n<div className="detail-overlay" role="dialog" />' : read(path);
+  assert.deepEqual(checkAppComposition(inline), ["App.tsx renders an inline dialog; move it to a feature"]);
+  const grown = (path) => (path === "src/App.tsx" ? read(path) + "\n".repeat(400) : read(path));
+  assert.match(checkAppComposition(grown)[0], /the cap is 3200/);
 });
