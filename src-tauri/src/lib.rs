@@ -21,7 +21,7 @@ use std::sync::{
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::webview::{PageLoadEvent, WebviewWindowBuilder};
-use tauri::{Emitter, Manager, Url, WebviewUrl};
+use tauri::{Manager, Url, WebviewUrl};
 use tokio::time::timeout;
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
@@ -38,6 +38,7 @@ const USER_AGENT: &str =
 const VISITOR_PREFIX: &str = "Cg";
 
 mod download_resume;
+mod events;
 mod ipc;
 pub(crate) use ipc::cancel::cancellable;
 pub(crate) use ipc::error::{IpcError, IpcResult};
@@ -2141,7 +2142,7 @@ fn read_download_info(db: &Connection, song_id: &str) -> Result<Option<DownloadI
 }
 
 fn emit_download(app: &tauri::AppHandle, info: &DownloadInfo) {
-    let _ = app.emit("download-state", info.clone());
+    events::emit(app, events::AppEvent::DownloadState, info.clone());
 }
 
 fn player_cache_limit_mb(db: &Connection) -> i64 {

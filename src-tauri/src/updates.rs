@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
 /// Marker shipped inside the portable ZIP next to the executable.
@@ -127,8 +127,11 @@ pub async fn app_update_install(app: AppHandle) -> crate::IpcResult<()> {
         .download(
             move |chunk, total| {
                 downloaded += chunk as u64;
-                let _ =
-                    progress_app.emit("app-update-progress", UpdateProgress { downloaded, total });
+                crate::events::emit(
+                    &progress_app,
+                    crate::events::AppEvent::AppUpdateProgress,
+                    UpdateProgress { downloaded, total },
+                );
             },
             || {},
         )

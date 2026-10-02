@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listenEvent } from "../../lib/events";
 import { useEffect, useState } from "react";
 import { errorMessage } from "../../lib/util";
 import { SessionStatus, SpotifySessionStatus, SpotifyProfile } from "../../types";
@@ -78,28 +78,28 @@ export function useAccounts({ setNotice }: AccountsDeps) {
   // Account sign-in results arrive as events from the sign-in windows.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    void listen<SessionStatus>("account-status", (event) => {
-      setSessionStatus(event.payload);
+    void listenEvent("account-status", (payload) => {
+      setSessionStatus(payload);
       setNotice("Google / YouTube Music account connected and validated.");
     }).then((stop) => {
       unlisten = stop;
     });
     let stopSpotify: (() => void) | undefined;
-    void listen<SpotifySessionStatus>("spotify-status", (event) => {
-      setSpotifyStatus(event.payload);
+    void listenEvent("spotify-status", (payload) => {
+      setSpotifyStatus(payload);
       setNotice("Spotify account connected and token validated.");
     }).then((stop) => {
       stopSpotify = stop;
     });
     let stopAccountError: (() => void) | undefined;
-    void listen<string>("account-status-error", (event) => {
-      setNotice(`Google account validation failed: ${event.payload}`, "error");
+    void listenEvent("account-status-error", (payload) => {
+      setNotice(`Google account validation failed: ${errorMessage(payload)}`, "error");
     }).then((stop) => {
       stopAccountError = stop;
     });
     let stopSpotifyError: (() => void) | undefined;
-    void listen<string>("spotify-status-error", (event) => {
-      setNotice(`Spotify account validation failed: ${event.payload}`, "error");
+    void listenEvent("spotify-status-error", (payload) => {
+      setNotice(`Spotify account validation failed: ${errorMessage(payload)}`, "error");
     }).then((stop) => {
       stopSpotifyError = stop;
     });

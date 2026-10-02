@@ -1,7 +1,7 @@
 import { errorMessage } from "./lib/util";
+import { listenEvent } from "./lib/events";
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { listen } from "@tauri-apps/api/event";
 import {
   checkForUpdate,
   formatProgress,
@@ -30,7 +30,7 @@ export function UpdatePanel() {
   }, []);
   useEffect(() => {
     let stop: (() => void) | undefined;
-    void listen<UpdateProgress>("app-update-progress", (event) => setProgress(event.payload)).then((unlisten) => {
+    void listenEvent("app-update-progress", (payload) => setProgress(payload)).then((unlisten) => {
       stop = unlisten;
     });
     return () => stop?.();
