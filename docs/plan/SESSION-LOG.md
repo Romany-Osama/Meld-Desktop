@@ -59,7 +59,7 @@
 
 **Next task:** PLAY-013 (validate every redirect hop), then Phase 1 M1.1 — U4-001.
 
-## 2026-10-02 — Session 4 (0.3.1 offline-download hotfix)
+## 2026-10-02 — Session 4 (offline-download fix, unreleased)
 
 **Done**
 - Root cause of "audio cache response failed: HTTP 403" for offline downloads: ANDROID_VR 1.65.10 stream URLs (first client in the order) serve only the first ~800 KB and answer 403 for later ranges, `bytes=0-` and plain GETs. The audio element only fetched the start, so playback looked fine while every download failed. Reproduced live.
@@ -70,4 +70,6 @@
 **Blockers / owner actions**
 - Same as session 3 (Authenticode certificate, real-PC check). The sandbox was reset between sessions, so the GitHub token had to be supplied again.
 
-**Next task:** PLAY-013 (validate every redirect hop; overlaps PLAY-046), then Phase 1 M1.1 — U4-001.
+- Owner decision: no more interim releases; one large release when the plan is finished. Fixes land on `main` under `[Unreleased]`.
+
+**Next task:** PLAY-042/PLAY-043/R6-027 (bound player-cache jobs), then PLAY-041/R6-023/R6-026 (cache quota, orphan cleanup), then Phase 0 leftovers (TR-L9).

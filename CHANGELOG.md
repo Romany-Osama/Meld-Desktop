@@ -4,10 +4,6 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 
 ## [Unreleased]
 
-## [0.3.1] — Offline downloads fixed
-
-**Update recommended for everyone on 0.3.0.** You get it inside the app (Settings → About, or the daily check), or run the setup EXE over your current install. Library, downloads and settings are kept.
-
 ### Fixed
 - **Offline downloads failed with "audio cache response failed: HTTP status client error (403 Forbidden)".** YouTube's media servers now serve only the first ~1 MB of stream links from the ANDROID_VR 1.65 client (the first one Meld tries) and refuse the rest. Playing could start and recover; downloading the whole file could not. Meld now checks every new stream link by reading a small piece past the first megabyte. A refused link is skipped straight away for another YouTube source, and that source is tried last for the next 30 minutes.
 - Downloads send range requests the way the player does. If a link is refused during a download, Meld picks another source and continues from the bytes it already has (up to two retries). A partial file that no longer matches is restarted cleanly.
