@@ -5,12 +5,13 @@ import type { ResourceCache } from "../../data/resourceCache";
 import { useResource } from "../../data/useResource";
 import { homeKey, speedDialKey } from "../../data/keys";
 import { errorMessage } from "../../lib/util";
+import type { SetNotice } from "../../app/notifications";
 
 const HOME_FALLBACK = { status: "loading" as const, data: { sections: [] } as HomePage };
 const SPEED_DIAL_FALLBACK = { status: "idle" as const, data: [] as YtItem[] };
 
 /** Server state of the Home page (U4-008): the feed, its continuation and Speed Dial. */
-export function useHomeData({ cache, setNotice }: { cache: ResourceCache; setNotice: (value: string) => void }) {
+export function useHomeData({ cache, setNotice }: { cache: ResourceCache; setNotice: SetNotice }) {
   const [home] = useResource<HomePage>(cache, homeKey, HOME_FALLBACK);
   const [speedDialState] = useResource<YtItem[]>(cache, speedDialKey, SPEED_DIAL_FALLBACK);
   const [homeMoreLoading, setHomeMoreLoading] = useState(false);
@@ -21,7 +22,7 @@ export function useHomeData({ cache, setNotice }: { cache: ResourceCache; setNot
 
   const loadSpeedDial = async () => {
     const outcome = await cache.load(speedDialKey, () => invoke<YtItem[]>("speed_dial_items"), { empty: [] });
-    if (outcome.status === "error") setNotice(`Speed Dial unavailable: ${outcome.error}`);
+    if (outcome.status === "error") setNotice(`Speed Dial unavailable: ${outcome.error}`, "error");
   };
 
   const loadHomeMore = async () => {
@@ -39,7 +40,7 @@ export function useHomeData({ cache, setNotice }: { cache: ResourceCache; setNot
         entry && entry.status === "ready" ? { ...entry, data: mergeHomePages(entry.data, next) } : entry,
       );
     } catch (error) {
-      if (token.isCurrent()) setNotice(`Home continuation failed: ${errorMessage(error)}`);
+      if (token.isCurrent()) setNotice(`Home continuation failed: ${errorMessage(error)}`, "error");
     } finally {
       token.finish();
       setHomeMoreLoading(false);

@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
@@ -6,7 +6,7 @@ import { parseAudioQuality, streamRequest } from "./lib/audioQuality";
 import { appendNewPlayable, removeAt } from "./lib/queue";
 import { playbackEffectKey, resumeStartPosition, shouldAutoplay, startOccurrence } from "./lib/playbackSession";
 import { restoreQueue, restoreSession } from "./lib/persistentPlayback";
-import { errorMessage, noticeSummary, shuffled } from "./lib/util";
+import { errorMessage, shuffled } from "./lib/util";
 import { mediaSrc } from "./lib/media";
 import {
   LibraryItemState,
@@ -72,6 +72,10 @@ import { LAST_ROUTE_KEY, parseLastRoute, serializeLastRoute } from "./app/lastRo
 import { parseLink } from "./app/links";
 import { canPerform, itemMenuEntries, MenuAction, MenuContext } from "./app/capabilities";
 import { ItemMenu } from "./features/menu/ItemMenu";
+import { NoticeStack } from "./components/NoticeStack";
+import { Destructive, DestructiveSpec, runDestructive } from "./app/destructive";
+import { useConfirm } from "./features/confirm/useConfirm";
+import { ConfirmDialog } from "./features/confirm/ConfirmDialog";
 import { captureScreenState, ScreenState, screenStateMatches } from "./app/screenState";
 import { useResourceCache } from "./data/useResource";
 import type { DetailRef, PodcastFilter, TopPeriod } from "./data/keys";
@@ -83,7 +87,13 @@ import { useDetailData } from "./features/detail/useDetailData";
 import { playlistIdOf, usePlaylistData } from "./features/playlist/usePlaylistData";
 
 function App() {
-  const { notice, setNotice } = useNotice();
+  const { notices, setNotice, dismiss: dismissNotice } = useNotice();
+  // Removing or deleting anything goes through one policy: confirm, optimistic change, rollback, undo (U4-012).
+  const { confirmRequest, confirm, answerConfirm } = useConfirm();
+  const destructive: Destructive = useCallback(
+    (spec: DestructiveSpec) => runDestructive(spec, { confirm, notify: setNotice }),
+    [confirm, setNotice],
+  );
   const {
     settingsOpen,
     setSettingsOpen,
@@ -108,7 +118,7 @@ function App() {
     downloadItems,
     removeDownloads,
     maybeAutoDownloadOnLike,
-  } = useDownloads({ audioQuality, setNotice, settings });
+  } = useDownloads({ audioQuality, setNotice, settings, destructive });
   const {
     logoutDialogOpen,
     setLogoutDialogOpen,
@@ -246,7 +256,7 @@ function App() {
     detailArtistSubscribed,
     setDetailArtistSubscribed,
   } = useDetailData({ cache, detailRef, setNotice });
-  const { playlist, loadPlaylist, reloadPlaylist, loadPlaylistMore } = usePlaylistData({
+  const { playlist, setPlaylistData, loadPlaylist, reloadPlaylist, loadPlaylistMore } = usePlaylistData({
     cache,
     openPlaylist,
     setNotice,
@@ -307,7 +317,7 @@ function App() {
     openSpotifyLiked,
     beginSpotifyAdd,
     addToSpotifyPlaylist,
-  } = useSpotifyLibrary({ audioQuality, setMenuItem, setNotice, setSpotifyProfile, spotifyStatus });
+  } = useSpotifyLibrary({ audioQuality, setMenuItem, setNotice, setSpotifyProfile, spotifyStatus, destructive });
   const {
     playerExpanded,
     setPlayerExpanded,
@@ -502,6 +512,7 @@ function App() {
 
   // Which overlays are open (U4-005). Back and Escape close the topmost one; see src/app/layers.ts for the order.
   const layerState: LayerState = {
+    confirm: confirmRequest !== null,
     logoutDialog: logoutDialogOpen,
     createPlaylist: createPlaylistOpen,
     playlistPicker: playlistPickerItems !== null,
@@ -526,6 +537,8 @@ function App() {
 
   const closeLayer = (layer: Layer) => {
     switch (layer) {
+      case "confirm":
+        return answerConfirm(false);
       case "logoutDialog":
         return setLogoutDialogOpen(false);
       case "createPlaylist":
@@ -605,7 +618,7 @@ function App() {
       setSpotifyOpenPlaylist(null);
       await openItem(item);
     } catch (error) {
-      setNotice(`Spotify track could not be opened in YouTube Music: ${errorMessage(error)}`);
+      setNotice(`Spotify track could not be opened in YouTube Music: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -641,7 +654,7 @@ function App() {
         setLyricsProviderOrder([...parsed, ...lyricsProviderNames.filter((provider) => !parsed.includes(provider))]);
       }
     } catch (error) {
-      setNotice(`Settings could not be loaded: ${errorMessage(error)}`);
+      setNotice(`Settings could not be loaded: ${errorMessage(error)}`, "error");
     } finally {
       setSettingsLoading(false);
     }
@@ -660,7 +673,7 @@ function App() {
       );
       if (active === "library") void reloadCurrentLibrary();
     } catch (error) {
-      setNotice(`Account logout failed: ${errorMessage(error)}`);
+      setNotice(`Account logout failed: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -755,11 +768,12 @@ function App() {
         syncFailures > 0
           ? `${verb} selected items ${preposition} Meld Liked Songs; Google sync failed for ${syncFailures} item${syncFailures === 1 ? "" : "s"}.`
           : `${verb} selected items ${preposition} Meld Liked Songs.`,
+        "warning",
       );
       if (active === "library" && libraryMode === "liked") void loadLibrary("liked");
       closeSelection();
     } catch (error) {
-      setNotice(`Selected like update failed: ${errorMessage(error)}`);
+      setNotice(`Selected like update failed: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -782,7 +796,7 @@ function App() {
           : "No supported audio files were imported.",
       );
     } catch (error) {
-      setNotice(`Local audio import failed: ${errorMessage(error)}`);
+      setNotice(`Local audio import failed: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -813,7 +827,7 @@ function App() {
           : "No saved podcasts needed a refresh.",
       );
     } catch (error) {
-      setNotice(`Saved podcast refresh failed: ${errorMessage(error)}`);
+      setNotice(`Saved podcast refresh failed: ${errorMessage(error)}`, "error");
     } finally {
       setPodcastRefreshing(false);
     }
@@ -832,6 +846,14 @@ function App() {
     }
     setLibrarySyncing(true);
     markLibraryLoading(mode);
+    // One notification per sync: progress first, then replaced by the outcome (same key, U4-013).
+    const noticeKey = `library-sync:${syncKey}`;
+    setNotice({
+      kind: "progress",
+      key: noticeKey,
+      message: "Syncing your library with YouTube Music…",
+      progress: { value: 0 },
+    });
     try {
       const syncMode = mode === "songs" ? "library" : mode;
       const result = await invoke<{ likedSongs: number; librarySongs: number; uploadedSongs: number }>(
@@ -840,11 +862,18 @@ function App() {
       );
       lastLibrarySyncRef.current[syncMode] = Date.now();
       await loadLibrary(mode);
-      setNotice(
-        `YouTube Music sync finished: ${mode === "liked" ? result.likedSongs : mode === "uploaded" ? result.uploadedSongs : result.librarySongs} songs.`,
-      );
+      setNotice({
+        kind: "success",
+        key: noticeKey,
+        message: `YouTube Music sync finished: ${mode === "liked" ? result.likedSongs : mode === "uploaded" ? result.uploadedSongs : result.librarySongs} songs.`,
+      });
     } catch (error) {
-      setNotice(`YouTube Music ${mode} sync failed: ${errorMessage(error)}`);
+      setNotice({
+        kind: "error",
+        key: noticeKey,
+        message: `YouTube Music ${mode} sync failed: ${errorMessage(error)}`,
+        action: { label: "Retry", run: () => syncLibraryMode(mode) },
+      });
       await loadLibrary(mode);
     } finally {
       setLibrarySyncing(false);
@@ -863,7 +892,7 @@ function App() {
     const outcome = await loadPlaylist(item, { reuse });
     if (outcome.status === "error") {
       setOpenPlaylist((current) => (current && playlistIdOf(current) === playlistIdOf(item) ? null : current));
-      setNotice(`Playlist could not be opened: ${outcome.error}`);
+      setNotice(`Playlist could not be opened: ${outcome.error}`, "error");
     }
   };
 
@@ -968,7 +997,7 @@ function App() {
       } else if (link.kind === "route") {
         await openRoute(link.route);
       } else {
-        setNotice(`Spotify ${link.type} links cannot be opened directly. Search for it by name instead.`);
+        setNotice(`Spotify ${link.type} links cannot be opened directly. Search for it by name instead.`, "warning");
       }
       return;
     }
@@ -991,20 +1020,20 @@ function App() {
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      setNotice(`Share unavailable: ${errorMessage(error)}`);
+      setNotice(`Share unavailable: ${errorMessage(error)}`, "error");
     }
   };
 
   const copyLink = async (item: YtItem) => {
     if (!item.videoId) {
-      setNotice("This item has no source link to copy.");
+      setNotice("This item has no source link to copy.", "warning");
       return;
     }
     try {
       await navigator.clipboard.writeText(`https://music.youtube.com/watch?v=${encodeURIComponent(item.videoId)}`);
       setNotice("Meld link copied to clipboard.");
     } catch (error) {
-      setNotice(`Copy link unavailable: ${errorMessage(error)}`);
+      setNotice(`Copy link unavailable: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -1031,9 +1060,10 @@ function App() {
           : !current.liked
             ? `Added “${player.item.title}” to Meld Liked Songs.`
             : `Removed “${player.item.title}” from Meld Liked Songs.`,
+        "warning",
       );
     } catch (error) {
-      setNotice(`Meld Liked Songs update failed: ${errorMessage(error)}`);
+      setNotice(`Meld Liked Songs update failed: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -1044,7 +1074,7 @@ function App() {
       await navigator.clipboard.writeText(`${report}\nSource: ${player?.payload.sourceClient ?? "cache or unknown"}`);
       setNotice("Playback report copied.");
     } catch (error) {
-      setNotice(`Could not copy the playback report: ${String(error)}`);
+      setNotice(`Could not copy the playback report: ${String(error)}`, "error");
     }
   };
 
@@ -1161,14 +1191,16 @@ function App() {
       return;
     }
     if (action === "cache_remove") {
-      try {
-        await invoke("player_cache_remove", { songId: item.id });
-        setMenuItem(null);
-        setNotice(`Removed playback cache for “${item.title}”.`);
-        if (active === "library" && libraryMode === "cache") void loadLibrary("cache");
-      } catch (error) {
-        setNotice(`Could not remove playback cache: ${errorMessage(error)}`);
-      }
+      await destructive({
+        severity: "disposable",
+        key: `cache-remove:${item.id}`,
+        commit: () => invoke("player_cache_remove", { songId: item.id }),
+        refresh: () => {
+          if (active === "library" && libraryMode === "cache") void loadLibrary("cache");
+        },
+        success: `Removed playback cache for “${item.title}”.`,
+        failure: "Could not remove playback cache",
+      });
       return;
     }
     if (action === "edit") {
@@ -1179,13 +1211,13 @@ function App() {
     }
     if (action === "refetch") {
       if (!item.videoId) {
-        setNotice("Refetch requires the source video ID for this item.");
+        setNotice("Refetch requires the source video ID for this item.", "warning");
         return;
       }
       try {
         const refreshed = await invoke<YtItem | null>("library_refetch_item", { id: item.videoId });
         if (!refreshed) {
-          setNotice(`Meld could not refetch metadata for “${item.title}”.`);
+          setNotice(`Meld could not refetch metadata for “${item.title}”.`, "warning");
           return;
         }
         setPlayer((current) =>
@@ -1195,27 +1227,36 @@ function App() {
           void syncLibraryMode(libraryMode as "liked" | "uploaded" | "downloads" | "local" | "songs");
         setNotice(`Refetched metadata for “${refreshed.title}”.`);
       } catch (error) {
-        setNotice(`Refetch failed: ${errorMessage(error)}`);
+        setNotice(`Refetch failed: ${errorMessage(error)}`, "error");
       }
       return;
     }
     if (action === "delete_uploaded") {
       if (!item.videoId || !menuState.uploaded) {
-        setNotice("This item is not marked as an uploaded YouTube Music song.");
+        setNotice("This item is not marked as an uploaded YouTube Music song.", "warning");
         return;
       }
-      try {
-        await invoke("ytm_delete_uploaded_song", { entityId: item.videoId });
-        if (active === "library") void syncLibraryMode("uploaded");
-        setNotice(`Deleted uploaded song “${item.title}” from YouTube Music.`);
-      } catch (error) {
-        setNotice(`Uploaded song deletion failed: ${errorMessage(error)}`);
-      }
+      const entityId = item.videoId;
+      await destructive({
+        severity: "permanent",
+        key: `delete-uploaded:${item.id}`,
+        confirm: {
+          title: "Delete uploaded song?",
+          message: `“${item.title}” is deleted from your YouTube Music uploads. This cannot be undone.`,
+          confirmLabel: "Delete song",
+        },
+        commit: () => invoke("ytm_delete_uploaded_song", { entityId }),
+        refresh: () => {
+          if (active === "library") void syncLibraryMode("uploaded");
+        },
+        success: `Deleted uploaded song “${item.title}” from YouTube Music.`,
+        failure: "Uploaded song deletion failed",
+      });
       return;
     }
     if (action === "change_youtube_version") {
       if (!item.videoId || !menuSpotifyMatch) {
-        setNotice("Change YouTube version requires the source Spotify match.");
+        setNotice("Change YouTube version requires the source Spotify match.", "warning");
         return;
       }
       setMenuItem(null);
@@ -1226,7 +1267,7 @@ function App() {
     }
     if (action === "album") {
       if (!item.albumId) {
-        setNotice(`This ${item.kind} has no source collection browse endpoint.`);
+        setNotice(`This ${item.kind} has no source collection browse endpoint.`, "warning");
         return;
       }
       const collectionKind = item.kind === "episode" ? "podcast" : "album";
@@ -1242,11 +1283,11 @@ function App() {
     if (action === "podcast_save") {
       const podcastId = item.albumId || (item.kind === "podcast" ? item.id : "");
       if (!item.kind || !["episode", "podcast"].includes(item.kind) || !podcastId) {
-        setNotice("This item has no source podcast ID for library actions.");
+        setNotice("This item has no source podcast ID for library actions.", "warning");
         return;
       }
-      const saved = menuState.podcastSaved !== true;
-      try {
+      const name = item.albumTitle || item.title || "podcast";
+      const setSaved = async (saved: boolean) => {
         await invoke("ytm_toggle_podcast_saved", {
           podcastId,
           saved,
@@ -1255,42 +1296,71 @@ function App() {
           thumbnail: item.thumbnail ?? null,
         });
         setMenuState((current) => ({ ...current, podcastSaved: saved }));
+      };
+      const refresh = () => {
         if (active === "library" && libraryMode === "podcasts") void loadPodcastItems(podcastFilter);
-        setNotice(
-          saved
-            ? `Saved “${item.albumTitle || item.title || "podcast"}” to Podcasts.`
-            : `Removed “${item.albumTitle || item.title || "podcast"}” from Podcasts.`,
-        );
-      } catch (error) {
-        setNotice(`Podcast library update failed: ${errorMessage(error)}`);
+      };
+      if (menuState.podcastSaved !== true) {
+        try {
+          await setSaved(true);
+          refresh();
+          setNotice(`Saved “${name}” to Podcasts.`, "success");
+        } catch (error) {
+          setNotice(`Podcast library update failed: ${errorMessage(error)}`, "error");
+        }
+        return;
       }
+      await destructive({
+        severity: "undoable",
+        key: `podcast:${podcastId}`,
+        commit: () => setSaved(false),
+        undo: () => setSaved(true),
+        refresh,
+        success: `Removed “${name}” from Podcasts.`,
+        undone: `“${name}” is back in Podcasts.`,
+        failure: "Podcast library update failed",
+      });
       return;
     }
     if (action === "episode_save") {
       if (item.kind !== "episode" || !item.videoId) {
-        setNotice("This item is not a source podcast episode.");
+        setNotice("This item is not a source podcast episode.", "warning");
         return;
       }
-      const saved = !menuState.inLibrary;
-      try {
-        await invoke("ytm_toggle_episode_saved", {
-          videoId: item.videoId,
-          saved,
-          setVideoId: item.setVideoId ?? null,
-          item,
-        });
+      const videoId = item.videoId;
+      const setSaved = async (saved: boolean) => {
+        await invoke("ytm_toggle_episode_saved", { videoId, saved, setVideoId: item.setVideoId ?? null, item });
         setMenuState((current) => ({ ...current, inLibrary: saved }));
+      };
+      const refresh = () => {
         if (active === "library" && libraryMode === "podcasts") void loadPodcastItems("episodes");
-        setNotice(saved ? `Saved “${item.title}” for later.` : `Removed “${item.title}” from Saved Episodes.`);
-      } catch (error) {
-        setNotice(`Saved Episode update failed: ${errorMessage(error)}`);
+      };
+      if (!menuState.inLibrary) {
+        try {
+          await setSaved(true);
+          refresh();
+          setNotice(`Saved “${item.title}” for later.`, "success");
+        } catch (error) {
+          setNotice(`Saved Episode update failed: ${errorMessage(error)}`, "error");
+        }
+        return;
       }
+      await destructive({
+        severity: "undoable",
+        key: `episode:${item.id}`,
+        commit: () => setSaved(false),
+        undo: () => setSaved(true),
+        refresh,
+        success: `Removed “${item.title}” from Saved Episodes.`,
+        undone: `“${item.title}” is saved for later again.`,
+        failure: "Saved Episode update failed",
+      });
       return;
     }
     if (action === "artist") {
       const artists = item.artists.filter((value) => value.id);
       if (artists.length === 0) {
-        setNotice("This song has no source artist browse endpoint.");
+        setNotice("This song has no source artist browse endpoint.", "warning");
         return;
       }
       if (artists.length > 1) {
@@ -1313,36 +1383,62 @@ function App() {
     }
     if (action === "remove_history") {
       if (!item.historyRemoveToken) {
-        setNotice("This remote history item has no source removal token.");
+        setNotice("This remote history item has no source removal token.", "warning");
         return;
       }
-      try {
-        await invoke("ytm_remove_from_history", { token: item.historyRemoveToken });
-        await loadRemoteHistory();
-        setNotice(`Removed “${item.title}” from YouTube Music history.`);
-      } catch (error) {
-        setNotice(`Could not remove “${item.title}” from remote history: ${errorMessage(error)}`);
-      }
+      const token = item.historyRemoveToken;
+      await destructive({
+        severity: "permanent",
+        key: `remove-history:${item.id}`,
+        confirm: {
+          title: "Remove from YouTube Music history?",
+          message: `“${item.title}” is removed from your YouTube Music watch history. This cannot be undone.`,
+          confirmLabel: "Remove",
+        },
+        commit: () => invoke("ytm_remove_from_history", { token }),
+        refresh: loadRemoteHistory,
+        success: `Removed “${item.title}” from YouTube Music history.`,
+        failure: `Could not remove “${item.title}” from remote history`,
+      });
       return;
     }
     if (action === "meld_like") {
-      try {
-        const nextLiked = !menuState.liked;
-        await invoke("library_toggle_liked", { item, liked: nextLiked });
-        setMenuState((current) => ({ ...current, liked: nextLiked }));
-        maybeAutoDownloadOnLike(item, nextLiked);
-        const synced = await syncLikeToYoutube(item, nextLiked);
+      const nextLiked = !menuState.liked;
+      const setLiked = async (liked: boolean) => {
+        await invoke("library_toggle_liked", { item, liked });
+        maybeAutoDownloadOnLike(item, liked);
+        if (!(await syncLikeToYoutube(item, liked)))
+          setNotice("Meld Liked Songs was updated locally; Google sync could not be completed.", "warning");
+      };
+      const refresh = () => {
         if (active === "library" && libraryMode === "liked") void loadLibrary("liked");
-        setNotice(
-          !synced
-            ? "Meld Liked Songs was updated locally; Google sync could not be completed."
-            : menuState.liked
-              ? `Removed “${item.title}” from Meld Liked Songs.`
-              : `Added “${item.title}” to Meld Liked Songs.`,
-        );
-      } catch (error) {
-        setNotice(`Meld Liked Songs update failed: ${errorMessage(error)}`);
+      };
+      if (nextLiked) {
+        try {
+          setMenuState((current) => ({ ...current, liked: true }));
+          await setLiked(true);
+          refresh();
+          setNotice(`Added “${item.title}” to Meld Liked Songs.`, "success");
+        } catch (error) {
+          setMenuState((current) => ({ ...current, liked: false }));
+          setNotice(`Meld Liked Songs update failed: ${errorMessage(error)}`, "error");
+        }
+        return;
       }
+      await destructive({
+        severity: "undoable",
+        key: `meld-like:${item.id}`,
+        optimistic: () => {
+          setMenuState((current) => ({ ...current, liked: false }));
+          return () => setMenuState((current) => ({ ...current, liked: true }));
+        },
+        commit: () => setLiked(false),
+        undo: () => setLiked(true),
+        refresh,
+        success: `Removed “${item.title}” from Meld Liked Songs.`,
+        undone: `“${item.title}” is back in Meld Liked Songs.`,
+        failure: "Meld Liked Songs update failed",
+      });
       return;
     }
     if (action === "playlist") {
@@ -1352,7 +1448,10 @@ function App() {
     }
     if (action === "play_next") {
       if (!item.videoId && !item.localPath) {
-        setNotice("This item has no playable source path or watchEndpoint videoId, so it cannot enter the queue.");
+        setNotice(
+          "This item has no playable source path or watchEndpoint videoId, so it cannot enter the queue.",
+          "warning",
+        );
         return;
       }
       setQueueItems((current) => {
@@ -1371,29 +1470,58 @@ function App() {
     if (action === "remove_from_playlist") {
       const playlistId = playlist?.data.playlist.id;
       if (!playlistId) {
-        setNotice("This item is not open inside a playlist.");
+        setNotice("This item is not open inside a playlist.", "warning");
         return;
       }
-      try {
-        if (playlistId.startsWith("LOCAL_")) {
-          await invoke("library_remove_from_playlist", { playlistId, songId: item.id });
-          await reloadPlaylist();
-          setNotice(`Removed “${item.title}” from the local playlist.`);
-        } else if (item.videoId && item.setVideoId) {
-          await invoke("ytm_remove_from_playlist", { playlistId, videoId: item.videoId, setVideoId: item.setVideoId });
-          await reloadPlaylist();
-          setNotice(`Removed “${item.title}” from the YouTube Music playlist.`);
-        } else {
-          setNotice("This playlist item has no source setVideoId required for removal.");
-        }
-      } catch (error) {
-        setNotice(`Could not remove from playlist: ${errorMessage(error)}`);
+      // The song disappears from the open playlist at once and comes back if the removal fails.
+      const optimistic = () => {
+        const before = playlist;
+        setPlaylistData((current) => ({
+          ...current,
+          data: { ...current.data, songs: current.data.songs.filter((song) => song !== item) },
+        }));
+        return () => {
+          if (before) setPlaylistData(before);
+        };
+      };
+      if (playlistId.startsWith("LOCAL_")) {
+        await destructive({
+          severity: "undoable",
+          key: `playlist-remove:${playlistId}:${item.id}`,
+          optimistic,
+          commit: () => invoke("library_remove_from_playlist", { playlistId, songId: item.id }),
+          undo: async () => {
+            await invoke("library_add_to_playlist", { playlistId, item });
+          },
+          refresh: reloadPlaylist,
+          success: `Removed “${item.title}” from the local playlist.`,
+          undone: `“${item.title}” was added back at the end of the playlist.`,
+          failure: "Could not remove from playlist",
+        });
+      } else if (item.videoId && item.setVideoId) {
+        const { videoId, setVideoId } = item;
+        await destructive({
+          severity: "permanent",
+          key: `playlist-remove:${playlistId}:${item.id}`,
+          confirm: {
+            title: "Remove from YouTube Music playlist?",
+            message: `“${item.title}” is removed from “${playlist?.data.playlist.title ?? "this playlist"}” on YouTube Music.`,
+            confirmLabel: "Remove",
+          },
+          optimistic,
+          commit: () => invoke("ytm_remove_from_playlist", { playlistId, videoId, setVideoId }),
+          refresh: reloadPlaylist,
+          success: `Removed “${item.title}” from the YouTube Music playlist.`,
+          failure: "Could not remove from playlist",
+        });
+      } else {
+        setNotice("This playlist item has no source setVideoId required for removal.", "warning");
       }
       return;
     }
     if (action === "radio") {
       if (!item.videoId) {
-        setNotice("This typed item has no watchEndpoint videoId, so it cannot start a radio queue.");
+        setNotice("This typed item has no watchEndpoint videoId, so it cannot start a radio queue.", "warning");
         return;
       }
       try {
@@ -1409,51 +1537,81 @@ function App() {
         const index = Math.min(page.currentIndex ?? 0, items.length - 1);
         await playItem(items[index], items, index, page.continuation ?? null, true);
       } catch (error) {
-        setNotice(`Radio unavailable: ${errorMessage(error)}`);
+        setNotice(`Radio unavailable: ${errorMessage(error)}`, "error");
       }
       return;
     }
     if (action === "pin" || action === "unpin") {
-      try {
-        await invoke("speed_dial_toggle", { item, pinned: action === "pin" });
-        setMenuState((current) => ({ ...current, pinned: action === "pin" }));
-        await loadSpeedDial();
-        setNotice(
-          action === "pin" ? `Pinned “${item.title}” to Speed Dial.` : `Unpinned “${item.title}” from Speed Dial.`,
-        );
-      } catch (error) {
-        setNotice(`Speed Dial update failed: ${errorMessage(error)}`);
+      const setPinned = async (pinned: boolean) => {
+        await invoke("speed_dial_toggle", { item, pinned });
+        setMenuState((current) => ({ ...current, pinned }));
+      };
+      if (action === "pin") {
+        try {
+          await setPinned(true);
+          await loadSpeedDial();
+          setNotice(`Pinned “${item.title}” to Speed Dial.`, "success");
+        } catch (error) {
+          setNotice(`Speed Dial update failed: ${errorMessage(error)}`, "error");
+        }
+        return;
       }
+      await destructive({
+        severity: "undoable",
+        key: `speed-dial:${item.id}`,
+        commit: () => setPinned(false),
+        undo: () => setPinned(true),
+        refresh: loadSpeedDial,
+        success: `Unpinned “${item.title}” from Speed Dial.`,
+        undone: `Pinned “${item.title}” to Speed Dial again.`,
+        failure: "Speed Dial update failed",
+      });
       return;
     }
     if (action === "add_library" || action === "remove_library") {
       if (!item.videoId) {
-        setNotice("This typed item has no watchEndpoint videoId, so it cannot be changed in YouTube Music Library.");
+        setNotice(
+          "This typed item has no watchEndpoint videoId, so it cannot be changed in YouTube Music Library.",
+          "warning",
+        );
         return;
       }
-      try {
-        await invoke("ytm_toggle_library", { videoId: item.videoId, addToLibrary: action === "add_library" });
-        if (action === "add_library") {
-          await invoke("library_save_item", { item });
-          setMenuState((current) => ({ ...current, inLibrary: true }));
-          setNotice(`Added “${item.title}” to YouTube Music library.`);
-        } else {
-          await invoke("library_remove_item", { id: item.id });
-          setMenuState((current) => ({ ...current, inLibrary: false }));
-          setNotice(`Removed “${item.title}” from YouTube Music library.`);
-          if (active === "library") {
-            if (libraryMode === "playlists") void syncSavedPlaylists();
-            else if (libraryMode === "podcasts") void loadPodcastItems(podcastFilter);
-            else void loadLibrary(libraryMode);
-          }
+      const videoId = item.videoId;
+      const setInLibrary = async (inLibrary: boolean) => {
+        await invoke("ytm_toggle_library", { videoId, addToLibrary: inLibrary });
+        if (inLibrary) await invoke("library_save_item", { item });
+        else await invoke("library_remove_item", { id: item.id });
+        setMenuState((current) => ({ ...current, inLibrary }));
+      };
+      const refresh = () => {
+        if (active !== "library") return;
+        if (libraryMode === "playlists") void syncSavedPlaylists();
+        else if (libraryMode === "podcasts") void loadPodcastItems(podcastFilter);
+        else void loadLibrary(libraryMode);
+      };
+      if (action === "add_library") {
+        try {
+          await setInLibrary(true);
+          setNotice(`Added “${item.title}” to YouTube Music library.`, "success");
+        } catch (error) {
+          setNotice(`YouTube Music library change failed: ${errorMessage(error)}`, "error");
         }
-      } catch (error) {
-        setNotice(`YouTube Music library change failed: ${errorMessage(error)}`);
+        return;
       }
+      await destructive({
+        severity: "undoable",
+        key: `library:${item.id}`,
+        commit: () => setInLibrary(false),
+        undo: () => setInLibrary(true),
+        refresh,
+        success: `Removed “${item.title}” from YouTube Music library.`,
+        undone: `“${item.title}” is back in your YouTube Music library.`,
+        failure: "YouTube Music library change failed",
+      });
       return;
     }
     if (!item.videoId) {
-      setNotice("This typed item has no watchEndpoint videoId, so it cannot enter the queue.");
+      setNotice("This typed item has no watchEndpoint videoId, so it cannot enter the queue.", "warning");
       return;
     }
     setQueueItems((current) => {
@@ -1464,7 +1622,7 @@ function App() {
       const next = [...withoutItem, item];
       return shuffleQueueAfterCurrent(next, currentId);
     });
-    setNotice(`Added “${item.title}” to the Meld queue.`);
+    setNotice(`Added “${item.title}” to the Meld queue.`, "success");
   };
 
   const clearQueue = () => {
@@ -1546,7 +1704,7 @@ function App() {
       return;
     }
     if (!item.videoId) {
-      setNotice("This typed item has no watchEndpoint videoId, so Meld cannot send it to the player.");
+      setNotice("This typed item has no watchEndpoint videoId, so Meld cannot send it to the player.", "warning");
       return;
     }
     setNotice("");
@@ -1613,7 +1771,7 @@ function App() {
       if (keepInlineLyrics) void openLyrics(item);
       void beginPlaytime(item);
     } catch (error) {
-      setNotice(`Playback unavailable: ${errorMessage(error)}`);
+      setNotice(`Playback unavailable: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -1654,7 +1812,7 @@ function App() {
           .catch((error) => {
             if (activePlayerIdRef.current === playerId) {
               setIsPlaying(false);
-              setNotice(`Audio playback failed: ${errorMessage(error)}`);
+              setNotice(`Audio playback failed: ${errorMessage(error)}`, "error");
             }
           });
       } else {
@@ -1694,7 +1852,7 @@ function App() {
         setQueueIndex(queue.index);
         setQueueContinuation(queue.continuation);
         setQueueContinuationKind(queue.continuationKind);
-        setNotice(`Restored ${items.length} item${items.length === 1 ? "" : "s"} in the Meld queue.`);
+        setNotice(`Restored ${items.length} item${items.length === 1 ? "" : "s"} in the Meld queue.`, "success");
       }
       const session = restoreSession<YtItem>(
         JSON.parse(localStorage.getItem("meld:persistentPlayback") ?? "null"),
@@ -1741,7 +1899,7 @@ function App() {
           }),
         );
       } catch (error) {
-        setNotice(`Persistent queue could not be saved: ${errorMessage(error)}`);
+        setNotice(`Persistent queue could not be saved: ${errorMessage(error)}`, "error");
       }
     }
     if (!persistentSessionLoadedRef.current) return;
@@ -1764,7 +1922,7 @@ function App() {
         } satisfies PersistentPlayback),
       );
     } catch (error) {
-      setNotice(`Persistent playback session could not be saved: ${errorMessage(error)}`);
+      setNotice(`Persistent playback session could not be saved: ${errorMessage(error)}`, "error");
     }
   }, [
     settings.persistentQueue,
@@ -1810,7 +1968,9 @@ function App() {
     });
     setHandler("play", () => {
       if (audioRef.current)
-        void audioRef.current.play().catch((error) => setNotice(`Audio playback failed: ${errorMessage(error)}`));
+        void audioRef.current
+          .play()
+          .catch((error) => setNotice(`Audio playback failed: ${errorMessage(error)}`, "error"));
     });
     setHandler("pause", () => audioRef.current?.pause());
     setHandler("seekbackward", () => {
@@ -1937,7 +2097,7 @@ function App() {
         if (additions.length === 0 && continuation === previousContinuation) break;
       }
     } catch (error) {
-      setNotice(`Queue continuation failed: ${errorMessage(error)}`);
+      setNotice(`Queue continuation failed: ${errorMessage(error)}`, "error");
       return;
     }
     const item = items[index];
@@ -2054,7 +2214,10 @@ function App() {
       );
       return;
     }
-    setNotice(`Meld could not open this ${item.kind}: the live item did not include a supported navigation endpoint.`);
+    setNotice(
+      `Meld could not open this ${item.kind}: the live item did not include a supported navigation endpoint.`,
+      "warning",
+    );
   };
   /** Shows `route` on top of `tab` without touching the history (back/forward and `openRoute` use it). */
   const showRoute = async (route: Route, tab: NavKey) => {
@@ -2142,25 +2305,42 @@ function App() {
 
   const toggleDetailArtistSubscription = async () => {
     if (!detail || detail.status !== "ready" || detail.data.kind !== "artist" || !detail.data.browseId) return;
-    const next = !detailArtistSubscribed;
-    try {
+    const page = detail.data;
+    const artistId = page.browseId as string;
+    const name = page.title || "artist";
+    const setBookmarked = async (bookmarked: boolean) => {
       await invoke("library_toggle_artist_bookmarked", {
-        artistId: detail.data.browseId,
-        name: detail.data.title || "Artist",
-        thumbnail: detail.data.thumbnail ?? null,
-        channelId: detail.data.browseId.startsWith("UC") ? detail.data.browseId : null,
-        bookmarked: next,
+        artistId,
+        name: page.title || "Artist",
+        thumbnail: page.thumbnail ?? null,
+        channelId: artistId.startsWith("UC") ? artistId : null,
+        bookmarked,
       });
-      setDetailArtistSubscribed(next);
-      setNotice(
-        next
-          ? `Subscribed to “${detail.data.title || "artist"}”.`
-          : `Unsubscribed from “${detail.data.title || "artist"}”.`,
-      );
+      setDetailArtistSubscribed(bookmarked);
+    };
+    const refresh = () => {
       if (active === "library" && libraryMode === "artists") void loadLibrary("artists");
-    } catch (error) {
-      setNotice(`Artist subscription update failed: ${errorMessage(error)}`);
+    };
+    if (!detailArtistSubscribed) {
+      try {
+        await setBookmarked(true);
+        refresh();
+        setNotice(`Subscribed to “${name}”.`, "success");
+      } catch (error) {
+        setNotice(`Artist subscription update failed: ${errorMessage(error)}`, "error");
+      }
+      return;
     }
+    await destructive({
+      severity: "undoable",
+      key: `artist-subscription:${artistId}`,
+      commit: () => setBookmarked(false),
+      undo: () => setBookmarked(true),
+      refresh,
+      success: `Unsubscribed from “${name}”.`,
+      undone: `Subscribed to “${name}” again.`,
+      failure: "Artist subscription update failed",
+    });
   };
 
   const openDetailItem = async (item: YtItem) => {
@@ -2446,19 +2626,7 @@ function App() {
           </div>
         </header>
 
-        {notice && (
-          <div className="notice" role="status">
-            <span title={notice}>{noticeSummary(notice)}</span>
-            <button
-              className="notice-dismiss"
-              onClick={() => setNotice("")}
-              title="Dismiss message"
-              aria-label="Dismiss message"
-            >
-              ×
-            </button>
-          </div>
-        )}
+        <NoticeStack notices={notices} onDismiss={dismissNotice} />
 
         <div className="page-scroll" ref={pageScrollRef}>
           {active === "home" && (
@@ -2496,6 +2664,7 @@ function App() {
 
           {active === "history" && (
             <HistoryScreen
+              destructive={destructive}
               audioQuality={audioQuality}
               closeSelection={closeSelection}
               hideItem={hideItem}
@@ -2513,7 +2682,6 @@ function App() {
               sessionStatus={sessionStatus}
               setHistoryQuery={setHistoryQuery}
               setHistorySource={setHistorySource}
-              setNotice={setNotice}
               setSelectionMode={setSelectionMode}
               settings={settings}
               toggleSelectedItem={toggleSelectedItem}
@@ -2868,10 +3036,10 @@ function App() {
                     artist: editArtist.trim(),
                   });
                   setEditItem(null);
-                  setNotice(`Updated “${editTitle.trim()}”.`);
+                  setNotice(`Updated “${editTitle.trim()}”.`, "success");
                   if (active === "library") void reloadCurrentLibrary();
                 } catch (error) {
-                  setNotice(`Song edit failed: ${errorMessage(error)}`);
+                  setNotice(`Song edit failed: ${errorMessage(error)}`, "error");
                 }
               }}
             >
@@ -2982,7 +3150,9 @@ function App() {
                       setSleepTimerDefault(sleepTimerMinutes);
                       setNotice(`Sleep timer default set to ${sleepTimerMinutes} minutes.`);
                     })
-                    .catch((error) => setNotice(`Sleep timer default could not be saved: ${errorMessage(error)}`))
+                    .catch((error) =>
+                      setNotice(`Sleep timer default could not be saved: ${errorMessage(error)}`, "error"),
+                    )
                 }
               >
                 Set as default
@@ -3175,6 +3345,7 @@ function App() {
         </div>
       )}
       <SettingsScreen
+        destructive={destructive}
         audioQuality={audioQuality}
         connectGoogle={connectGoogle}
         connectSpotify={connectSpotify}
@@ -3372,6 +3543,7 @@ function App() {
         setLyrics={setLyrics}
         setLyricsAutoScrollEnabled={setLyricsAutoScrollEnabled}
       />
+      <ConfirmDialog request={confirmRequest} onAnswer={answerConfirm} />
     </div>
   );
 }

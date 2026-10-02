@@ -18,6 +18,7 @@ import {
 import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
 import {
   checkCapabilities,
+  checkDestructivePolicy,
   checkFeatureModules,
   checkScreenSplit,
   checkServerState,
@@ -279,4 +280,21 @@ test("ui: the item menu comes from the capability model (U4-011)", () => {
   assert.deepEqual(checkCapabilities(scattered), ["App.tsx calls performMenuAction with a literal action"]);
   const missing = (path) => (path === "src/app/capabilities.ts" ? null : read(path));
   assert.deepEqual(checkCapabilities(missing), ["src/app/capabilities.ts is missing"]);
+});
+
+test("ui: removals follow one destructive-action policy (U4-012, U4-013)", () => {
+  const read = (path) => (existsSync(path) ? readFileSync(path, "utf8") : null);
+  assert.deepEqual(checkDestructivePolicy(read, readUiSource()), []);
+  assert.deepEqual(checkDestructivePolicy(read, 'if (window.confirm("Delete?")) remove();'), [
+    "window.confirm is used; ask through the destructive policy",
+  ]);
+  const direct = (path) =>
+    path === "src/App.tsx"
+      ? read(path)
+          .replace('if (action === "remove_history") {', 'if (action === "remove_history") {\n      return;')
+          .replace(/(if \(action === "remove_history"\) \{[\s\S]*?)destructive\(/, "$1runNow(")
+      : read(path);
+  assert.deepEqual(checkDestructivePolicy(direct, ""), ["remove_history does not go through destructive()"]);
+  const missing = (path) => (path === "src/app/destructive.ts" ? null : read(path));
+  assert.deepEqual(checkDestructivePolicy(missing, ""), ["src/app/destructive.ts is missing"]);
 });

@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CACHE_LIMIT_CHOICES_MB, limitLabel, usageSummary, type PlayerCacheUsage } from "./lib/cacheUsage";
+import type { SetNotice } from "./app/notifications";
+import type { Destructive } from "./app/destructive";
 
 // Settings → Storage: playback-cache size, limit and clearing (PLAY-041). Offline downloads are separate.
-export function PlaybackCachePanel({ onNotice }: { onNotice: (message: string) => void }) {
+export function PlaybackCachePanel({ onNotice, destructive }: { onNotice: SetNotice; destructive: Destructive }) {
   const [usage, setUsage] = useState<PlayerCacheUsage | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -11,7 +13,7 @@ export function PlaybackCachePanel({ onNotice }: { onNotice: (message: string) =
     try {
       setUsage(await invoke<PlayerCacheUsage>("player_cache_usage"));
     } catch (error) {
-      onNotice(`Playback cache size could not be read: ${String(error)}`);
+      onNotice(`Playback cache size could not be read: ${String(error)}`, "error");
     }
   };
 
@@ -25,20 +27,27 @@ export function PlaybackCachePanel({ onNotice }: { onNotice: (message: string) =
       await invoke("settings_set", { key: "playerCacheLimitMb", value: String(limitMb) });
       await refresh();
     } catch (error) {
-      onNotice(`Playback cache limit could not be saved: ${String(error)}`);
+      onNotice(`Playback cache limit could not be saved: ${String(error)}`, "error");
     } finally {
       setBusy(false);
     }
   };
 
+  // Disposable (U4-012): songs are cached again when played, so neither a question nor Undo.
   const clear = async () => {
     setBusy(true);
+    let removed = 0;
     try {
-      const removed = await invoke<number>("player_cache_clear");
-      onNotice(removed === 1 ? "Removed 1 cached song." : `Removed ${removed} cached songs.`);
-      await refresh();
-    } catch (error) {
-      onNotice(`Playback cache could not be cleared: ${String(error)}`);
+      await destructive({
+        severity: "disposable",
+        key: "player-cache-clear",
+        commit: async () => {
+          removed = await invoke<number>("player_cache_clear");
+        },
+        refresh,
+        success: () => (removed === 1 ? "Removed 1 cached song." : `Removed ${removed} cached songs.`),
+        failure: "Playback cache could not be cleared",
+      });
     } finally {
       setBusy(false);
     }

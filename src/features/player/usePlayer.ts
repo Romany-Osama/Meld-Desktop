@@ -1,15 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioQuality, streamRequest } from "../../lib/audioQuality";
 import { mediaSrc } from "../../lib/media";
 import { withRefreshedPayload } from "../../lib/playbackSession";
 import { recoveryReason, isLocalStream, recoveryNotice } from "../../lib/streamRecovery";
 import { errorMessage } from "../../lib/util";
 import { YtItem, PlayerPayload, PlaytimeSession } from "../../types";
+import type { SetNotice } from "../../app/notifications";
 
 export type PlayerDeps = {
   audioQuality: AudioQuality;
-  setNotice: Dispatch<SetStateAction<string>>;
+  setNotice: SetNotice;
   settings: Record<string, boolean>;
 };
 
@@ -119,7 +120,7 @@ export function usePlayer({ audioQuality, setNotice, settings }: PlayerDeps) {
       void audio
         .play()
         .then(() => setIsPlaying(true))
-        .catch((error) => setNotice(`Audio playback failed: ${errorMessage(error)}`));
+        .catch((error) => setNotice(`Audio playback failed: ${errorMessage(error)}`, "error"));
     } else {
       audio.pause();
       setIsPlaying(false);
@@ -162,7 +163,7 @@ export function usePlayer({ audioQuality, setNotice, settings }: PlayerDeps) {
       void audio
         .play()
         .then(() => setIsPlaying(true))
-        .catch((error) => setNotice(`Audio playback failed: ${errorMessage(error)}`));
+        .catch((error) => setNotice(`Audio playback failed: ${errorMessage(error)}`, "error"));
     }
     setVolume(value);
     if (audio) audio.volume = value;

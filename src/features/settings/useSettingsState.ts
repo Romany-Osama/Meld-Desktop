@@ -1,12 +1,13 @@
 import { SettingsPage } from "../../app/routes";
 import { invoke } from "@tauri-apps/api/core";
-import { Dispatch, SetStateAction, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { AudioQuality } from "../../lib/audioQuality";
 import { errorMessage } from "../../lib/util";
 import { YtItem } from "../../types";
+import type { SetNotice } from "../../app/notifications";
 
 export type SettingsStateDeps = {
-  setNotice: Dispatch<SetStateAction<string>>;
+  setNotice: SetNotice;
 };
 
 export function useSettingsState({ setNotice }: SettingsStateDeps) {
@@ -59,7 +60,7 @@ export function useSettingsState({ setNotice }: SettingsStateDeps) {
       await invoke("settings_set", { key, value: String(value) });
     } catch (error) {
       setSettings((current) => ({ ...current, [key]: previous }));
-      setNotice(`Setting could not be saved: ${errorMessage(error)}`);
+      setNotice(`Setting could not be saved: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -70,7 +71,7 @@ export function useSettingsState({ setNotice }: SettingsStateDeps) {
       await invoke("settings_set", { key: "audioQuality", value });
     } catch (error) {
       setAudioQuality(previous);
-      setNotice(`Audio quality could not be saved: ${errorMessage(error)}`);
+      setNotice(`Audio quality could not be saved: ${errorMessage(error)}`, "error");
     }
   };
 

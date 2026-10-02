@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Dispatch, SetStateAction, useState, useRef } from "react";
+import { useState, useRef } from "react";
 import { arrangeQueue, shuffleAfterCurrent, moveItem } from "../../lib/queue";
 import { errorMessage } from "../../lib/util";
 import { YtItem, QueuePage } from "../../types";
+import type { SetNotice } from "../../app/notifications";
 
 export type QueueDeps = {
-  setNotice: Dispatch<SetStateAction<string>>;
+  setNotice: SetNotice;
   settings: Record<string, boolean>;
 };
 
@@ -28,7 +29,7 @@ export function useQueue({ setNotice, settings }: QueueDeps) {
       await invoke("settings_set", { key: "shuffleMode", value: String(next) });
     } catch (error) {
       setShuffleEnabled(!next);
-      setNotice(`Shuffle preference could not be saved: ${errorMessage(error)}`);
+      setNotice(`Shuffle preference could not be saved: ${errorMessage(error)}`, "error");
     }
   };
 
@@ -38,7 +39,7 @@ export function useQueue({ setNotice, settings }: QueueDeps) {
     try {
       await invoke("settings_set", { key: "repeatMode", value: next === "one" ? "1" : next === "all" ? "2" : "0" });
     } catch (error) {
-      setNotice(`Repeat preference could not be saved: ${errorMessage(error)}`);
+      setNotice(`Repeat preference could not be saved: ${errorMessage(error)}`, "error");
     }
   };
 

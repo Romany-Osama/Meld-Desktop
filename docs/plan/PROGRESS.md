@@ -59,8 +59,8 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] U4-009 (P0) Use request identities and cancellation per screen — request ids + per-screen scopes (D-031); resourceCache.test.ts (superseded/aborted), App.test.tsx (slow page, slow search)
 - [x] U4-010 (P0) Preserve screen state on back — src/app/screenState.ts + cached pages (D-032); screenState.test.ts, App.test.tsx (cached search, library filter, album scroll, detail without refetch)
 - [x] U4-011 (P0) Centralize capability checks — src/app/capabilities.ts + ItemMenu (D-033); capabilities.test.ts, App.test.tsx (item menu), checks.test.mjs (capabilities)
-- [ ] U4-012 (P0) Centralize destructive-action policy
-- [ ] U4-013 (P0) Centralize notifications
+- [x] U4-012 (P0) Centralize destructive-action policy — src/app/destructive.ts + ConfirmDialog (D-035); destructive.test.ts, App.test.tsx (confirm before clearing history), checks.test.mjs (destructive policy)
+- [x] U4-013 (P0) Centralize notifications — src/app/notifications.ts + NoticeStack (D-034); notifications.test.ts, featureModules.test.tsx, App.test.tsx (error with Retry)
 - [ ] U4-014 (P0) Add an error boundary per major route and player
 - [ ] U4-015 (P0) Use stable domain IDs plus occurrence IDs
 - [ ] TR-M1 (P1) Monolithic frontend and backend

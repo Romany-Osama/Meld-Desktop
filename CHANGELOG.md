@@ -7,9 +7,12 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 ### Added
 - Settings → Storage → Playback cache: current size, a size limit and a Clear playback cache button.
 - Meld opens on the page you were on when you closed it (an album, artist, playlist, library tab, search or history). Settings, dialogs and searches for a pasted link are not reopened.
+- Undo after unliking a song, unpinning from Speed Dial, removing something from your library or a local playlist, unsubscribing from a podcast or artist and unsaving an episode.
+- Messages now stack in the corner with their kind (info, success, warning, error). Errors stay until you close them and offer Retry where it helps; library sync and Spotify playlist downloads show their progress.
 - Pasting a Spotify playlist link or a `meld:` link into search opens that page. Pasting a Spotify song, album or artist link explains that it cannot be opened directly and to search by name.
 
 ### Changed
+- Meld asks before anything that cannot be undone: deleting an uploaded song, removing a song from YouTube Music history or a YouTube Music playlist, removing a download, clearing playback or search history, removing a Spotify playlist track. If the change fails, the screen goes back to how it was.
 - Back and Forward return to the page you left, including an album, artist or playlist page, the tab it was opened from and the scroll position.
 - Back and Forward show a search, album, artist or playlist page you visited in the last 10 minutes straight away, as you left it, instead of loading it again.
 - Back and Forward also bring back the Library search text, sort order, grid/list layout, podcast filter and top-songs period, the History search, the filter and sort of a Spotify playlist, and the scroll position inside an album, artist or playlist page.

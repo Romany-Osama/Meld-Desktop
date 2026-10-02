@@ -179,3 +179,44 @@ export function checkCapabilities(readFile) {
   if (/performMenuAction\(\s*"/.test(app)) problems.push("App.tsx calls performMenuAction with a literal action");
   return problems;
 }
+
+/** Removals the policy covers (U4-012), by the App.tsx menu-action branch that performs them. */
+export const DESTRUCTIVE_MENU_ACTIONS = [
+  "cache_remove",
+  "delete_uploaded",
+  "remove_history",
+  "meld_like",
+  "remove_from_playlist",
+  'pin" || action === "unpin',
+  'add_library" || action === "remove_library',
+];
+
+/**
+ * U4-012/U4-013: removals go through `destructive(...)` (confirm, Undo, rollback in one place), nothing asks with
+ * `window.confirm`, and App renders the notification stack and the confirmation dialog.
+ * `uiSource` is every non-test source file joined (see readUiSource).
+ */
+export function checkDestructivePolicy(readFile, uiSource) {
+  const problems = [];
+  if (readFile("src/app/destructive.ts") === null) return ["src/app/destructive.ts is missing"];
+  if (readFile("src/app/notifications.ts") === null) return ["src/app/notifications.ts is missing"];
+  const app = readFile("src/App.tsx") ?? "";
+  if (/\bwindow\.confirm\(/.test(uiSource)) problems.push("window.confirm is used; ask through the destructive policy");
+  if (!app.includes("<ConfirmDialog")) problems.push("App.tsx no longer renders <ConfirmDialog>");
+  if (!app.includes("<NoticeStack")) problems.push("App.tsx no longer renders <NoticeStack>");
+  for (const action of DESTRUCTIVE_MENU_ACTIONS) {
+    const start = app.indexOf(`if (action === "${action}")`);
+    if (start < 0) {
+      problems.push(`App.tsx has no branch for ${action.split('"')[0]}`);
+      continue;
+    }
+    const rest = app.slice(start + 1);
+    const end = rest.search(/\n {4}if \(action === "/);
+    const branch = end < 0 ? rest : rest.slice(0, end);
+    if (!branch.includes("destructive(")) problems.push(`${action.split('"')[0]} does not go through destructive()`);
+  }
+  const downloads = readFile("src/features/downloads/useDownloads.ts") ?? "";
+  if ((downloads.match(/destructive\(/g) ?? []).length < 2)
+    problems.push("useDownloads removes downloads without destructive()");
+  return problems;
+}

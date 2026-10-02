@@ -4,6 +4,7 @@ import type { ResourceCache } from "../../data/resourceCache";
 import { useResource } from "../../data/useResource";
 import { FRESH_FOR_MS, playlistKey } from "../../data/keys";
 import { errorMessage } from "../../lib/util";
+import type { SetNotice } from "../../app/notifications";
 
 const PLAYLIST_FALLBACK = {
   status: "loading" as const,
@@ -29,7 +30,7 @@ export function usePlaylistData({
 }: {
   cache: ResourceCache;
   openPlaylist: YtItem | null;
-  setNotice: (value: string) => void;
+  setNotice: SetNotice;
 }) {
   const key = openPlaylist ? playlistKey(playlistIdOf(openPlaylist)) : null;
   const [playlist, setPlaylistData] = useResource<PlaylistPage>(cache, key, PLAYLIST_FALLBACK);
@@ -68,7 +69,7 @@ export function usePlaylistData({
         return { ...entry, data: { ...entry.data, songs, continuation: next.continuation } };
       });
     } catch (error) {
-      if (token.isCurrent()) setNotice(`Playlist continuation failed: ${errorMessage(error)}`);
+      if (token.isCurrent()) setNotice(`Playlist continuation failed: ${errorMessage(error)}`, "error");
     } finally {
       token.finish();
     }
