@@ -76,6 +76,76 @@ impl CacheJobs {
     }
 }
 
+/// Default playback-cache quota (PLAY-041, R6-023). `0` turns background caching off.
+pub const DEFAULT_LIMIT_MB: i64 = 2048;
+pub const LIMIT_CHOICES_MB: [i64; 7] = [0, 512, 1024, 2048, 5120, 10240, 20480];
+
+pub fn limit_bytes(limit_mb: i64) -> i64 {
+    limit_mb.max(0).saturating_mul(1024 * 1024)
+}
+
+/// Parses the stored setting; anything missing or invalid means the default.
+pub fn parse_limit_mb(value: Option<&str>) -> i64 {
+    value
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .filter(|value| LIMIT_CHOICES_MB.contains(value))
+        .unwrap_or(DEFAULT_LIMIT_MB)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheEntry {
+    pub song_id: String,
+    pub bytes: i64,
+    /// Last time the entry was written or played from (seconds).
+    pub used_at: i64,
+}
+
+/// Least-recently-used entries to delete so the committed cache fits in `quota` bytes. Offline downloads
+/// live in their own table and folder and are never candidates.
+pub fn plan_eviction(entries: &[CacheEntry], quota: i64) -> Vec<String> {
+    let mut total: i64 = entries.iter().map(|entry| entry.bytes.max(0)).sum();
+    if total <= quota {
+        return Vec::new();
+    }
+    let mut ordered: Vec<&CacheEntry> = entries.iter().collect();
+    ordered.sort_by(|a, b| {
+        a.used_at
+            .cmp(&b.used_at)
+            .then_with(|| a.song_id.cmp(&b.song_id))
+    });
+    let mut evict = Vec::new();
+    for entry in ordered {
+        if total <= quota {
+            break;
+        }
+        total -= entry.bytes.max(0);
+        evict.push(entry.song_id.clone());
+    }
+    evict
+}
+
+/// Leftover files to delete at start-up (R6-026). No fill runs at start-up, so every `.part` in the
+/// playback cache is abandoned, and a finished file with no database row is unreachable. In the downloads
+/// folder a `.part` is kept only when its download can still be resumed.
+pub fn orphaned_files(
+    files: &[std::path::PathBuf],
+    known: &std::collections::HashSet<std::path::PathBuf>,
+    resumable_parts: &std::collections::HashSet<std::path::PathBuf>,
+) -> Vec<std::path::PathBuf> {
+    files
+        .iter()
+        .filter(|file| {
+            let is_part = file.extension().is_some_and(|ext| ext == "part");
+            if is_part {
+                !resumable_parts.contains(*file)
+            } else {
+                !known.contains(*file)
+            }
+        })
+        .cloned()
+        .collect()
+}
+
 /// A transfer is complete only when it delivered every byte the server announced (PLAY-044, partial:
 /// lengths the server does not announce are not validated yet).
 pub fn transfer_complete(bytes: i64, expected: Option<i64>) -> bool {
@@ -352,5 +422,84 @@ mod tests {
         assert!(!transfer_complete(0, None));
         assert!(!transfer_complete(0, Some(0)));
         assert!(transfer_complete(512, None));
+    }
+
+    fn entry(id: &str, bytes: i64, used_at: i64) -> CacheEntry {
+        CacheEntry {
+            song_id: id.to_owned(),
+            bytes,
+            used_at,
+        }
+    }
+
+    #[test]
+    fn eviction_removes_least_recently_used_until_under_quota() {
+        let entries = vec![
+            entry("new", 40, 300),
+            entry("old", 50, 100),
+            entry("mid", 30, 200),
+        ];
+        assert!(plan_eviction(&entries, 120).is_empty());
+        assert_eq!(plan_eviction(&entries, 100), vec!["old".to_owned()]);
+        assert_eq!(
+            plan_eviction(&entries, 45),
+            vec!["old".to_owned(), "mid".to_owned()]
+        );
+        assert_eq!(plan_eviction(&entries, 0).len(), 3);
+    }
+
+    #[test]
+    fn cache_stress_never_exceeds_quota_after_commit() {
+        // 500 plays of 3-9 MB songs into a 64 MB cache: after every committed fill the cache fits again.
+        let quota = limit_bytes(64);
+        let mut cache: Vec<CacheEntry> = Vec::new();
+        for play in 0..500_i64 {
+            let id = format!("song-{}", (play * 7919) % 173);
+            let bytes = (3 + play % 7) * 1024 * 1024;
+            if let Some(hit) = cache.iter_mut().find(|e| e.song_id == id) {
+                hit.used_at = play;
+            } else {
+                cache.push(entry(&id, bytes, play));
+            }
+            let evict = plan_eviction(&cache, quota);
+            cache.retain(|e| !evict.contains(&e.song_id));
+            let total: i64 = cache.iter().map(|e| e.bytes).sum();
+            assert!(total <= quota, "play {play}: {total} > {quota}");
+            // The song that was just played is never the one evicted while others remain.
+            assert!(cache.iter().any(|e| e.song_id == id) || cache.is_empty());
+        }
+        // In-flight allowance: at most MAX_ACTIVE_JOBS uncommitted files exist on top of the quota.
+        assert_eq!(MAX_ACTIVE_JOBS, 2);
+    }
+
+    #[test]
+    fn limit_setting_accepts_only_offered_choices() {
+        assert_eq!(parse_limit_mb(None), DEFAULT_LIMIT_MB);
+        assert_eq!(parse_limit_mb(Some("5120")), 5120);
+        assert_eq!(parse_limit_mb(Some("0")), 0);
+        assert_eq!(parse_limit_mb(Some("777")), DEFAULT_LIMIT_MB);
+        assert_eq!(parse_limit_mb(Some("-1")), DEFAULT_LIMIT_MB);
+        assert_eq!(limit_bytes(2), 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn startup_cleanup_keeps_known_files_and_resumable_parts() {
+        use std::collections::HashSet;
+        use std::path::PathBuf;
+        let files = vec![
+            PathBuf::from("c/a.audio"),
+            PathBuf::from("c/orphan.audio"),
+            PathBuf::from("c/a.audio.part"),
+            PathBuf::from("d/resume.audio.part"),
+        ];
+        let known: HashSet<PathBuf> = [PathBuf::from("c/a.audio")].into();
+        let resumable: HashSet<PathBuf> = [PathBuf::from("d/resume.audio.part")].into();
+        assert_eq!(
+            orphaned_files(&files, &known, &resumable),
+            vec![
+                PathBuf::from("c/orphan.audio"),
+                PathBuf::from("c/a.audio.part")
+            ]
+        );
     }
 }

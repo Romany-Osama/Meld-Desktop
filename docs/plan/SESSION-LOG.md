@@ -72,4 +72,7 @@
 
 - Owner decision: no more interim releases; one large release when the plan is finished. Fixes land on `main` under `[Unreleased]`.
 
-**Next task:** PLAY-042/PLAY-043/R6-027 (bound player-cache jobs), then PLAY-041/R6-023/R6-026 (cache quota, orphan cleanup), then Phase 0 leftovers (TR-L9).
+- Step 2: bounded player-cache fills, cancelled on skip, removal and exit (PLAY-042, PLAY-043, D-019); tests against a local HTTP server prove cancellation releases the socket and file within 3 s and stalls give up.
+- Step 3: playback-cache limit with LRU eviction, usage UI, start-up orphan cleanup (PLAY-041, R6-023, R6-026, D-020).
+
+**Next task:** TR-L9 (Prettier/ESLint, line endings, enforced in CI), then R6-075/TR-H9 (required checks).
