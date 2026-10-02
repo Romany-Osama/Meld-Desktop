@@ -9,6 +9,12 @@ Thanks for helping. Meld Desktop is a Windows port (Tauri 2, Rust, React, SQLite
 - Do not remove a feature that a released version already has without an entry in `docs/plan/DECISIONS.md`.
 - Every change comes with tests (Rust unit/integration tests, `scripts/tests`, or frontend tests once available).
 
+## Branches and releases (QUEUE-001)
+
+- **`main` is the only canonical branch.** Every feature and fix lands on `main` through a PR with a merge commit; there is no long-lived release, development or "v0.1.8" line. Short-lived topic branches (`feat/…`, `fix/…`, `chore/…`, `test/…`) are branched from an up-to-date `main` and deleted after merging.
+- **Releases are built only from `main`.** `release.yml` refuses a tag whose commit is not on `main` and whose name is not `v<package.json version>`. Every earlier release tag, including `v0.1.8`, is an ancestor of `main` (DECISIONS D-001).
+- Queue, playback and download logic has one implementation, tested on `main` (`src/lib/queue.test.ts`, `src/lib/playbackSession.test.ts`, `src/lib/persistentPlayback.test.ts`, Rust `download_resume` tests). Older unmerged branches are history, not sources: port a change from them with a PR and tests, never by releasing from them.
+
 ## Development setup
 
 Requirements: Windows 10/11 (primary target), Node.js 22, Rust stable with `rustfmt` and `clippy`, and the [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/).

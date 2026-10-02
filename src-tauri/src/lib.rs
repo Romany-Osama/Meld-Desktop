@@ -1,5 +1,4 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use futures_util::StreamExt;
 use hmac::{Hmac, Mac as HmacMac};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::ItemKey;
@@ -23,7 +22,6 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::webview::{PageLoadEvent, WebviewWindowBuilder};
 use tauri::{Emitter, Manager, Url, WebviewUrl};
-use tokio::io::AsyncWriteExt;
 use tokio::time::timeout;
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
@@ -39,6 +37,7 @@ const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 const VISITOR_PREFIX: &str = "Cg";
 
+mod download_resume;
 mod player_cache;
 mod resolver;
 mod secrets;
@@ -246,17 +245,6 @@ const MAX_STREAM_REQUESTS: u8 = 3;
 
 fn http() -> &'static Client {
     HTTP.get_or_init(|| build_http_client(HTTP_CONNECT_TIMEOUT, HTTP_REQUEST_TIMEOUT))
-}
-
-/// Waits for the next chunk of a transfer, failing with "`what` stalled" if nothing arrives within `idle`.
-async fn next_chunk_within<S: futures_util::Stream + Unpin>(
-    stream: &mut S,
-    idle: Duration,
-    what: &str,
-) -> Result<Option<S::Item>, String> {
-    timeout(idle, stream.next())
-        .await
-        .map_err(|_| format!("{what} stalled: no data received for {}s", idle.as_secs()))
 }
 
 struct RuntimeState {
@@ -2133,6 +2121,26 @@ fn download_cache_path(song_id: &str) -> PathBuf {
         .join(format!("{digest:x}.audio"))
 }
 
+/// A playback-cache file usable for this song at this quality (PLAY-021): a copy cached at another quality is
+/// never served, and an empty or vanished file is ignored.
+fn cached_player_file(
+    db: &Connection,
+    song_id: &str,
+    quality: &str,
+) -> Result<Option<String>, String> {
+    let cached = db
+        .query_row(
+            "SELECT path, bytes FROM player_cache WHERE song_id = ?1 AND quality = ?2",
+            params![song_id, quality],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("player cache state read failed: {error}"))?;
+    Ok(cached
+        .filter(|(path, bytes)| *bytes > 0 && Path::new(path).is_file())
+        .map(|(path, _)| path))
+}
+
 fn normalize_audio_quality(value: Option<&str>) -> &'static str {
     match value.unwrap_or("auto") {
         "high" => "high",
@@ -2200,18 +2208,14 @@ enum DownloadRetry {
     Restart,
 }
 
-fn download_retry(status: reqwest::StatusCode, offset: i64) -> DownloadRetry {
+fn download_retry(status: reqwest::StatusCode, resume: download_resume::Resume) -> DownloadRetry {
     if resolver::stream_access(status.as_u16()) == resolver::StreamAccess::Forbidden {
         DownloadRetry::Reresolve
-    } else if offset > 0 && status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+    } else if resume == download_resume::Resume::Restart {
         DownloadRetry::Restart
     } else {
         DownloadRetry::Proceed
     }
-}
-
-fn can_resume_partial_download(existing_bytes: i64, status: reqwest::StatusCode) -> bool {
-    existing_bytes > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT
 }
 
 async fn cache_download_artwork(song_id: &str, source_url: Option<&str>) -> Option<String> {
@@ -2712,11 +2716,25 @@ async fn download_start(
         fs::create_dir_all(parent)
             .map_err(|error| format!("download cache directory failed: {error}"))?;
     }
+    let expected_total: Option<i64>;
     {
         let db = state
             .db
             .lock()
             .map_err(|_| "database state poisoned".to_owned())?;
+        // The row is the resume manifest (PLAY-055): the size recorded when the partial file was started.
+        expected_total = if existing_partial_bytes > 0 {
+            db.query_row(
+                "SELECT total_bytes FROM downloads WHERE song_id = ?1",
+                params![song_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map_err(|error| format!("download resume state read failed: {error}"))?
+            .flatten()
+        } else {
+            None
+        };
         if let Some(old_artwork) = db
             .query_row(
                 "SELECT artwork_path FROM downloads WHERE song_id = ?1",
@@ -2731,7 +2749,7 @@ async fn download_start(
         }
         db.execute("INSERT INTO songs (id, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, kind, saved_at, explicit, music_video_type, liked, liked_date, in_library, is_video, uploaded, youtube_liked, album_id, duration) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, NULL, 0, 0, 0, 0, ?13, ?14) ON CONFLICT(id) DO UPDATE SET title=excluded.title, subtitle=excluded.subtitle, thumbnail=excluded.thumbnail, video_id=excluded.video_id, set_video_id=excluded.set_video_id, kind=excluded.kind, album_id=excluded.album_id, duration=excluded.duration", params![song_id, item.title, item.subtitle, item.thumbnail, item.browse_id, item.playlist_id, item.video_id, item.set_video_id, item.kind, now_seconds(), if item.explicit { 1 } else { 0 }, item.music_video_type, item.album_id, 0]).map_err(|error| format!("download metadata save failed: {error}"))?;
         db.execute("INSERT INTO downloads (song_id, path, bytes, total_bytes, state, error, lyrics_cached, artwork_path, downloaded_at)
- VALUES (?1, ?2, ?3, NULL, 'downloading', NULL, 0, NULL, ?4) ON CONFLICT(song_id) DO UPDATE SET path=excluded.path, bytes=excluded.bytes, total_bytes=NULL, state='downloading', error=NULL, lyrics_cached=0, artwork_path=NULL, downloaded_at=excluded.downloaded_at", params![song_id, final_path.to_string_lossy().to_string(), existing_partial_bytes, now_seconds()]).map_err(|error| format!("download state init failed: {error}"))?;
+ VALUES (?1, ?2, ?3, NULL, 'downloading', NULL, 0, NULL, ?4) ON CONFLICT(song_id) DO UPDATE SET path=excluded.path, bytes=excluded.bytes, total_bytes=CASE WHEN excluded.bytes > 0 THEN downloads.total_bytes ELSE NULL END, state='downloading', error=NULL, lyrics_cached=0, artwork_path=NULL, downloaded_at=excluded.downloaded_at", params![song_id, final_path.to_string_lossy().to_string(), existing_partial_bytes, now_seconds()]).map_err(|error| format!("download state init failed: {error}"))?;
         if let Some(info) = read_download_info(&db, &song_id)? {
             emit_download(&app, &info);
         }
@@ -2750,12 +2768,14 @@ async fn download_start(
         // audio element's), and a URL the media server refuses is re-resolved with another client.
         let mut offset = existing_partial_bytes;
         let mut requests = 0_u8;
-        let response = loop {
+        let (response, decision) = loop {
             requests += 1;
             let response = http().get(&payload.stream_url).timeout(TRANSFER_TIMEOUT).header(RANGE, format!("bytes={offset}-")).send().await.map_err(|error| format!("audio cache request failed: {}", resolver::redact(&error.without_url().to_string())))?;
             let status = response.status();
+            let content_range = response.headers().get(reqwest::header::CONTENT_RANGE).and_then(|value| value.to_str().ok()).map(str::to_owned);
+            let decision = download_resume::resume_decision(offset, status.as_u16(), content_range.as_deref(), expected_total);
             if requests < MAX_STREAM_REQUESTS {
-                match download_retry(status, offset) {
+                match download_retry(status, decision) {
                     DownloadRetry::Reresolve => {
                         mark_stream_refused(video_id, payload.source_client.as_deref());
                         payload = resolve_player_payload(video_id, item.playlist_id.as_deref(), quality, &state).await?;
@@ -2772,35 +2792,25 @@ async fn download_start(
             if !status.is_success() {
                 return Err(format!("audio cache response failed: HTTP {status} from {}", payload.source_client.as_deref().unwrap_or("YouTube")));
             }
-            break response;
+            if decision == download_resume::Resume::Restart {
+                let _ = fs::remove_file(&partial_path);
+                return Err("the partial download no longer matches the stream; try again to start over".to_owned());
+            }
+            break (response, decision);
         };
-        let resume = can_resume_partial_download(offset, response.status());
+        let resume = decision == download_resume::Resume::Append;
         if offset > 0 && !resume { let _ = fs::remove_file(&partial_path); }
         let total_bytes = response.content_length().map(|value| value as i64).map(|value| if resume { value + offset } else { value });
         {
             let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
             db.execute("UPDATE downloads SET total_bytes = ?1 WHERE song_id = ?2", params![total_bytes, song_id]).map_err(|error| format!("download size state failed: {error}"))?;
         }
-        let mut file = if resume {
-            tokio::fs::OpenOptions::new().create(true).append(true).open(&partial_path).await.map_err(|error| format!("download cache file failed: {error}"))?
-        } else {
-            tokio::fs::File::create(&partial_path).await.map_err(|error| format!("download cache file failed: {error}"))?
-        };
-        let mut stream = response.bytes_stream();
-        let mut bytes = if resume { offset } else { 0_i64 };
-        while let Some(chunk) = next_chunk_within(&mut stream, STALL_TIMEOUT, "download").await? {
-            if cancel.load(Ordering::Acquire) { return Err("download cancelled".to_owned()); }
-            let chunk = chunk.map_err(|error| format!("download stream failed: {error}"))?;
-            file.write_all(&chunk).await.map_err(|error| format!("download cache write failed: {error}"))?;
-            bytes += chunk.len() as i64;
-            if bytes % ((1024 * 1024) as i64) < chunk.len() as i64 {
-                let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
-                db.execute("UPDATE downloads SET bytes = ?1 WHERE song_id = ?2", params![bytes, song_id]).map_err(|error| format!("download progress state failed: {error}"))?;
-                if let Some(info) = read_download_info(&db, &song_id)? { emit_download(&app, &info); }
-            }
-        }
-        file.flush().await.map_err(|error| format!("download cache flush failed: {error}"))?;
-        drop(file);
+        let bytes = download_resume::write_body(response.bytes_stream(), &partial_path, resume, offset, &cancel, STALL_TIMEOUT, |bytes| {
+            let db = state.db.lock().map_err(|_| "database state poisoned".to_owned())?;
+            db.execute("UPDATE downloads SET bytes = ?1 WHERE song_id = ?2", params![bytes, song_id]).map_err(|error| format!("download progress state failed: {error}"))?;
+            if let Some(info) = read_download_info(&db, &song_id)? { emit_download(&app, &info); }
+            Ok(())
+        }).await?;
         if !player_cache::transfer_complete(bytes, total_bytes) {
             // The partial file is kept so the next attempt resumes from it.
             return Err(format!("download incomplete: received {bytes} of {} bytes", total_bytes.unwrap_or(0)));
@@ -2830,7 +2840,7 @@ async fn download_start(
         let retained_bytes = fs::metadata(&partial_path)
             .map(|metadata| metadata.len() as i64)
             .unwrap_or(0);
-        let state_name = if error == "download cancelled" {
+        let state_name = if error == download_resume::CANCELLED {
             "cancelled"
         } else {
             "failed"
@@ -2874,19 +2884,12 @@ async fn ytm_player(
             .db
             .lock()
             .map_err(|_| "database state poisoned".to_owned())?;
-        let cached = db
-            .query_row(
-                "SELECT path, bytes FROM player_cache WHERE song_id = ?1 AND quality = ?2",
-                params![id, requested_quality],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .optional()
-            .map_err(|error| format!("player cache state read failed: {error}"))?;
-        (cached, player_cache_limit_mb(&db))
+        (
+            cached_player_file(&db, &id, requested_quality)?,
+            player_cache_limit_mb(&db),
+        )
     };
-    if let Some((path, _bytes)) =
-        cached.filter(|(path, bytes)| *bytes > 0 && Path::new(path).is_file())
-    {
+    if let Some(path) = cached {
         // Playing from the cache counts as a use for least-recently-used eviction.
         if let Ok(db) = state.db.lock() {
             let _ = db.execute(
@@ -10227,19 +10230,6 @@ mod tests {
         assert_eq!(metadata.title.as_deref(), Some("Quality"));
     }
 
-    #[test]
-    fn partial_download_resume_requires_nonempty_file_and_206() {
-        assert!(can_resume_partial_download(
-            1024,
-            reqwest::StatusCode::PARTIAL_CONTENT
-        ));
-        assert!(!can_resume_partial_download(
-            0,
-            reqwest::StatusCode::PARTIAL_CONTENT
-        ));
-        assert!(!can_resume_partial_download(1024, reqwest::StatusCode::OK));
-    }
-
     fn cache_test_db() -> Connection {
         let store = MemKeyStore(Mutex::new(None));
         let db = Connection::open_in_memory().expect("db");
@@ -10357,27 +10347,67 @@ mod tests {
     }
 
     #[test]
+    fn playback_cache_serves_only_the_requested_quality() {
+        // PLAY-021: switching Audio quality must not keep playing a copy cached at the other quality.
+        let db = cache_test_db();
+        let dir = std::env::temp_dir().join(format!("meld-quality-cache-{}", std::process::id()));
+        let low = dir.join("low.audio");
+        write_file(&low, 16);
+        db.execute(
+            "INSERT INTO player_cache (song_id, path, bytes, cached_at, quality) VALUES ('song', ?1, 16, 1, 'low')",
+            params![low.to_string_lossy().to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            cached_player_file(&db, "song", "low").unwrap(),
+            Some(low.to_string_lossy().to_string())
+        );
+        assert_eq!(cached_player_file(&db, "song", "high").unwrap(), None);
+        assert_eq!(cached_player_file(&db, "song", "auto").unwrap(), None);
+        assert_eq!(cached_player_file(&db, "other", "low").unwrap(), None);
+        fs::remove_file(&low).unwrap();
+        assert_eq!(
+            cached_player_file(&db, "song", "low").unwrap(),
+            None,
+            "a vanished file is not served"
+        );
+        assert_eq!(normalize_audio_quality(Some("low")), "low");
+        assert_eq!(normalize_audio_quality(Some("high")), "high");
+        assert_eq!(normalize_audio_quality(Some("best")), "auto");
+        assert_eq!(normalize_audio_quality(None), "auto");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn refused_download_urls_are_reresolved_and_stale_partials_restart() {
+        use download_resume::Resume;
         use reqwest::StatusCode;
         assert_eq!(
-            download_retry(StatusCode::FORBIDDEN, 0),
+            download_retry(StatusCode::FORBIDDEN, Resume::Fresh),
             DownloadRetry::Reresolve
         );
         assert_eq!(
-            download_retry(StatusCode::GONE, 4096),
+            download_retry(StatusCode::GONE, Resume::Restart),
             DownloadRetry::Reresolve
         );
         assert_eq!(
-            download_retry(StatusCode::RANGE_NOT_SATISFIABLE, 4096),
+            download_retry(StatusCode::RANGE_NOT_SATISFIABLE, Resume::Restart),
             DownloadRetry::Restart
         );
         assert_eq!(
-            download_retry(StatusCode::PARTIAL_CONTENT, 4096),
+            download_retry(StatusCode::PARTIAL_CONTENT, Resume::Restart),
+            DownloadRetry::Restart
+        );
+        assert_eq!(
+            download_retry(StatusCode::PARTIAL_CONTENT, Resume::Append),
             DownloadRetry::Proceed
         );
-        assert_eq!(download_retry(StatusCode::OK, 0), DownloadRetry::Proceed);
         assert_eq!(
-            download_retry(StatusCode::SERVICE_UNAVAILABLE, 0),
+            download_retry(StatusCode::OK, Resume::Fresh),
+            DownloadRetry::Proceed
+        );
+        assert_eq!(
+            download_retry(StatusCode::SERVICE_UNAVAILABLE, Resume::Fresh),
             DownloadRetry::Proceed
         );
     }
@@ -11158,24 +11188,39 @@ mod tests {
 
     #[test]
     fn a_transfer_that_stops_sending_data_is_reported_as_stalled() {
+        use futures_util::StreamExt;
         // TR-H5: downloads and the player cache stop with a clear error instead of hanging.
         current_thread_runtime().block_on(async {
             let mut stream =
                 futures_util::stream::iter(vec![1_u8]).chain(futures_util::stream::pending());
             assert_eq!(
-                next_chunk_within(&mut stream, Duration::from_millis(50), "download").await,
+                download_resume::next_chunk_within(
+                    &mut stream,
+                    Duration::from_millis(50),
+                    "download"
+                )
+                .await,
                 Ok(Some(1))
             );
-            let error = next_chunk_within(&mut stream, Duration::from_millis(50), "download")
-                .await
-                .expect_err("must stall");
+            let error = download_resume::next_chunk_within(
+                &mut stream,
+                Duration::from_millis(50),
+                "download",
+            )
+            .await
+            .expect_err("must stall");
             assert!(
                 error.starts_with("download stalled: no data received"),
                 "{error}"
             );
             let mut finished = futures_util::stream::iter(Vec::<u8>::new());
             assert_eq!(
-                next_chunk_within(&mut finished, Duration::from_millis(50), "player cache").await,
+                download_resume::next_chunk_within(
+                    &mut finished,
+                    Duration::from_millis(50),
+                    "player cache"
+                )
+                .await,
                 Ok(None)
             );
         });
