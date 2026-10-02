@@ -27,7 +27,7 @@ it("shows a fallback for its own region only and recovers on Try again (U4-014)"
   expect(screen.getByText("Shell")).toBeTruthy();
   expect(screen.getByRole("alert").textContent).toContain("This page could not be shown.");
   expect(screen.getByText("cannot render album")).toBeTruthy();
-  expect(renderErrors.at(-1)).toMatchObject({ region: "This page", message: "cannot render album" });
+  expect(renderErrors[renderErrors.length - 1]).toMatchObject({ region: "This page", message: "cannot render album" });
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(onClose).toHaveBeenCalledTimes(1);
   broken = false;
