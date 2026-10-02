@@ -2,6 +2,7 @@ import { InlineLikeButton } from "../../components/InlineLikeButton";
 import { AudioQuality } from "../../lib/audioQuality";
 import { mediaSrc } from "../../lib/media";
 import { LoadState, DetailPage, YtItem } from "../../types";
+import { withOccurrences } from "../../lib/identity";
 
 export type DetailScreenProps = {
   audioQuality: AudioQuality;
@@ -87,8 +88,8 @@ export function DetailScreen({
                       <p>This browse response contained no typed items.</p>
                     </div>
                   ) : (
-                    detail.data.items.map((item, itemIndex) => (
-                      <div className="song-row-wrap" key={`${item.kind}-${item.id}-${itemIndex}`}>
+                    withOccurrences(detail.data.items, "detail").map(({ item, key }) => (
+                      <div className="song-row-wrap" key={key}>
                         <button className="song-row" onClick={() => void openDetailItem(item)}>
                           {mediaSrc(item.thumbnail) && <img src={mediaSrc(item.thumbnail) as string} alt="" />}
                           <span className="song-copy">

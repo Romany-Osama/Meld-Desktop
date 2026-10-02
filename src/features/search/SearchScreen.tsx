@@ -3,6 +3,7 @@ import { InlineLikeButton } from "../../components/InlineLikeButton";
 import { ItemCard } from "../../components/ItemCard";
 import { AudioQuality } from "../../lib/audioQuality";
 import { YtItem, LoadState, SearchPage } from "../../types";
+import { withOccurrences } from "../../lib/identity";
 
 export type SearchScreenProps = {
   audioQuality: AudioQuality;
@@ -14,12 +15,14 @@ export type SearchScreenProps = {
   openMenu: (item: YtItem) => Promise<void>;
   search: LoadState<SearchPage>;
   searchMoreLoading: boolean;
+  /** Whether the row with this occurrence key is selected (U4-015). */
+  isSelected: (key: string) => boolean;
   selectedItems: YtItem[];
   selectionMode: boolean;
   setSelectionMode: Dispatch<SetStateAction<boolean>>;
   settings: Record<string, boolean>;
   submittedQuery: string;
-  toggleSelectedItem: (item: YtItem) => void;
+  toggleSelectedItem: (item: YtItem, key?: string) => void;
 };
 
 export function SearchScreen({
@@ -32,6 +35,7 @@ export function SearchScreen({
   openMenu,
   search,
   searchMoreLoading,
+  isSelected,
   selectedItems,
   selectionMode,
   setSelectionMode,
@@ -73,46 +77,47 @@ export function SearchScreen({
           )}
           {search.status === "ready" && (
             <div className="result-list">
-              {search.data.items
-                .filter((item) => !hideItem(item))
-                .map((item) => (
-                  <div className="result-row" key={`${item.kind}-${item.id}`}>
-                    {selectionMode && (
-                      <input
-                        className="selection-checkbox"
-                        type="checkbox"
-                        checked={selectedItems.some((value) => value.id === item.id)}
-                        onChange={() => toggleSelectedItem(item)}
-                        aria-label={`Select ${item.title}`}
-                      />
-                    )}
-                    <ItemCard item={item} onOpen={openItem} />
+              {withOccurrences(
+                search.data.items.filter((item) => !hideItem(item)),
+                "search",
+              ).map(({ item, key }) => (
+                <div className="result-row" key={key}>
+                  {selectionMode && (
+                    <input
+                      className="selection-checkbox"
+                      type="checkbox"
+                      checked={isSelected(key)}
+                      onChange={() => toggleSelectedItem(item, key)}
+                      aria-label={`Select ${item.title}`}
+                    />
+                  )}
+                  <ItemCard item={item} onOpen={openItem} />
+                  {item.kind === "song" && (
+                    <InlineLikeButton
+                      item={item}
+                      autoDownloadOnLike={settings.autoDownloadOnLike === true}
+                      audioQuality={audioQuality}
+                    />
+                  )}
+                  <div className="row-actions">
+                    <button className="row-action" onClick={() => void openItem(item)}>
+                      {item.kind === "song" ? "Play in Meld" : "Open"}
+                    </button>
                     {item.kind === "song" && (
-                      <InlineLikeButton
-                        item={item}
-                        autoDownloadOnLike={settings.autoDownloadOnLike === true}
-                        audioQuality={audioQuality}
-                      />
+                      <button className="row-action" onClick={() => void openLyrics(item)}>
+                        Lyrics
+                      </button>
                     )}
-                    <div className="row-actions">
-                      <button className="row-action" onClick={() => void openItem(item)}>
-                        {item.kind === "song" ? "Play in Meld" : "Open"}
-                      </button>
-                      {item.kind === "song" && (
-                        <button className="row-action" onClick={() => void openLyrics(item)}>
-                          Lyrics
-                        </button>
-                      )}
-                      <button
-                        className="row-action menu-trigger"
-                        onClick={() => void openMenu(item)}
-                        title={`More options for ${item.title}`}
-                      >
-                        ⋮
-                      </button>
-                    </div>
+                    <button
+                      className="row-action menu-trigger"
+                      onClick={() => void openMenu(item)}
+                      title={`More options for ${item.title}`}
+                    >
+                      ⋮
+                    </button>
                   </div>
-                ))}
+                </div>
+              ))}
             </div>
           )}
           {search.data.continuation && (

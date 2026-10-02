@@ -1,5 +1,6 @@
 import { Dispatch, SetStateAction } from "react";
 import { SpotifyTrackItem, SpotifyPlaylistItem, LoadState, SpotifyTrackPage, SpotifyProfile } from "../../types";
+import { withOccurrencesBy } from "../../lib/identity";
 
 export type SpotifyPlaylistScreenProps = {
   downloadSpotifyPlaylist: () => Promise<void>;
@@ -154,55 +155,58 @@ export function SpotifyPlaylistScreen({
             )}
             {spotifyPlaylistTracks.status === "ready" && visibleSpotifyPlaylistTracks.length > 0 && (
               <div className="spotify-track-list">
-                {visibleSpotifyPlaylistTracks.map((track) => (
-                  <div className="spotify-track-row" key={track.id}>
-                    <div className="spotify-track-copy">
-                      <strong>{track.name}</strong>
-                      <span>
-                        {track.artist}
-                        {track.album ? ` · ${track.album}` : ""}
-                      </span>
-                    </div>
-                    <div className="spotify-track-actions">
-                      <button className="row-action" onClick={() => void playSpotifyTrack(track)}>
-                        Find & play
-                      </button>
-                      {spotifyReorderUnlocked &&
-                        !spotifyDetailQuery.trim() &&
-                        spotifyDetailSort === "original" &&
-                        !spotifyDetailSortDescending &&
-                        track.uid && (
-                          <>
-                            <button
-                              className="row-action"
-                              disabled={visibleSpotifyPlaylistTracks.indexOf(track) === 0}
-                              onClick={() => void moveSpotifyTrack(track, "up")}
-                              title="Move up"
-                              aria-label={`Move ${track.name} up`}
-                            >
-                              ↑
-                            </button>
-                            <button
-                              className="row-action"
-                              disabled={
-                                visibleSpotifyPlaylistTracks.indexOf(track) === visibleSpotifyPlaylistTracks.length - 1
-                              }
-                              onClick={() => void moveSpotifyTrack(track, "down")}
-                              title="Move down"
-                              aria-label={`Move ${track.name} down`}
-                            >
-                              ↓
-                            </button>
-                          </>
-                        )}
-                      {track.uid && (
-                        <button className="row-action danger-action" onClick={() => void removeSpotifyTrack(track)}>
-                          Remove
+                {withOccurrencesBy(visibleSpotifyPlaylistTracks, "spotify", (track) => track.id).map(
+                  ({ item: track, key }) => (
+                    <div className="spotify-track-row" key={key}>
+                      <div className="spotify-track-copy">
+                        <strong>{track.name}</strong>
+                        <span>
+                          {track.artist}
+                          {track.album ? ` · ${track.album}` : ""}
+                        </span>
+                      </div>
+                      <div className="spotify-track-actions">
+                        <button className="row-action" onClick={() => void playSpotifyTrack(track)}>
+                          Find & play
                         </button>
-                      )}
+                        {spotifyReorderUnlocked &&
+                          !spotifyDetailQuery.trim() &&
+                          spotifyDetailSort === "original" &&
+                          !spotifyDetailSortDescending &&
+                          track.uid && (
+                            <>
+                              <button
+                                className="row-action"
+                                disabled={visibleSpotifyPlaylistTracks.indexOf(track) === 0}
+                                onClick={() => void moveSpotifyTrack(track, "up")}
+                                title="Move up"
+                                aria-label={`Move ${track.name} up`}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                className="row-action"
+                                disabled={
+                                  visibleSpotifyPlaylistTracks.indexOf(track) ===
+                                  visibleSpotifyPlaylistTracks.length - 1
+                                }
+                                onClick={() => void moveSpotifyTrack(track, "down")}
+                                title="Move down"
+                                aria-label={`Move ${track.name} down`}
+                              >
+                                ↓
+                              </button>
+                            </>
+                          )}
+                        {track.uid && (
+                          <button className="row-action danger-action" onClick={() => void removeSpotifyTrack(track)}>
+                            Remove
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ),
+                )}
               </div>
             )}
             {spotifyPlaylistTracks.data.tracks.length < spotifyPlaylistTracks.data.totalCount && (

@@ -1,5 +1,6 @@
 import { HomeSection, YtItem } from "../types";
 import { ItemCard } from "./ItemCard";
+import { withOccurrences } from "../lib/identity";
 
 export function Section({
   section,
@@ -40,11 +41,12 @@ export function Section({
         )}
       </div>
       <div className="card-row">
-        {section.items
-          .filter((item) => !shouldHide(item))
-          .map((item) => (
-            <ItemCard key={`${item.kind}-${item.id}`} item={item} onOpen={onOpen} onMenu={onMenu} />
-          ))}
+        {withOccurrences(
+          section.items.filter((item) => !shouldHide(item)),
+          "section",
+        ).map(({ item, key }) => (
+          <ItemCard key={key} item={item} onOpen={onOpen} onMenu={onMenu} />
+        ))}
       </div>
     </section>
   );

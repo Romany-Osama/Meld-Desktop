@@ -45,7 +45,7 @@ beforeEach(() => {
 });
 
 describe("useSelection", () => {
-  it("toggles items by id and clears selection mode", () => {
+  it("toggles items and clears selection mode", () => {
     const { result } = renderHook(() => useSelection());
     act(() => {
       result.current.setSelectionMode(true);
@@ -57,6 +57,18 @@ describe("useSelection", () => {
     act(() => result.current.closeSelection());
     expect(result.current.selectedItems).toEqual([]);
     expect(result.current.selectionMode).toBe(false);
+  });
+
+  it("selects one occurrence of a song that is in the list twice (U4-015)", () => {
+    const { result } = renderHook(() => useSelection());
+    act(() => result.current.toggleSelectedItem(song("a"), "playlist:P:song:a#1"));
+    expect(result.current.isSelected("playlist:P:song:a#1")).toBe(true);
+    expect(result.current.isSelected("playlist:P:song:a#0")).toBe(false);
+    expect(result.current.selectedItems.map((item) => item.id)).toEqual(["a"]);
+    act(() => result.current.toggleSelectedItem(song("a"), "playlist:P:song:a#0"));
+    expect(result.current.selectedItems).toHaveLength(2);
+    act(() => result.current.clearSelected());
+    expect(result.current.selectedItems).toEqual([]);
   });
 });
 

@@ -73,6 +73,7 @@ import { parseLink } from "./app/links";
 import { canPerform, itemMenuEntries, MenuAction, MenuContext } from "./app/capabilities";
 import { ItemMenu } from "./features/menu/ItemMenu";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { indexOfOccurrence } from "./lib/identity";
 import { NoticeStack } from "./components/NoticeStack";
 import { Destructive, DestructiveSpec, runDestructive } from "./app/destructive";
 import { useConfirm } from "./features/confirm/useConfirm";
@@ -135,8 +136,15 @@ function App() {
     logoutSpotify,
     logoutGoogle,
   } = useAccounts({ setNotice });
-  const { selectedItems, setSelectedItems, selectionMode, setSelectionMode, toggleSelectedItem, closeSelection } =
-    useSelection();
+  const {
+    selectedItems,
+    isSelected,
+    clearSelected,
+    selectionMode,
+    setSelectionMode,
+    toggleSelectedItem,
+    closeSelection,
+  } = useSelection();
   const [active, setActive] = useState<NavKey>("home");
   const [navHistory, setNavHistory] = useState<NavHistory>(EMPTY_HISTORY);
   const pageScrollRef = useRef<HTMLDivElement>(null);
@@ -193,7 +201,7 @@ function App() {
     visiblePlaylists,
     visiblePlaylistPicker,
     localPlaylists,
-  } = usePlaylists({ sessionStatus, setNotice, setSelectedItems, setSelectionMode, settings });
+  } = usePlaylists({ sessionStatus, setNotice, clearSelected, setSelectionMode, settings });
   const [topPeriod, setTopPeriod] = useState<TopPeriod>("all");
   const topSize = 50;
   const [podcastFilter, setPodcastFilter] = useState<PodcastFilter>("episodes");
@@ -2171,7 +2179,7 @@ function App() {
       playableLibraryItems.some((value) => value.id === item.id)
         ? playableLibraryItems
         : sourceQueue;
-    const libraryIndex = libraryQueue.findIndex((value) => value.id === item.id);
+    const libraryIndex = indexOfOccurrence(libraryQueue, item, libraryQueue === sourceQueue ? sourceIndex : undefined);
     if (item.localPath) {
       await playItem(item, libraryQueue, libraryIndex >= 0 ? libraryIndex : sourceIndex, null, false);
       return;
@@ -2347,7 +2355,7 @@ function App() {
   const openDetailItem = async (item: YtItem) => {
     const detailItems = detail?.status === "ready" ? detail.data.items : [];
     const queue = detailItems.filter((value) => value.videoId || value.localPath);
-    const index = queue.findIndex((value) => value.id === item.id);
+    const index = indexOfOccurrence(queue, item);
     await openItem(item, queue.length > 0 ? queue : [item], index >= 0 ? index : 0);
   };
 
@@ -2655,6 +2663,7 @@ function App() {
                 openMenu={openMenu}
                 search={search}
                 searchMoreLoading={searchMoreLoading}
+                isSelected={isSelected}
                 selectedItems={selectedItems}
                 selectionMode={selectionMode}
                 setSelectionMode={setSelectionMode}
@@ -2679,6 +2688,7 @@ function App() {
                 openLyrics={openLyrics}
                 openMenu={openMenu}
                 remoteHistory={remoteHistory}
+                isSelected={isSelected}
                 selectedItems={selectedItems}
                 selectionMode={selectionMode}
                 sessionStatus={sessionStatus}
@@ -2741,6 +2751,7 @@ function App() {
                 podcastRefreshing={podcastRefreshing}
                 refreshSavedPodcasts={refreshSavedPodcasts}
                 reloadCurrentLibrary={reloadCurrentLibrary}
+                isSelected={isSelected}
                 selectedItems={selectedItems}
                 selectionMode={selectionMode}
                 setLibraryMixSort={setLibraryMixSort}
@@ -3437,7 +3448,7 @@ function App() {
           openMenu={openMenu}
           playItem={playItem}
           playlist={playlist}
-          selectedItems={selectedItems}
+          isSelected={isSelected}
           selectionMode={selectionMode}
           closePlaylist={() => setOpenPlaylist(null)}
           settings={settings}

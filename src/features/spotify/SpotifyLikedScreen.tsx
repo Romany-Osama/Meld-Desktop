@@ -1,5 +1,6 @@
 import { Dispatch, SetStateAction } from "react";
 import { SpotifyTrackItem, LoadState, SpotifyLikedTracksPayload } from "../../types";
+import { withOccurrencesBy } from "../../lib/identity";
 
 export type SpotifyLikedScreenProps = {
   loadSpotifyLikedTracks: () => Promise<void>;
@@ -58,20 +59,22 @@ export function SpotifyLikedScreen({
             )}
             {spotifyLikedTracks.status === "ready" && spotifyLikedTracks.data.tracks.length > 0 && (
               <div className="spotify-track-list">
-                {spotifyLikedTracks.data.tracks.map((track) => (
-                  <div className="spotify-track-row" key={track.id}>
-                    <div className="spotify-track-copy">
-                      <strong>{track.name}</strong>
-                      <span>
-                        {track.artist}
-                        {track.album ? ` · ${track.album}` : ""}
-                      </span>
+                {withOccurrencesBy(spotifyLikedTracks.data.tracks, "spotify", (track) => track.id).map(
+                  ({ item: track, key }) => (
+                    <div className="spotify-track-row" key={key}>
+                      <div className="spotify-track-copy">
+                        <strong>{track.name}</strong>
+                        <span>
+                          {track.artist}
+                          {track.album ? ` · ${track.album}` : ""}
+                        </span>
+                      </div>
+                      <button className="row-action" onClick={() => void playSpotifyTrack(track)}>
+                        Find & play
+                      </button>
                     </div>
-                    <button className="row-action" onClick={() => void playSpotifyTrack(track)}>
-                      Find & play
-                    </button>
-                  </div>
-                ))}
+                  ),
+                )}
               </div>
             )}
           </div>

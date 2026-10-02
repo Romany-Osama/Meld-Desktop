@@ -1,6 +1,7 @@
 import { Dispatch, SetStateAction } from "react";
 import { ItemCard } from "../../components/ItemCard";
 import { YtItem, LoadState, StatsPayload } from "../../types";
+import { domainId, withOccurrencesBy } from "../../lib/identity";
 
 export type StatsScreenProps = {
   loadStats: (period?: "all" | "day" | "week" | "month" | "year") => Promise<void>;
@@ -150,31 +151,36 @@ export function StatsScreen({
                 </div>
               ) : (
                 <div className="result-list stats-list">
-                  {stats.data.rows.map((row, index) => (
-                    <div className="result-row stats-row" key={`${row.item.id}-${index}`}>
-                      <span className="stats-rank">{index + 1}</span>
-                      <ItemCard item={row.item} onOpen={(value) => openItem(value, statsQueueItems, index)} />
-                      <span
-                        className="stats-metrics"
-                        title="New plays use measured playback time; older history rows may use track-duration estimates."
-                      >
-                        {row.plays} play{row.plays === 1 ? "" : "s"} · {row.minutes} min listened
-                      </span>
-                      <div className="row-actions">
-                        <button className="row-action" onClick={() => void openItem(row.item, statsQueueItems, index)}>
-                          Play in Meld
-                        </button>
-                        <button
-                          className="row-action menu-trigger"
-                          onClick={() => void openMenu(row.item)}
-                          title={`More options for ${row.item.title}`}
-                          aria-label={`More options for ${row.item.title}`}
+                  {withOccurrencesBy(stats.data.rows, "stats", (row) => domainId(row.item)).map(
+                    ({ item: row, key, index }) => (
+                      <div className="result-row stats-row" key={key}>
+                        <span className="stats-rank">{index + 1}</span>
+                        <ItemCard item={row.item} onOpen={(value) => openItem(value, statsQueueItems, index)} />
+                        <span
+                          className="stats-metrics"
+                          title="New plays use measured playback time; older history rows may use track-duration estimates."
                         >
-                          ⋮
-                        </button>
+                          {row.plays} play{row.plays === 1 ? "" : "s"} · {row.minutes} min listened
+                        </span>
+                        <div className="row-actions">
+                          <button
+                            className="row-action"
+                            onClick={() => void openItem(row.item, statsQueueItems, index)}
+                          >
+                            Play in Meld
+                          </button>
+                          <button
+                            className="row-action menu-trigger"
+                            onClick={() => void openMenu(row.item)}
+                            title={`More options for ${row.item.title}`}
+                            aria-label={`More options for ${row.item.title}`}
+                          >
+                            ⋮
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ),
+                  )}
                 </div>
               )}
             </>
