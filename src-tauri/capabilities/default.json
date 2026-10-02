@@ -1,7 +1,20 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for the main window: core, taskbar and every app command, granted per owner (S5-004, docs/ipc-commands.md)",
   "windows": ["main"],
-  "permissions": ["core:default", "taskbar:default"]
+  "permissions": [
+    "core:default",
+    "taskbar:default",
+    "ipc-account",
+    "ipc-spotify",
+    "ipc-catalog",
+    "ipc-library",
+    "ipc-downloads",
+    "ipc-player",
+    "ipc-lyrics",
+    "ipc-settings",
+    "ipc-backup",
+    "ipc-system"
+  ]
 }

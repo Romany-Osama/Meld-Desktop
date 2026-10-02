@@ -70,8 +70,8 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] S5-001 (P0) Inventory every Tauri command with an owner, caller, and risk class — scripts/lib/ipc-inventory.mjs + docs/ipc-commands.md (D-039); checks.test.mjs (ipc inventory), npm run check:security
 - [x] S5-002 (P0) Remove or gate unused commands — none unused (104/104 called); check:security fails on a command without a caller (D-039); checks.test.mjs (ipc inventory)
 - [x] S5-003 (P0) Split commands into Rust modules by domain — src-tauri/src/ipc/<owner>.rs, one path-qualified generate_handler! (D-040); cargo test (every_song_delete_protects_downloaded_songs scans ipc/), checks.test.mjs (command modules)
-- [ ] S5-004 (P0) Adopt Tauri v2 app-command permissions
-- [ ] S5-005 (P0) Keep remote login windows IPC-less — and test it
+- [x] S5-004 (P0) Adopt Tauri v2 app-command permissions — build.rs AppManifest + permissions/<owner>.toml sets granted to main (D-041); checks.test.mjs (permission sets), cargo build validates grants
+- [x] S5-005 (P0) Keep remote login windows IPC-less — and test it — check:security rejects capabilities for login windows, window patterns, remote URLs (D-041); checks.test.mjs (login windows)
 - [ ] S5-006 (P0) Typed, validated IPC payloads
 - [ ] S5-007 (P0) Structured error type instead of `Result<_, String>`
 - [ ] S5-008 (P0) Cap response sizes and list lengths returned over IPC

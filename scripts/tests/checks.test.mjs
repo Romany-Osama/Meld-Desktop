@@ -17,7 +17,18 @@ import {
   RESTORED_UI_COMMANDS,
 } from "../lib/ui-invariants.mjs";
 import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
-import { COMMANDS, callersOf, checkCommandModules, checkIpcInventory, renderInventory } from "../lib/ipc-inventory.mjs";
+import {
+  COMMANDS,
+  allowPermission,
+  callersOf,
+  checkCapabilityGrants,
+  checkCommandModules,
+  checkIpcInventory,
+  externalWindowLabels,
+  renderBuildRs,
+  renderInventory,
+  renderPermissionSet,
+} from "../lib/ipc-inventory.mjs";
 import { inventoryState } from "../ipc-inventory.mjs";
 import {
   checkAppComposition,
@@ -373,4 +384,44 @@ test("ipc: each command is registered from its owner's module (S5-003)", () => {
   assert.deepEqual(checkCommandModules(moved), ["settings_get is registered from ipc::library; its owner is settings"]);
   const flat = lib.replace("ipc::settings::settings_get", "settings_get");
   assert.deepEqual(checkCommandModules(flat), ["settings_get must be registered as ipc::settings::settings_get"]);
+});
+
+test("ipc: the main window gets app commands only through owner permission sets (S5-004)", () => {
+  assert.equal(allowPermission("history_items"), "allow-history-items");
+  assert.match(renderBuildRs(["b_cmd", "a_cmd"]), /"a_cmd",\n {4}"b_cmd",/);
+  assert.match(
+    renderPermissionSet("settings", ["settings_get", "ytm_home"]),
+    /identifier = "ipc-settings"[\s\S]*"allow-settings-get",\n\]/,
+  );
+  const registered = ["settings_get", "ytm_home"];
+  const main = {
+    identifier: "default",
+    windows: ["main"],
+    permissions: ["core:default", "ipc-settings", "ipc-catalog"],
+  };
+  assert.deepEqual(checkCapabilityGrants([main], registered, ["google-login"]), []);
+  assert.deepEqual(
+    checkCapabilityGrants([{ ...main, permissions: ["core:default", "ipc-settings"] }], registered, []),
+    ["main capability does not grant ipc-catalog"],
+  );
+  assert.deepEqual(
+    checkCapabilityGrants([{ ...main, permissions: [...main.permissions, "allow-ytm-home"] }], registered, []),
+    ['capability "default" grants allow-ytm-home outside a set'],
+  );
+});
+
+test("ipc: login windows that load remote sites never get IPC (S5-005)", () => {
+  const rust =
+    'WebviewWindowBuilder::new(&app, "google-login", WebviewUrl::External(url))\n' +
+    'WebviewWindowBuilder::new(\n        &app,\n        "spotify-login",\n        WebviewUrl::External(url)';
+  assert.deepEqual(externalWindowLabels(rust), ["google-login", "spotify-login"]);
+  assert.deepEqual(externalWindowLabels(readRustSource()), ["google-login", "spotify-login"]);
+  const main = { identifier: "default", windows: ["main"], permissions: [] };
+  assert.deepEqual(
+    checkCapabilityGrants([main, { identifier: "login", windows: ["google-login"] }], [], ["google-login"]),
+    ['capability "login" gives IPC to the login window google-login'],
+  );
+  assert.deepEqual(checkCapabilityGrants([{ ...main, windows: ["main", "*"] }], [], []), [
+    'capability "default" uses the window pattern *',
+  ]);
 });
