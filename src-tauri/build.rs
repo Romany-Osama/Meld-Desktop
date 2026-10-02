@@ -52,6 +52,7 @@ const COMMANDS: &[&str] = &[
     "player_cache_clear",
     "player_cache_remove",
     "player_cache_usage",
+    "request_cancel",
     "search_history_add",
     "search_history_clear",
     "search_history_items",

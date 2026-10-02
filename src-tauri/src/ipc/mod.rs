@@ -2,6 +2,7 @@
 //! The command bodies still use helpers from `lib.rs`; those move into domain modules later.
 pub mod account;
 pub mod backup;
+pub mod cancel;
 pub mod catalog;
 pub mod downloads;
 pub mod error;
@@ -12,3 +13,4 @@ pub mod payload;
 pub mod player;
 pub mod settings;
 pub mod spotify;
+pub mod system;

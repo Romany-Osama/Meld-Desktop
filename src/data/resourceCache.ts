@@ -7,8 +7,8 @@ import { errorMessage } from "../lib/util";
  *
  * Request identities (U4-009): every load gets an id. Only the newest load of a key may commit its result, and
  * starting a load in a scope (one per screen, e.g. `detail`) aborts the older load of that scope, so a page the
- * user has already left can never overwrite the page they are looking at. Tauri commands cannot be interrupted
- * yet (S5-009); an aborted load's answer is dropped when it arrives.
+ * user has already left can never overwrite the page they are looking at. Fetchers that pass the signal to
+ * `invokeCancellable` also stop the backend request (S5-009); any answer that still arrives is dropped.
  *
  * Entries stay cached (least recently used first out), so Back can show a page as it was left (U4-010).
  */

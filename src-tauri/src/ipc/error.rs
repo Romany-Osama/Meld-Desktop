@@ -435,6 +435,7 @@ mod contract {
             ("player", include_str!("player.rs")),
             ("settings", include_str!("settings.rs")),
             ("spotify", include_str!("spotify.rs")),
+            ("system", include_str!("system.rs")),
             ("updates", include_str!("../updates.rs")),
         ];
         let signature = regex::Regex::new(r"\)\s*->\s*Result<[^{;]*,\s*String>\s*\{").unwrap();

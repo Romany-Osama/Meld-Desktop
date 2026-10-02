@@ -95,6 +95,19 @@ pub fn library_saved_podcasts(state: tauri::State<'_, RuntimeState>) -> IpcResul
 pub async fn sync_youtube_library(
     mode: Keyword,
     state: tauri::State<'_, RuntimeState>,
+    request_id: Opt<Token>,
+) -> IpcResult<YouTubeSyncResult> {
+    cancellable(
+        request_id.into_string(),
+        "Library sync",
+        sync_youtube_library_body(mode, state),
+    )
+    .await
+}
+
+async fn sync_youtube_library_body(
+    mode: Keyword,
+    state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<YouTubeSyncResult> {
     let mode = mode.into_inner();
     let mode = mode.trim().to_lowercase();

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invokeCancellable } from "../../lib/cancellable";
 import { invoke } from "@tauri-apps/api/core";
 import type { DetailPage } from "../../types";
 import type { ResourceCache } from "../../data/resourceCache";
@@ -13,12 +14,16 @@ const DETAIL_FALLBACK = {
 };
 
 /** Fetches one album, artist, podcast or browse page. */
-export async function fetchDetail(ref: DetailRef): Promise<DetailPage> {
+export async function fetchDetail(ref: DetailRef, signal?: AbortSignal): Promise<DetailPage> {
   if (ref.kind === "browse") {
-    const data = await invoke<DetailPage>("ytm_browse", { browseId: ref.browseId, params: ref.params ?? null });
+    const data = await invokeCancellable<DetailPage>(
+      "ytm_browse",
+      { browseId: ref.browseId, params: ref.params ?? null },
+      signal,
+    );
     return { ...data, browseId: data.browseId ?? ref.browseId };
   }
-  const data = await invoke<DetailPage>("ytm_detail", { kind: ref.kind, browseId: ref.browseId });
+  const data = await invokeCancellable<DetailPage>("ytm_detail", { kind: ref.kind, browseId: ref.browseId }, signal);
   return { ...data, browseId: data.browseId ?? ref.browseId };
 }
 
@@ -49,7 +54,11 @@ export function useDetailData({
   const loadDetail = async (ref: DetailRef, placeholder: DetailPage, { reuse = false }: { reuse?: boolean } = {}) => {
     const target = detailKey(ref);
     if (reuse && cache.isFresh(target, FRESH_FOR_MS)) return;
-    await cache.load(target, () => fetchDetail(ref), { scope: "detail", placeholder, empty: placeholder });
+    await cache.load(target, (signal) => fetchDetail(ref, signal), {
+      scope: "detail",
+      placeholder,
+      empty: placeholder,
+    });
   };
 
   const loadDetailMore = async () => {
@@ -88,7 +97,9 @@ export function useDetailData({
       return;
     setDetailRefreshing(true);
     try {
-      const outcome = await cache.load(detailKey(detailRef), () => fetchDetail(detailRef), { scope: "detail" });
+      const outcome = await cache.load(detailKey(detailRef), (signal) => fetchDetail(detailRef, signal), {
+        scope: "detail",
+      });
       if (outcome.status === "ready") setNotice("Podcast details refreshed.");
       else if (outcome.status === "error") setNotice(`Podcast refresh failed: ${outcome.error}`, "error");
     } finally {

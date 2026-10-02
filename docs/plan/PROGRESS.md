@@ -75,7 +75,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] S5-006 (P0) Typed, validated IPC payloads — newtypes VideoId/YtId/Token/LibraryId/SpotifyId/SpotifyUri/Keyword/Name/Text/LongText + Opt<T> validated at deserialization for all 103 string arguments (D-043); ipc::payload::tests::*, ipc::payload::contract::no_command_takes_a_free_string_argument
 - [x] S5-007 (P0) Structured error type instead of `Result<_, String>` — `IpcError {code,message,retryable,detail?}` for every command, raw SQL/paths/URLs/bodies stripped (D-042); ipc::error::tests::*, ipc::error::contract::no_command_returns_a_string_error, src/lib/ipcError.test.ts
 - [x] S5-008 (P0) Cap response sizes and list lengths returned over IPC — continuation walks bounded by `collect_continuations` (500 pages / 50 000 items), limit/offset clamps (D-044); ipc::limits::tests::*, ipc::limits::contract::library_walks_use_the_bounded_helper
-- [ ] S5-009 (P0) Cancellation for long commands
+- [x] S5-009 (P0) Cancellation for long commands — `requestId` + `request_cancel` for search, browse/detail/playlist loads, library sync and lyrics; route changes abort via ResourceCache signals, sync has a Cancel action (D-045); ipc::cancel::tests::*, src/lib/cancellable.test.ts
 - [ ] S5-010 (P0) Event channel contract
 - [ ] S5-011 (P0) Generate TypeScript bindings from Rust
 - [ ] S5-012 (P0) IPC contract tests

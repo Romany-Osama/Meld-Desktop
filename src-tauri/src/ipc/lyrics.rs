@@ -11,6 +11,23 @@ pub async fn fetch_lyrics(
     album: Opt<Text>,
     id: Opt<LibraryId>,
     state: tauri::State<'_, RuntimeState>,
+    request_id: Opt<Token>,
+) -> IpcResult<LyricsPayload> {
+    cancellable(
+        request_id.into_string(),
+        "Lyrics lookup",
+        fetch_lyrics_body(title, artist, duration, album, id, state),
+    )
+    .await
+}
+
+async fn fetch_lyrics_body(
+    title: Text,
+    artist: Text,
+    duration: i32,
+    album: Opt<Text>,
+    id: Opt<LibraryId>,
+    state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<LyricsPayload> {
     let title = title.into_inner();
     let artist = artist.into_inner();
@@ -37,6 +54,23 @@ pub async fn fetch_lyrics_fresh(
     album: Opt<Text>,
     id: Opt<LibraryId>,
     state: tauri::State<'_, RuntimeState>,
+    request_id: Opt<Token>,
+) -> IpcResult<LyricsPayload> {
+    cancellable(
+        request_id.into_string(),
+        "Lyrics lookup",
+        fetch_lyrics_fresh_body(title, artist, duration, album, id, state),
+    )
+    .await
+}
+
+async fn fetch_lyrics_fresh_body(
+    title: Text,
+    artist: Text,
+    duration: i32,
+    album: Opt<Text>,
+    id: Opt<LibraryId>,
+    state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<LyricsPayload> {
     let title = title.into_inner();
     let artist = artist.into_inner();
@@ -56,7 +90,26 @@ pub async fn fetch_lyrics_fresh(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri maps named JS arguments; a struct would change the IPC shape
 pub async fn fetch_lyrics_from_provider(
+    title: Text,
+    artist: Text,
+    duration: i32,
+    album: Opt<Text>,
+    id: Opt<LibraryId>,
+    provider: Keyword,
+    state: tauri::State<'_, RuntimeState>,
+    request_id: Opt<Token>,
+) -> IpcResult<LyricsPayload> {
+    cancellable(
+        request_id.into_string(),
+        "Lyrics lookup",
+        fetch_lyrics_from_provider_body(title, artist, duration, album, id, provider, state),
+    )
+    .await
+}
+
+async fn fetch_lyrics_from_provider_body(
     title: Text,
     artist: Text,
     duration: i32,

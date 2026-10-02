@@ -7,4 +7,5 @@ permissions = [
   "allow-app-open-releases-page",
   "allow-app-update-check",
   "allow-app-update-install",
+  "allow-request-cancel",
 ]

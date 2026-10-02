@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { invokeCancellable } from "./lib/cancellable";
+import { isIpcErrorCode } from "./lib/ipcError";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
@@ -868,17 +870,20 @@ function App() {
     markLibraryLoading(mode);
     // One notification per sync: progress first, then replaced by the outcome (same key, U4-013).
     const noticeKey = `library-sync:${syncKey}`;
+    const sync = new AbortController();
     setNotice({
       kind: "progress",
       key: noticeKey,
       message: "Syncing your library with YouTube Music…",
       progress: { value: 0 },
+      action: { label: "Cancel", run: () => sync.abort() },
     });
     try {
       const syncMode = mode === "songs" ? "library" : mode;
-      const result = await invoke<{ likedSongs: number; librarySongs: number; uploadedSongs: number }>(
+      const result = await invokeCancellable<{ likedSongs: number; librarySongs: number; uploadedSongs: number }>(
         "sync_youtube_library",
         { mode: syncMode },
+        sync.signal,
       );
       lastLibrarySyncRef.current[syncMode] = Date.now();
       await loadLibrary(mode);
@@ -888,6 +893,11 @@ function App() {
         message: `YouTube Music sync finished: ${mode === "liked" ? result.likedSongs : mode === "uploaded" ? result.uploadedSongs : result.librarySongs} songs.`,
       });
     } catch (error) {
+      if (isIpcErrorCode(error, "cancelled")) {
+        setNotice({ kind: "info", key: noticeKey, message: "YouTube Music sync cancelled." });
+        await loadLibrary(mode);
+        return;
+      }
       setNotice({
         kind: "error",
         key: noticeKey,

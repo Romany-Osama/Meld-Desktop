@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { invokeCancellable } from "../../lib/cancellable";
 import { invoke } from "@tauri-apps/api/core";
 import type { SearchPage } from "../../types";
 import type { ResourceCache } from "../../data/resourceCache";
@@ -33,7 +34,7 @@ export function useSearchData({
   const loadSearch = async (query: string, { reuse = false }: { reuse?: boolean } = {}) => {
     const key = searchKey(query);
     if (reuse && cache.isFresh(key, FRESH_FOR_MS)) return;
-    await cache.load(key, () => invoke<SearchPage>("ytm_search", { query }), {
+    await cache.load(key, (signal) => invokeCancellable<SearchPage>("ytm_search", { query }, signal), {
       scope: "search",
       keepData: false,
       placeholder: EMPTY_SEARCH,
@@ -54,7 +55,7 @@ export function useSearchData({
     const token = cache.begin(`${key}:more`, "search-more");
     setSearchMoreLoading(true);
     try {
-      const next = await invoke<SearchPage>("ytm_search_continuation", { continuation });
+      const next = await invokeCancellable<SearchPage>("ytm_search_continuation", { continuation }, token.signal);
       // The page is merged into the query it was requested for, even if the user searched for something else since.
       if (!token.isCurrent() || cache.get<SearchPage>(key) !== current) return;
       cache.set<SearchPage>(key, (entry) => {

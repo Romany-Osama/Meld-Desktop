@@ -25,6 +25,20 @@ pub async fn ytm_browse(
     browse_id: YtId,
     params: Opt<Token>,
     state: tauri::State<'_, RuntimeState>,
+    request_id: Opt<Token>,
+) -> IpcResult<DetailPage> {
+    cancellable(
+        request_id.into_string(),
+        "Loading the page",
+        ytm_browse_body(browse_id, params, state),
+    )
+    .await
+}
+
+async fn ytm_browse_body(
+    browse_id: YtId,
+    params: Opt<Token>,
+    state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<DetailPage> {
     let browse_id = browse_id.into_inner();
     let params = params.into_string();
@@ -71,6 +85,20 @@ pub async fn ytm_browse_continuation(
 
 #[tauri::command]
 pub async fn ytm_detail(
+    kind: Keyword,
+    browse_id: YtId,
+    state: tauri::State<'_, RuntimeState>,
+    request_id: Opt<Token>,
+) -> IpcResult<DetailPage> {
+    cancellable(
+        request_id.into_string(),
+        "Loading the page",
+        ytm_detail_body(kind, browse_id, state),
+    )
+    .await
+}
+
+async fn ytm_detail_body(
     kind: Keyword,
     browse_id: YtId,
     state: tauri::State<'_, RuntimeState>,
@@ -175,6 +203,19 @@ pub async fn ytm_home_continuation(
 pub async fn ytm_search(
     query: Text,
     state: tauri::State<'_, RuntimeState>,
+    request_id: Opt<Token>,
+) -> IpcResult<SearchPage> {
+    cancellable(
+        request_id.into_string(),
+        "Search",
+        ytm_search_body(query, state),
+    )
+    .await
+}
+
+async fn ytm_search_body(
+    query: Text,
+    state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<SearchPage> {
     let query = query.into_inner();
     let trimmed = query.trim();
@@ -195,6 +236,19 @@ pub async fn ytm_search(
 
 #[tauri::command]
 pub async fn ytm_search_continuation(
+    continuation: Token,
+    state: tauri::State<'_, RuntimeState>,
+    request_id: Opt<Token>,
+) -> IpcResult<SearchPage> {
+    cancellable(
+        request_id.into_string(),
+        "Loading more results",
+        ytm_search_continuation_body(continuation, state),
+    )
+    .await
+}
+
+async fn ytm_search_continuation_body(
     continuation: Token,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<SearchPage> {
@@ -311,6 +365,19 @@ pub fn ytm_podcast_cache_detail_page(
 
 #[tauri::command]
 pub async fn ytm_playlist(
+    playlist_id: YtId,
+    state: tauri::State<'_, RuntimeState>,
+    request_id: Opt<Token>,
+) -> IpcResult<PlaylistPage> {
+    cancellable(
+        request_id.into_string(),
+        "Loading the playlist",
+        ytm_playlist_body(playlist_id, state),
+    )
+    .await
+}
+
+async fn ytm_playlist_body(
     playlist_id: YtId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<PlaylistPage> {

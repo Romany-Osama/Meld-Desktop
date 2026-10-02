@@ -11,7 +11,7 @@ module the command belongs to (S5-003). **Callers** are found in `src/` (tests e
 | Class | Meaning | Commands |
 | --- | --- | --- |
 | `read-local` | Reads Meld's own database, settings or files. | 26 |
-| `write-local` | Changes Meld's own data; the change can be reversed. | 17 |
+| `write-local` | Changes Meld's own data; the change can be reversed. | 18 |
 | `remote-read` | Calls YouTube Music, Spotify or a lyrics/update server; reads only (may cache the answer). | 32 |
 | `remote-write` | Changes the signed-in YouTube Music or Spotify account; the change can be reversed. | 9 |
 | `destructive-local` | Deletes or replaces Meld data (history, cache, downloads, a backup restore). | 7 |
@@ -19,7 +19,7 @@ module the command belongs to (S5-003). **Callers** are found in `src/` (tests e
 | `system` | Reaches outside the app: file dialogs, opening a browser, installing an update, writing a backup file. | 4 |
 | `credentials` | Opens a login window or creates, refreshes or deletes a stored session. | 5 |
 
-## Commands (104)
+## Commands (105)
 
 ### account (8)
 
@@ -167,11 +167,12 @@ module the command belongs to (S5-003). **Callers** are found in `src/` (tests e
 | `backup_create` | system | `features/settings/SettingsScreen.tsx` |
 | `backup_restore` | destructive-local | `features/settings/SettingsScreen.tsx` |
 
-### system (3)
+### system (4)
 
 | Command | Risk | Callers |
 | --- | --- | --- |
 | `app_open_releases_page` | system | `lib/updates.ts` |
 | `app_update_check` | remote-read | `lib/updates.ts` |
 | `app_update_install` | system | `lib/updates.ts` |
+| `request_cancel` | write-local | `lib/cancellable.ts` |
 
