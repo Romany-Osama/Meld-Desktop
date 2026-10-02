@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { checkVersions, cargoPackageVersion, cargoLockVersion, readRepo } from "../lib/versions.mjs";
 import {
   checkSecurityConfig,
@@ -11,10 +11,12 @@ import {
 import {
   checkUiInvariants,
   checkLogoutClearsWebview,
+  readUiSource,
   registeredCommands,
   RESTORED_UI_COMMANDS,
 } from "../lib/ui-invariants.mjs";
 import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
+import { checkScreenSplit, ROUTE_SCREENS } from "../lib/ui-structure.mjs";
 
 const goodRepo = () => ({
   packageJson: { version: "0.2.0" },
@@ -116,8 +118,8 @@ test("ui: duplicate Audio quality control is detected (TR-M3)", () => {
   );
 });
 
-test("ui: the real App.tsx passes and every restored command is registered (TR-H1)", () => {
-  assert.deepEqual(checkUiInvariants(readFileSync("src/App.tsx", "utf8")), []);
+test("ui: the real UI source passes and every restored command is registered (TR-H1)", () => {
+  assert.deepEqual(checkUiInvariants(readUiSource()), []);
   const registered = registeredCommands(readFileSync("src-tauri/src/lib.rs", "utf8"));
   for (const command of RESTORED_UI_COMMANDS) assert.ok(registered.includes(command), `${command} must be registered`);
   for (const retired of [
@@ -219,4 +221,13 @@ test("tooling: CRLF or mixed committed files are reported, PowerShell scripts ar
     "i/-text w/-text attr/-text            \tsrc-tauri/icons/icon.png",
   ].join("\n");
   assert.deepEqual(crlfIndexEntries(eol), ["src/bad.ts", "docs/mixed.md"]);
+});
+
+test("ui: every route-level screen is its own module rendered by App.tsx (U4-001)", () => {
+  const read = (path) => (existsSync(path) ? readFileSync(path, "utf8") : null);
+  assert.deepEqual(checkScreenSplit(read), []);
+  const missing = (path) => (path === ROUTE_SCREENS.Queue ? null : read(path));
+  assert.deepEqual(checkScreenSplit(missing), [`Queue: ${ROUTE_SCREENS.Queue} is missing`]);
+  const inlined = (path) => (path === "src/App.tsx" ? read(path).replace("<SettingsScreen", "<div") : read(path));
+  assert.deepEqual(checkScreenSplit(inlined), ["App.tsx no longer renders <SettingsScreen>"]);
 });

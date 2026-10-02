@@ -48,7 +48,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 
 ## Phase 1 · M1.1 Frontend architecture split
 
-- [ ] U4-001 (P0) Split `App.tsx` into route-level screens
+- [x] U4-001 (P0) Split `App.tsx` into route-level screens — src/features/<area>/*Screen.tsx, App.tsx 7897 → 4665 lines; screens.test.tsx, checks.test.mjs (ui-structure)
 - [ ] U4-002 (P0) Extract reusable feature modules
 - [ ] U4-003 (P0) Introduce a typed router
 - [ ] U4-004 (P0) Make navigation history route-based

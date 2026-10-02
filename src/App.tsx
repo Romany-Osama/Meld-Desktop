@@ -2,9 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
-import { UpdatePanel, useStartupUpdateCheck } from "./UpdatePanel";
-import { PlaybackCachePanel } from "./PlaybackCachePanel";
-import { FINAL_STREAM_ERROR, isLocalStream, recoveryNotice, recoveryReason } from "./lib/streamRecovery";
+import { useStartupUpdateCheck } from "./UpdatePanel";
+import { isLocalStream, recoveryNotice, recoveryReason } from "./lib/streamRecovery";
 import { type AudioQuality, parseAudioQuality, streamRequest } from "./lib/audioQuality";
 import { appendNewPlayable, arrangeQueue, moveItem, removeAt, shuffleAfterCurrent } from "./lib/queue";
 import {
@@ -17,7 +16,6 @@ import {
 import { restoreQueue, restoreSession } from "./lib/persistentPlayback";
 import { errorMessage, noticeSummary, shuffled } from "./lib/util";
 import { mediaSrc } from "./lib/media";
-import { InlineLikeButton } from "./components/InlineLikeButton";
 import {
   DetailPage,
   DownloadInfo,
@@ -61,6 +59,15 @@ import { LibraryScreen } from "./features/library/LibraryScreen";
 import { StatsScreen } from "./features/stats/StatsScreen";
 import { HistoryScreen } from "./features/history/HistoryScreen";
 import { SearchScreen } from "./features/search/SearchScreen";
+import { LyricsPanel } from "./features/lyrics/LyricsPanel";
+import { ExpandedPlayer } from "./features/player/ExpandedPlayer";
+import { QueuePanel } from "./features/queue/QueuePanel";
+import { PlayerBar } from "./features/player/PlayerBar";
+import { PlaylistScreen } from "./features/playlist/PlaylistScreen";
+import { DetailScreen } from "./features/detail/DetailScreen";
+import { SettingsScreen } from "./features/settings/SettingsScreen";
+import { SpotifyPlaylistScreen } from "./features/spotify/SpotifyPlaylistScreen";
+import { SpotifyLikedScreen } from "./features/spotify/SpotifyLikedScreen";
 
 function App() {
   const [active, setActive] = useState<NavKey>("home");
@@ -3797,220 +3804,38 @@ function App() {
           </div>
         </div>
       )}
-      {spotifyLikedOpen && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setSpotifyLikedOpen(false)}>
-          <div className="detail-panel spotify-playlist-panel" onClick={(event) => event.stopPropagation()}>
-            <button
-              className="close-button"
-              title="Close"
-              aria-label="Close"
-              onClick={() => setSpotifyLikedOpen(false)}
-            >
-              ×
-            </button>
-            <p className="eyebrow">Spotify library</p>
-            <h2>Liked Songs</h2>
-            {spotifyLikedTracks.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading Spotify liked songs…</p>
-              </div>
-            )}
-            {spotifyLikedTracks.status === "error" && (
-              <div className="state-panel error">
-                <h2>Spotify liked songs unavailable</h2>
-                <p>{spotifyLikedTracks.error}</p>
-                <button className="primary-button" onClick={() => void loadSpotifyLikedTracks()}>
-                  Retry
-                </button>
-              </div>
-            )}
-            {spotifyLikedTracks.status === "ready" && spotifyLikedTracks.data.tracks.length === 0 && (
-              <div className="state-panel">
-                <h2>No liked songs returned</h2>
-                <p>Spotify returned an empty liked-songs library.</p>
-              </div>
-            )}
-            {spotifyLikedTracks.status === "ready" && spotifyLikedTracks.data.tracks.length > 0 && (
-              <div className="spotify-track-list">
-                {spotifyLikedTracks.data.tracks.map((track) => (
-                  <div className="spotify-track-row" key={track.id}>
-                    <div className="spotify-track-copy">
-                      <strong>{track.name}</strong>
-                      <span>
-                        {track.artist}
-                        {track.album ? ` · ${track.album}` : ""}
-                      </span>
-                    </div>
-                    <button className="row-action" onClick={() => void playSpotifyTrack(track)}>
-                      Find & play
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-      {spotifyOpenPlaylist && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setSpotifyOpenPlaylist(null)}>
-          <div className="detail-panel spotify-playlist-panel" onClick={(event) => event.stopPropagation()}>
-            <button
-              className="close-button"
-              title="Close"
-              aria-label="Close"
-              onClick={() => setSpotifyOpenPlaylist(null)}
-            >
-              ×
-            </button>
-            <p className="eyebrow">Spotify playlist</p>
-            <h2>{spotifyOpenPlaylist.name}</h2>
-            <div className="spotify-detail-toolbar">
-              <input
-                value={spotifyDetailQuery}
-                onChange={(event) => setSpotifyDetailQuery(event.target.value)}
-                placeholder="Search tracks"
-                aria-label="Search Spotify playlist tracks"
-              />
-              <select
-                value={spotifyDetailSort}
-                onChange={(event) =>
-                  setSpotifyDetailSort(event.target.value as "original" | "name" | "artist" | "duration")
-                }
-                aria-label="Sort Spotify playlist tracks"
-              >
-                <option value="original">Original order</option>
-                <option value="name">Name</option>
-                <option value="artist">Artist</option>
-                <option value="duration">Duration</option>
-              </select>
-              <button
-                className="row-action"
-                onClick={() => setSpotifyDetailSortDescending((value) => !value)}
-                title="Reverse sort order"
-              >
-                {spotifyDetailSortDescending ? "Descending" : "Ascending"}
-              </button>
-              <button
-                className="row-action"
-                onClick={() => setSpotifyReorderUnlocked((value) => !value)}
-                title="Unlock playlist reorder"
-              >
-                {spotifyReorderUnlocked ? "Lock order" : "Unlock order"}
-              </button>
-            </div>
-            {spotifyPlaylistTracks.status === "ready" && spotifyPlaylistTracks.data.tracks.length > 0 && (
-              <button
-                className="secondary-button spotify-download-button"
-                onClick={() => void downloadSpotifyPlaylist()}
-              >
-                Download playlist
-              </button>
-            )}
-            {spotifyOpenPlaylist.owner &&
-              spotifyProfile?.displayName &&
-              spotifyOpenPlaylist.owner === spotifyProfile.displayName && (
-                <div className="spotify-rename-row">
-                  <input
-                    value={spotifyRenameName}
-                    onChange={(event) => setSpotifyRenameName(event.target.value)}
-                    aria-label="Spotify playlist name"
-                  />
-                  <button
-                    className="row-action"
-                    disabled={!spotifyRenameName.trim() || spotifyRenameName.trim() === spotifyOpenPlaylist.name}
-                    onClick={() => void renameSpotifyPlaylist()}
-                  >
-                    Rename
-                  </button>
-                </div>
-              )}
-            {spotifyPlaylistTracks.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading Spotify tracks…</p>
-              </div>
-            )}
-            {spotifyPlaylistTracks.status === "error" && (
-              <div className="state-panel error">
-                <h2>Spotify playlist unavailable</h2>
-                <p>{spotifyPlaylistTracks.error}</p>
-                <button className="primary-button" onClick={() => void openSpotifyPlaylist(spotifyOpenPlaylist)}>
-                  Retry
-                </button>
-              </div>
-            )}
-            {spotifyPlaylistTracks.status === "ready" && visibleSpotifyPlaylistTracks.length === 0 && (
-              <div className="state-panel">
-                <h2>No tracks returned</h2>
-                <p>Spotify returned an empty playlist.</p>
-              </div>
-            )}
-            {spotifyPlaylistTracks.status === "ready" && visibleSpotifyPlaylistTracks.length > 0 && (
-              <div className="spotify-track-list">
-                {visibleSpotifyPlaylistTracks.map((track) => (
-                  <div className="spotify-track-row" key={track.id}>
-                    <div className="spotify-track-copy">
-                      <strong>{track.name}</strong>
-                      <span>
-                        {track.artist}
-                        {track.album ? ` · ${track.album}` : ""}
-                      </span>
-                    </div>
-                    <div className="spotify-track-actions">
-                      <button className="row-action" onClick={() => void playSpotifyTrack(track)}>
-                        Find & play
-                      </button>
-                      {spotifyReorderUnlocked &&
-                        !spotifyDetailQuery.trim() &&
-                        spotifyDetailSort === "original" &&
-                        !spotifyDetailSortDescending &&
-                        track.uid && (
-                          <>
-                            <button
-                              className="row-action"
-                              disabled={visibleSpotifyPlaylistTracks.indexOf(track) === 0}
-                              onClick={() => void moveSpotifyTrack(track, "up")}
-                              title="Move up"
-                              aria-label={`Move ${track.name} up`}
-                            >
-                              ↑
-                            </button>
-                            <button
-                              className="row-action"
-                              disabled={
-                                visibleSpotifyPlaylistTracks.indexOf(track) === visibleSpotifyPlaylistTracks.length - 1
-                              }
-                              onClick={() => void moveSpotifyTrack(track, "down")}
-                              title="Move down"
-                              aria-label={`Move ${track.name} down`}
-                            >
-                              ↓
-                            </button>
-                          </>
-                        )}
-                      {track.uid && (
-                        <button className="row-action danger-action" onClick={() => void removeSpotifyTrack(track)}>
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {spotifyPlaylistTracks.data.tracks.length < spotifyPlaylistTracks.data.totalCount && (
-              <button
-                className="secondary-button"
-                onClick={() => void loadMoreSpotifyPlaylistTracks()}
-                disabled={spotifyPlaylistLoadingMore}
-              >
-                {spotifyPlaylistLoadingMore ? "Loading…" : "Load more"}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      <SpotifyLikedScreen
+        loadSpotifyLikedTracks={loadSpotifyLikedTracks}
+        playSpotifyTrack={playSpotifyTrack}
+        setSpotifyLikedOpen={setSpotifyLikedOpen}
+        spotifyLikedOpen={spotifyLikedOpen}
+        spotifyLikedTracks={spotifyLikedTracks}
+      />
+      <SpotifyPlaylistScreen
+        downloadSpotifyPlaylist={downloadSpotifyPlaylist}
+        loadMoreSpotifyPlaylistTracks={loadMoreSpotifyPlaylistTracks}
+        moveSpotifyTrack={moveSpotifyTrack}
+        openSpotifyPlaylist={openSpotifyPlaylist}
+        playSpotifyTrack={playSpotifyTrack}
+        removeSpotifyTrack={removeSpotifyTrack}
+        renameSpotifyPlaylist={renameSpotifyPlaylist}
+        setSpotifyDetailQuery={setSpotifyDetailQuery}
+        setSpotifyDetailSort={setSpotifyDetailSort}
+        setSpotifyDetailSortDescending={setSpotifyDetailSortDescending}
+        setSpotifyOpenPlaylist={setSpotifyOpenPlaylist}
+        setSpotifyRenameName={setSpotifyRenameName}
+        setSpotifyReorderUnlocked={setSpotifyReorderUnlocked}
+        spotifyDetailQuery={spotifyDetailQuery}
+        spotifyDetailSort={spotifyDetailSort}
+        spotifyDetailSortDescending={spotifyDetailSortDescending}
+        spotifyOpenPlaylist={spotifyOpenPlaylist}
+        spotifyPlaylistLoadingMore={spotifyPlaylistLoadingMore}
+        spotifyPlaylistTracks={spotifyPlaylistTracks}
+        spotifyProfile={spotifyProfile}
+        spotifyRenameName={spotifyRenameName}
+        spotifyReorderUnlocked={spotifyReorderUnlocked}
+        visibleSpotifyPlaylistTracks={visibleSpotifyPlaylistTracks}
+      />
       {youtubeMatchItem && (
         <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setYoutubeMatchItem(null)}>
           <div className="detail-panel picker-panel" onClick={(event) => event.stopPropagation()}>
@@ -4635,616 +4460,28 @@ function App() {
           </div>
         </div>
       )}
-      {settingsOpen && (
-        <div className="detail-overlay settings-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel settings-panel">
-            <button
-              className="close-button"
-              title={settingsPage === "main" ? "Close" : "Back to settings"}
-              aria-label={settingsPage === "main" ? "Close" : "Back to settings"}
-              onClick={() => (settingsPage === "main" ? setSettingsOpen(false) : setSettingsPage("main"))}
-            >
-              {settingsPage === "main" ? "×" : "‹"}
-            </button>
-            <p className="eyebrow">Meld Desktop</p>
-            <h2>
-              {settingsPage === "main"
-                ? "Settings"
-                : settingsPage === "player"
-                  ? "Player and audio"
-                  : settingsPage === "content"
-                    ? "Content"
-                    : settingsPage === "privacy"
-                      ? "Privacy"
-                      : settingsPage === "storage"
-                        ? "Storage and data"
-                        : settingsPage === "integrations"
-                          ? "Integrations"
-                          : settingsPage === "appearance"
-                            ? "Appearance"
-                            : "About"}
-            </h2>
-            {!settingsLoading && settingsPage === "main" && (
-              <div className="settings-hub">
-                <button className="settings-nav-card" onClick={() => setSettingsPage("appearance")}>
-                  <strong>Appearance</strong>
-                  <small>Theme and player presentation</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("player")}>
-                  <strong>Player and audio</strong>
-                  <small>Queue, automix, and playback behavior</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("content")}>
-                  <strong>Content</strong>
-                  <small>Library sync, explicit content, and lyrics providers</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("privacy")}>
-                  <strong>Privacy</strong>
-                  <small>Listen/search history controls</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("storage")}>
-                  <strong>Storage and data</strong>
-                  <small>Local library and offline data</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("integrations")}>
-                  <strong>Integrations</strong>
-                  <small>Google and Spotify accounts</small>
-                </button>
-                <button className="settings-nav-card" onClick={() => setSettingsPage("about")}>
-                  <strong>About</strong>
-                  <small>Version and project information</small>
-                </button>
-              </div>
-            )}
-            {settingsPage === "appearance" && (
-              <div className="settings-group">
-                <h3>Appearance</h3>
-                <p className="muted-copy">
-                  Meld’s source appearance screen contains Android-specific theme, palette, and density controls.
-                  Desktop keeps one native dark shell here until those controls have a real Windows renderer
-                  implementation; no inert switches are shown.
-                </p>
-              </div>
-            )}
-            {settingsPage === "storage" && (
-              <div className="settings-group">
-                <h3>Storage and data</h3>
-                <p className="muted-copy">
-                  Offline downloads and the SQLite library are managed by their real download, playlist, logout, and
-                  clear-data actions. Desktop playback cache is separate and appears in the Cached playlist; its size
-                  limit is below.
-                </p>
-                <div className="storage-actions">
-                  <button
-                    className="secondary-button"
-                    onClick={async () => {
-                      try {
-                        const path = await invoke<string>("backup_create");
-                        setNotice(`Meld Desktop backup created at ${path}.`);
-                      } catch (error) {
-                        if (!String(error).toLowerCase().includes("cancelled"))
-                          setNotice(`Backup could not be created: ${errorMessage(error)}`);
-                      }
-                    }}
-                  >
-                    Create backup
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={async () => {
-                      try {
-                        const path = await invoke<string>("backup_restore");
-                        setNotice(`Backup restored from ${path}. Restart Meld Desktop to reload the restored library.`);
-                      } catch (error) {
-                        if (!String(error).toLowerCase().includes("cancelled"))
-                          setNotice(`Backup could not be restored: ${errorMessage(error)}`);
-                      }
-                    }}
-                  >
-                    Restore backup
-                  </button>
-                </div>
-                <p className="muted-copy">
-                  Backups contain the Desktop SQLite library and non-sensitive settings only. Downloaded/player-cache
-                  media files and imported external media are not embedded. Google/YouTube Music and Spotify sessions
-                  are excluded and must be connected again after restore.
-                </p>
-              </div>
-            )}
-            {settingsPage === "storage" && <PlaybackCachePanel onNotice={setNotice} />}
-            {settingsPage === "about" && (
-              <div className="settings-group">
-                <h3>About Meld Desktop</h3>
-                <p className="muted-copy">
-                  Native Tauri desktop adaptation of the live Meld/Metrolist source contracts. Source-dependent features
-                  remain tracked in the audit rather than being presented as complete.
-                </p>
-              </div>
-            )}
-            {settingsPage === "about" && <UpdatePanel />}
-            {settingsLoading ? (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading saved settings…</p>
-              </div>
-            ) : (
-              <>
-                {settingsPage === "content" && (
-                  <div className="settings-group">
-                    <h3>Content</h3>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Hide explicit content</strong>
-                        <small>Hide items whose live metadata marks them explicit.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.hideExplicit}
-                        onChange={(event) => void setSetting("hideExplicit", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Hide video songs</strong>
-                        <small>Hide songs whose live source metadata marks them as video-only.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.hideVideoSongs}
-                        onChange={(event) => void setSetting("hideVideoSongs", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable Better Lyrics</strong>
-                        <small>Use the source TTML lyrics provider first when enabled.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enableBetterLyrics !== false}
-                        onChange={(event) => void setSetting("enableBetterLyrics", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable Paxsenix</strong>
-                        <small>Use the source Apple Music lyrics fallback after Better Lyrics when enabled.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enablePaxsenix !== false}
-                        onChange={(event) => void setSetting("enablePaxsenix", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable LRCLIB</strong>
-                        <small>Use the source LRCLIB matching fallback when enabled.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enableLrclib !== false}
-                        onChange={(event) => void setSetting("enableLrclib", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable KuGou</strong>
-                        <small>Use the source KuGou LRC fallback after LRCLIB when enabled.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enableKugou !== false}
-                        onChange={(event) => void setSetting("enableKugou", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable LyricsPlus</strong>
-                        <small>Use the source LyricsPlus mirror fallback after KuGou when enabled.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enableLyricsPlus === true}
-                        onChange={(event) => void setSetting("enableLyricsPlus", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Enable Musixmatch</strong>
-                        <small>Use the source opt-in Musixmatch guest-token fallback when available.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.enableMusixmatch === true}
-                        onChange={(event) => void setSetting("enableMusixmatch", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Sync YouTube Music library</strong>
-                        <small>
-                          When enabled, Liked Songs, Library, and Uploaded filters use the authenticated source sync
-                          path.
-                        </small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        disabled={!sessionStatus.authenticated}
-                        checked={settings.ytmSync !== false}
-                        onChange={(event) => void setSetting("ytmSync", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Use login for browse</strong>
-                        <small>
-                          Use the connected YouTube Music session for Home, search, details, playlists, and related
-                          browse requests, matching Meld’s Account setting.
-                        </small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        disabled={!sessionStatus.authenticated}
-                        checked={settings.useLoginForBrowse !== false}
-                        onChange={(event) => void setSetting("useLoginForBrowse", event.target.checked)}
-                      />
-                    </label>
-                  </div>
-                )}
-                {settingsPage === "privacy" && (
-                  <div className="settings-group">
-                    <h3>Privacy</h3>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Pause listen history</strong>
-                        <small>Do not add locally played items to Meld’s listening history.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.pauseListenHistory === true}
-                        onChange={(event) => void setSetting("pauseListenHistory", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Pause search history</strong>
-                        <small>Do not save submitted searches to Meld’s recent-search list.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.pauseSearchHistory === true}
-                        onChange={(event) => void setSetting("pauseSearchHistory", event.target.checked)}
-                      />
-                    </label>
-                    <button
-                      className="secondary-button"
-                      onClick={async () => {
-                        try {
-                          await invoke("search_history_clear");
-                          await loadSearchHistory();
-                          setNotice("Meld search history cleared.");
-                        } catch (error) {
-                          setNotice(`Search history could not be cleared: ${errorMessage(error)}`);
-                        }
-                      }}
-                    >
-                      Clear search history
-                    </button>
-                  </div>
-                )}
-                {settingsPage === "content" && (
-                  <div className="settings-group">
-                    <h3>Lyrics provider order</h3>
-                    <p className="muted-copy">
-                      Enabled providers are tried in this order. Disabled providers remain after them, matching Meld’s
-                      provider registry.
-                    </p>
-                    <div className="lyrics-provider-order">
-                      {lyricsProviderOrder.map((provider, index) => {
-                        const enabled =
-                          provider === "YouTube" ||
-                          provider === "YouTubeSubtitle" ||
-                          settings[lyricProviderSettingKeys[provider] ?? ""] === true;
-                        return (
-                          <div
-                            className={enabled ? "provider-order-row" : "provider-order-row disabled"}
-                            key={provider}
-                          >
-                            <span>
-                              <strong>{provider === "YouTubeSubtitle" ? "YouTube Subtitle" : provider}</strong>
-                              <small>{enabled ? `Priority ${index + 1}` : "Disabled"}</small>
-                            </span>
-                            {enabled && (
-                              <span className="provider-order-buttons">
-                                <button
-                                  className="secondary-button"
-                                  disabled={index === 0}
-                                  onClick={() => void moveLyricsProvider(provider, -1)}
-                                  title={`Move ${provider} up`}
-                                >
-                                  ↑
-                                </button>
-                                <button
-                                  className="secondary-button"
-                                  disabled={index === lyricsProviderOrder.length - 1}
-                                  onClick={() => void moveLyricsProvider(provider, 1)}
-                                  title={`Move ${provider} down`}
-                                >
-                                  ↓
-                                </button>
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                {settingsPage === "player" && (
-                  <div className="settings-group">
-                    <h3>Player and queue</h3>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Audio quality</strong>
-                        <small>
-                          Auto currently uses the highest direct original format on Desktop because native Windows
-                          metered-network detection is not wired; High selects the highest direct original format, while
-                          Low selects the lowest. Streams that need YouTube's signature step are handled locally when no
-                          direct stream is available.
-                        </small>
-                      </span>
-                      <select
-                        value={audioQuality}
-                        onChange={(event) => void setAudioQualitySetting(event.target.value as AudioQuality)}
-                      >
-                        <option value="auto">Auto</option>
-                        <option value="high">High</option>
-                        <option value="low">Low</option>
-                      </select>
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Varispeed</strong>
-                        <small>When enabled, playback speed follows pitch like Meld’s varispeed mode.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.varispeed === true}
-                        onChange={(event) => void setSetting("varispeed", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Incremental seek skip</strong>
-                        <small>
-                          Repeated double-clicks on the player artwork increase the 5-second seek step, matching Meld.
-                        </small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.seekExtraSeconds === true}
-                        onChange={(event) => void setSetting("seekExtraSeconds", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Pause on mute</strong>
-                        <small>Pause playback when volume reaches zero and resume when volume is raised again.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.pauseOnMute === true}
-                        onChange={(event) => void setSetting("pauseOnMute", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Persistent queue</strong>
-                        <small>Restore the current Meld queue after restarting the desktop app.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.persistentQueue === true}
-                        onChange={(event) => void setSetting("persistentQueue", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Load more automatically</strong>
-                        <small>Use Meld’s queue continuation and automix loading when available.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.autoLoadMore !== false}
-                        onChange={(event) => void setSetting("autoLoadMore", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Similar content / automix</strong>
-                        <small>Fetch related source songs when the current queue ends.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.similarContent !== false}
-                        onChange={(event) => void setSetting("similarContent", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Disable load more on Repeat all</strong>
-                        <small>Keep Repeat all from appending automix content, matching Meld’s source option.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.disableLoadMoreWhenRepeatAll === true}
-                        onChange={(event) => void setSetting("disableLoadMoreWhenRepeatAll", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Auto-download on like</strong>
-                        <small>When enabled, liking a remote song starts Meld’s native offline cache download.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.autoDownloadOnLike === true}
-                        onChange={(event) => void setSetting("autoDownloadOnLike", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Skip failed song automatically</strong>
-                        <small>Move to the next queue item when native playback reports an error.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.autoSkipNextOnError === true}
-                        onChange={(event) => void setSetting("autoSkipNextOnError", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Remember shuffle and repeat</strong>
-                        <small>Persist the source shuffle/repeat preferences across launches.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.rememberShuffleAndRepeat !== false}
-                        onChange={(event) => void setSetting("rememberShuffleAndRepeat", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Shuffle playlist first</strong>
-                        <small>Source queue preference for starting playlist playback in shuffled order.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.shufflePlaylistFirst === true}
-                        onChange={(event) => void setSetting("shufflePlaylistFirst", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Prevent duplicate queue tracks</strong>
-                        <small>Do not add another copy of an item already present in the queue.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.preventDuplicateTracksInQueue === true}
-                        onChange={(event) => void setSetting("preventDuplicateTracksInQueue", event.target.checked)}
-                      />
-                    </label>
-                  </div>
-                )}
-                {settingsPage === "appearance" && (
-                  <div className="settings-group">
-                    <h3>Auto playlists</h3>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Show Liked Songs playlist</strong>
-                        <small>Show Meld’s single liked-songs playlist in My Playlists.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.show_liked_playlist !== false}
-                        onChange={(event) => void setSetting("show_liked_playlist", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Show Cached playlist</strong>
-                        <small>
-                          Show songs cached during playback. This is separate from Meld’s explicit Downloaded playlist.
-                        </small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.show_cached_playlist !== false}
-                        onChange={(event) => void setSetting("show_cached_playlist", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Show Downloaded playlist</strong>
-                        <small>Show songs downloaded for offline listening.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.show_downloaded_playlist !== false}
-                        onChange={(event) => void setSetting("show_downloaded_playlist", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Show Uploaded playlist</strong>
-                        <small>Show the YouTube Music uploaded-songs playlist after account sync.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.show_uploaded_playlist !== false}
-                        onChange={(event) => void setSetting("show_uploaded_playlist", event.target.checked)}
-                      />
-                    </label>
-                    <label className="setting-row">
-                      <span>
-                        <strong>Show Top Songs playlist</strong>
-                        <small>Show the source-style most-played playlist built from Meld listening history.</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={settings.show_top_playlist !== false}
-                        onChange={(event) => void setSetting("show_top_playlist", event.target.checked)}
-                      />
-                    </label>
-                  </div>
-                )}
-                {settingsPage === "integrations" && (
-                  <div className="settings-group">
-                    <h3>Accounts</h3>
-                    <div className="setting-status">
-                      <strong>Google / YouTube Music</strong>
-                      <span>
-                        {sessionStatus.authenticated
-                          ? `Connected${sessionStatus.accountEmail ? ` as ${sessionStatus.accountEmail}` : ""}. Authenticated library actions can use the saved session.`
-                          : "Connect inside Meld Desktop to sync liked songs, account playlists, and library actions."}
-                      </span>
-                      {sessionStatus.authenticated ? (
-                        <button className="secondary-button" onClick={() => void logoutGoogle()}>
-                          Disconnect account
-                        </button>
-                      ) : (
-                        <button className="secondary-button" onClick={() => void connectGoogle()}>
-                          Connect Google
-                        </button>
-                      )}
-                    </div>
-                    <div className="setting-status">
-                      <strong>Spotify</strong>
-                      <span>
-                        {spotifyStatus.authenticated
-                          ? `Connected${spotifyProfile?.displayName ? ` as ${spotifyProfile.displayName}` : ""}. Spotify profileAttributes validated with the live GraphQL operation.`
-                          : "Connect inside Meld Desktop; the token is validated before the session is saved."}
-                      </span>
-                      {spotifyStatus.authenticated ? (
-                        <button className="secondary-button" onClick={() => void logoutSpotify()}>
-                          Disconnect Spotify
-                        </button>
-                      ) : (
-                        <button className="secondary-button" onClick={() => void connectSpotify()}>
-                          Connect Spotify
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <SettingsScreen
+        audioQuality={audioQuality}
+        connectGoogle={connectGoogle}
+        connectSpotify={connectSpotify}
+        loadSearchHistory={loadSearchHistory}
+        logoutGoogle={logoutGoogle}
+        logoutSpotify={logoutSpotify}
+        lyricsProviderOrder={lyricsProviderOrder}
+        moveLyricsProvider={moveLyricsProvider}
+        sessionStatus={sessionStatus}
+        setAudioQualitySetting={setAudioQualitySetting}
+        setNotice={setNotice}
+        setSetting={setSetting}
+        setSettingsOpen={setSettingsOpen}
+        setSettingsPage={setSettingsPage}
+        settings={settings}
+        settingsLoading={settingsLoading}
+        settingsOpen={settingsOpen}
+        settingsPage={settingsPage}
+        spotifyProfile={spotifyProfile}
+        spotifyStatus={spotifyStatus}
+      />
       {infoItem && (
         <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setInfoItem(null)}>
           <div className="detail-panel info-panel" onClick={(event) => event.stopPropagation()}>
@@ -5273,824 +4510,154 @@ function App() {
           </div>
         </div>
       )}
-      {detail && (
-        <div className="detail-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel">
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setDetail(null)}>
-              ×
-            </button>
-            {detail.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading {detail.data.kind}…</p>
-              </div>
-            )}
-            {detail.status === "error" && (
-              <div className="state-panel error">
-                <h2>{detail.data.kind} unavailable</h2>
-                <p>{detail.error}</p>
-              </div>
-            )}
-            {detail.status === "ready" && (
-              <>
-                <div className="playlist-header">
-                  {mediaSrc(detail.data.thumbnail) && <img src={mediaSrc(detail.data.thumbnail) as string} alt="" />}
-                  <div>
-                    <p className="eyebrow">{detail.data.kind}</p>
-                    <h2>{detail.data.title || "Untitled"}</h2>
-                    <p>{detail.data.subtitle}</p>
-                  </div>
-                  <div className="detail-header-actions">
-                    {detail.data.kind === "artist" && (
-                      <button
-                        className={detailArtistSubscribed ? "secondary-button active-control" : "secondary-button"}
-                        onClick={() => void toggleDetailArtistSubscription()}
-                      >
-                        {detailArtistSubscribed ? "Following" : "Follow"}
-                      </button>
-                    )}
-                    {detail.data.kind === "podcast" && (
-                      <button
-                        className="secondary-button"
-                        onClick={() => void refreshPodcastDetail()}
-                        disabled={detailRefreshing}
-                      >
-                        {detailRefreshing ? "Refreshing…" : "Refresh"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="playlist-songs">
-                  {detail.data.items.length === 0 ? (
-                    <div className="state-panel">
-                      <p>This browse response contained no typed items.</p>
-                    </div>
-                  ) : (
-                    detail.data.items.map((item, itemIndex) => (
-                      <div className="song-row-wrap" key={`${item.kind}-${item.id}-${itemIndex}`}>
-                        <button className="song-row" onClick={() => void openDetailItem(item)}>
-                          {mediaSrc(item.thumbnail) && <img src={mediaSrc(item.thumbnail) as string} alt="" />}
-                          <span className="song-copy">
-                            <strong>{item.title}</strong>
-                            <small>{item.subtitle}</small>
-                          </span>
-                          <span className="song-kind">{item.kind}</span>
-                        </button>
-                        {item.kind === "song" && (
-                          <InlineLikeButton
-                            item={item}
-                            autoDownloadOnLike={settings.autoDownloadOnLike === true}
-                            audioQuality={audioQuality}
-                          />
-                        )}
-                        <button
-                          className="song-row-menu"
-                          onClick={() => void openMenu(item)}
-                          title={`More options for ${item.title}`}
-                          aria-label={`More options for ${item.title}`}
-                        >
-                          ⋮
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-                {detail.data.continuation && (
-                  <button
-                    className="primary-button playlist-more"
-                    disabled={detailMoreLoading}
-                    onClick={() => void loadDetailMore()}
-                  >
-                    {detailMoreLoading ? "Loading more…" : "Load more"}
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-      {playlist && (
-        <div className="detail-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel">
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setPlaylist(null)}>
-              ×
-            </button>
-            {playlist.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading playlist songs…</p>
-              </div>
-            )}
-            {playlist.status === "error" && (
-              <div className="state-panel error">
-                <h2>Playlist unavailable</h2>
-                <p>{playlist.error}</p>
-              </div>
-            )}
-            {playlist.status === "ready" && (
-              <>
-                <div className="playlist-header">
-                  {mediaSrc(playlist.data.playlist.thumbnail) && (
-                    <img src={mediaSrc(playlist.data.playlist.thumbnail) as string} alt="" />
-                  )}
-                  <div>
-                    <p className="eyebrow">Playlist</p>
-                    <h2>{playlist.data.playlist.title}</h2>
-                    <p>{playlist.data.playlist.subtitle}</p>
-                  </div>
-                </div>
-                <div className="playlist-songs">
-                  {playlist.data.songs.length === 0 ? (
-                    <div className="state-panel">
-                      <p>YouTube Music returned no playlist songs.</p>
-                    </div>
-                  ) : (
-                    playlist.data.songs.map((song, index) => (
-                      <div className="song-row-wrap" key={`${song.id}-${index}`}>
-                        {selectionMode && (
-                          <input
-                            className="selection-checkbox"
-                            type="checkbox"
-                            checked={selectedItems.some((value) => value.id === song.id)}
-                            onChange={() => toggleSelectedItem(song)}
-                            aria-label={`Select ${song.title}`}
-                          />
-                        )}
-                        <button
-                          className="song-row"
-                          onClick={() =>
-                            void playItem(
-                              song,
-                              playlist.data.songs,
-                              index,
-                              playlist.data.continuation ?? null,
-                              false,
-                              "playlist",
-                            )
-                          }
-                        >
-                          <span className="song-index">{index + 1}</span>
-                          {mediaSrc(song.thumbnail) && <img src={mediaSrc(song.thumbnail) as string} alt="" />}
-                          <span className="song-copy">
-                            <strong>{song.title}</strong>
-                            <small>{song.subtitle}</small>
-                          </span>
-                          <span className="song-kind">{song.kind}</span>
-                        </button>
-                        {song.kind === "song" && (
-                          <InlineLikeButton
-                            item={song}
-                            autoDownloadOnLike={settings.autoDownloadOnLike === true}
-                            audioQuality={audioQuality}
-                          />
-                        )}
-                        <button
-                          className="song-row-menu"
-                          onClick={() => void openMenu(song)}
-                          title={`More options for ${song.title}`}
-                          aria-label={`More options for ${song.title}`}
-                        >
-                          ⋮
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-                {playlist.data.continuation && (
-                  <button className="primary-button playlist-more" onClick={() => void loadPlaylistMore()}>
-                    Load more songs
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-      {player && (
-        <div className="player-dock">
-          <button
-            className="transport-button"
-            disabled={queueIndex <= 0}
-            onClick={() => void playQueueIndex(queueIndex - 1)}
-            title="Previous"
-          >
-            ‹
-          </button>
-          <div className="dock-copy">
-            {mediaSrc(player.item.thumbnail) && <img src={mediaSrc(player.item.thumbnail) as string} alt="" />}
-            <div>
-              <strong>{player.payload.title || player.item.title}</strong>
-              <span>{player.payload.artist || player.item.subtitle}</span>
-            </div>
-          </div>
-          <div className="player-controls">
-            <button
-              className="transport-button play-button"
-              onClick={togglePlayback}
-              title={isPlaying ? "Pause" : "Play"}
-            >
-              {isPlaying ? "Ⅱ" : "▶"}
-            </button>
-            <span className="time-label">{formatTime(playbackSeconds)}</span>
-            <input
-              className="seek-slider"
-              type="range"
-              min="0"
-              max={Math.max(durationSeconds, 1)}
-              step="0.1"
-              value={Math.min(playbackSeconds, Math.max(durationSeconds, 1))}
-              onChange={(event) => seekPlayback(Number(event.currentTarget.value))}
-              aria-label="Seek"
-            />
-            <span className="time-label">{formatTime(durationSeconds)}</span>
-            <button
-              className="player-lyrics-button"
-              onClick={() => {
-                setPlayerExpanded(true);
-                setLyricsAutoScrollEnabled(true);
-                if (!lyrics) void openLyrics(player.item);
-              }}
-              title="Open synchronized lyrics"
-              aria-label="Open synchronized lyrics"
-            >
-              ♫
-            </button>
-            <button
-              className={playerItemState?.liked ? "player-action active-control" : "player-action"}
-              onClick={() => void togglePlayerFavorite()}
-              title={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}
-              aria-label={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}
-            >
-              {playerItemState?.liked ? "♥" : "♡"}
-            </button>
-            <button
-              className="player-action"
-              onClick={() => void shareItem(player.item)}
-              title="Share"
-              aria-label="Share"
-            >
-              ↗
-            </button>
-            <button
-              className="player-action"
-              onClick={() => void openPlayerMenu()}
-              title="More actions"
-              aria-label="More actions"
-            >
-              ⋮
-            </button>
-            <label className="volume-control" title="Volume · scroll to adjust" onWheel={adjustVolumeByWheel}>
-              <span>Vol</span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={volume}
-                onChange={(event) => updateVolume(Number(event.currentTarget.value))}
-                aria-label="Volume"
-              />
-            </label>
-          </div>{" "}
-          <audio
-            className="native-audio"
-            ref={audioRef}
-            preload="auto"
-            onLoadedMetadata={(event) =>
-              setDurationSeconds(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)
-            }
-            onTimeUpdate={(event) => {
-              setPlaybackSeconds(event.currentTarget.currentTime);
-              recordPlaytime(event.currentTarget.currentTime);
-            }}
-            onPlay={() => {
-              setIsPlaying(true);
-              if (playtimeRef.current) playtimeRef.current.playing = true;
-            }}
-            onPause={() => {
-              setIsPlaying(false);
-              if (playtimeRef.current) playtimeRef.current.playing = false;
-              void flushPlaytime();
-            }}
-            onEnded={async () => {
-              recordPlaytime(audioRef.current?.currentTime ?? playbackSeconds);
-              if (playtimeRef.current) playtimeRef.current.playing = false;
-              await flushPlaytime();
-              if (sleepTimerEndOfSong) {
-                clearSleepTimer();
-                setIsPlaying(false);
-                return;
-              }
-              if (repeatMode === "one") {
-                if (audioRef.current) {
-                  audioRef.current.currentTime = 0;
-                  void audioRef.current.play();
-                }
-                return;
-              }
-              setIsPlaying(false);
-              if (
-                queueIndex + 1 < queueItems.length ||
-                (queueContinuation &&
-                  settings.autoLoadMore !== false &&
-                  !(settings.disableLoadMoreWhenRepeatAll === true && repeatMode === "all"))
-              ) {
-                void playQueueIndex(queueIndex + 1);
-                return;
-              }
-              if (repeatMode === "all" && queueItems.length > 0) {
-                void playQueueIndex(0);
-                return;
-              }
-              if (!autoMixEnabledRef.current) return;
-              const current = player?.item;
-              if (!current?.videoId) return;
-              const existing = queueItems;
-              const additions = await loadAutomixItems(current, existing);
-              if (additions.length > 0) {
-                const nextItems = [...existing, ...additions];
-                setQueueItems(nextItems);
-                setQueueContinuation(null);
-                void playItem(additions[0], nextItems, existing.length, null, true);
-              }
-            }}
-            onError={async () => {
-              if (await recoverStream()) return;
-              setNotice(FINAL_STREAM_ERROR);
-              if (settings.autoSkipNextOnError && (queueIndex + 1 < queueItems.length || queueContinuation))
-                void playQueueIndex(queueIndex + 1);
-            }}
-          />
-          <div className="dock-transport-actions">
-            <button
-              className="transport-button"
-              disabled={queueIndex < 0 || (queueIndex + 1 >= queueItems.length && !queueContinuation)}
-              onClick={() => void playQueueIndex(queueIndex + 1)}
-              title="Next"
-            >
-              ›
-            </button>
-            <button
-              className={shuffleEnabled ? "queue-button active-control" : "queue-button"}
-              onClick={() => void toggleShuffle()}
-              title={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"}
-              aria-label={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"}
-              aria-pressed={shuffleEnabled}
-            >
-              ⤨
-            </button>
-            <button
-              className={repeatMode === "off" ? "queue-button" : "queue-button active-control"}
-              onClick={() => void cycleRepeat()}
-              title={`Repeat mode: ${repeatMode}`}
-              aria-label={`Repeat mode: ${repeatMode}`}
-            >
-              ↻
-            </button>
-            <button
-              className="queue-button"
-              onClick={() => setQueueOpen(true)}
-              title="Open queue"
-              aria-label="Open queue"
-            >
-              ☰
-            </button>
-            <button
-              className="player-expand"
-              onClick={() => {
-                setPlayerExpanded(true);
-                setLyricsAutoScrollEnabled(true);
-                if (!lyrics) void openLyrics(player.item);
-              }}
-              title="Open full player"
-              aria-label="Open full player"
-            >
-              ↗
-            </button>
-          </div>
-          <button
-            className="dock-close"
-            onClick={() => {
-              audioRef.current?.pause();
-              setPlayer(null);
-              setPlayerExpanded(false);
-              setIsPlaying(false);
-            }}
-            title="Close player"
-            aria-label="Close player"
-          >
-            ×
-          </button>
-        </div>
-      )}
-      {queueOpen && player && (
-        <div
-          className="detail-overlay queue-overlay"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setQueueOpen(false)}
-        >
-          <div className="queue-panel" onClick={(event) => event.stopPropagation()}>
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setQueueOpen(false)}>
-              ×
-            </button>
-            <div className="queue-heading">
-              <div>
-                <p className="eyebrow">Queue</p>
-                <h2>{queueItems.length > 0 ? `${queueItems.length} songs` : "Queue"}</h2>
-              </div>
-              {queueItems.length > 0 && (
-                <button className="secondary-button" onClick={clearQueue}>
-                  Clear queue
-                </button>
-              )}
-            </div>
-            <div className="queue-list">
-              {queueItems.length === 0 ? (
-                <div className="state-panel">
-                  <p>No songs are queued.</p>
-                </div>
-              ) : (
-                queueItems.map((item, index) => (
-                  <div
-                    key={`${item.id}-${index}`}
-                    className={index === queueIndex ? "queue-item active" : "queue-item"}
-                  >
-                    <button
-                      className="queue-item-play"
-                      onClick={() => {
-                        setQueueOpen(false);
-                        void playQueueIndex(index);
-                      }}
-                    >
-                      <span>{index + 1}</span>
-                      {mediaSrc(item.thumbnail) && <img src={mediaSrc(item.thumbnail) as string} alt="" />}
-                      <span>
-                        <strong>{item.title}</strong>
-                        <small>{item.subtitle}</small>
-                      </span>
-                    </button>
-                    <span className="queue-item-actions">
-                      <button
-                        className="queue-item-action"
-                        disabled={index === 0}
-                        onClick={() => moveQueueItem(index, index - 1)}
-                        title="Move up"
-                        aria-label={`Move ${item.title} up`}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        className="queue-item-action"
-                        disabled={index === queueItems.length - 1}
-                        onClick={() => moveQueueItem(index, index + 1)}
-                        title="Move down"
-                        aria-label={`Move ${item.title} down`}
-                      >
-                        ↓
-                      </button>
-                      <button
-                        className="queue-item-action"
-                        onClick={() => removeQueueItem(index)}
-                        title="Remove from queue"
-                        aria-label={`Remove ${item.title} from queue`}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-      {playerExpanded && player && (
-        <div
-          className="detail-overlay player-overlay"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => {
-            setPlayerExpanded(false);
-            setLyrics(null);
-          }}
-        >
-          <div className="full-player-panel" onClick={(event) => event.stopPropagation()}>
-            <button
-              className="close-button"
-              title="Close"
-              aria-label="Close"
-              onClick={() => {
-                setPlayerExpanded(false);
-                setLyrics(null);
-              }}
-            >
-              ×
-            </button>
-            <div
-              className="full-player-art"
-              onDoubleClick={(event) => {
-                const bounds = event.currentTarget.getBoundingClientRect();
-                seekByPlayerGesture(event.clientX < bounds.left + bounds.width / 2 ? -1 : 1);
-              }}
-              title="Double-click the left or right side to seek"
-            >
-              {mediaSrc(player.item.thumbnail) ? (
-                <img src={mediaSrc(player.item.thumbnail) as string} alt="" />
-              ) : (
-                <div className="item-art empty-art">M</div>
-              )}
-            </div>
-            <div className="full-player-meta">
-              <p className="eyebrow">Now playing in Meld</p>
-              <h2 className="full-player-title" title={player.payload.title || player.item.title}>
-                {player.payload.title || player.item.title}
-              </h2>
-              <p>{player.payload.artist || player.item.subtitle}</p>
-              <div className="full-player-action-row">
-                <div className="full-player-actions">
-                  <button
-                    className="player-action"
-                    onClick={() => void shareItem(player.item)}
-                    title="Share"
-                    aria-label="Share"
-                  >
-                    ↗
-                  </button>
-                  <button
-                    className={playerItemState?.liked ? "player-action active-control" : "player-action"}
-                    onClick={() => void togglePlayerFavorite()}
-                    title={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}
-                    aria-label={playerItemState?.liked ? "Remove from Meld Liked Songs" : "Add to Meld Liked Songs"}
-                  >
-                    {playerItemState?.liked ? "♥" : "♡"}
-                  </button>
-                  <button
-                    className="player-action"
-                    onClick={() => void openPlayerMenu()}
-                    title="More actions"
-                    aria-label="More actions"
-                  >
-                    ⋮
-                  </button>
-                </div>
-                <div className="full-player-controls">
-                  <button
-                    className="transport-button"
-                    disabled={queueIndex <= 0}
-                    onClick={() => void playQueueIndex(queueIndex - 1)}
-                    title="Previous"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    className="transport-button play-button"
-                    onClick={togglePlayback}
-                    title={isPlaying ? "Pause" : "Play"}
-                  >
-                    {isPlaying ? "Ⅱ" : "▶"}
-                  </button>
-                  <button
-                    className="transport-button"
-                    disabled={queueIndex < 0 || (queueIndex + 1 >= queueItems.length && !queueContinuation)}
-                    onClick={() => void playQueueIndex(queueIndex + 1)}
-                    title="Next"
-                  >
-                    ›
-                  </button>
-                  <button
-                    className={shuffleEnabled ? "queue-button active-control" : "queue-button"}
-                    onClick={() => void toggleShuffle()}
-                    title={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"}
-                    aria-label={shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"}
-                    aria-pressed={shuffleEnabled}
-                  >
-                    ⤨
-                  </button>
-                  <button
-                    className={repeatMode === "off" ? "queue-button" : "queue-button active-control"}
-                    onClick={() => void cycleRepeat()}
-                    title={`Repeat mode: ${repeatMode}`}
-                    aria-label={`Repeat mode: ${repeatMode}`}
-                  >
-                    ↻
-                  </button>
-                  <button
-                    className="queue-button"
-                    onClick={() => setQueueOpen(true)}
-                    title="Open queue"
-                    aria-label="Open queue"
-                  >
-                    ☷
-                  </button>
-                </div>
-              </div>
-              <div className="full-player-progress">
-                <span>{formatTime(playbackSeconds)}</span>
-                <input
-                  className="seek-slider"
-                  type="range"
-                  min="0"
-                  max={Math.max(durationSeconds, 1)}
-                  step="0.1"
-                  value={Math.min(playbackSeconds, Math.max(durationSeconds, 1))}
-                  onChange={(event) => seekPlayback(Number(event.currentTarget.value))}
-                  aria-label="Seek"
-                />
-                <span>{formatTime(durationSeconds)}</span>
-              </div>
-              <label className="full-volume-control" title="Volume · scroll to adjust" onWheel={adjustVolumeByWheel}>
-                <span>Volume</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={volume}
-                  onChange={(event) => updateVolume(Number(event.currentTarget.value))}
-                  aria-label="Volume"
-                />
-              </label>
-            </div>
-            <div className="full-player-lyrics">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Lyrics</p>
-                  <h3>{lyrics?.status === "ready" ? lyrics.data.provider : "Meld lyric providers"}</h3>
-                  <label className="lyrics-provider-picker">
-                    <span>Provider</span>
-                    <select
-                      value={lyricsProviderSelection}
-                      onChange={(event) => void changeLyricsProvider(event.target.value)}
-                      disabled={lyricsProviderLoading}
-                      aria-label="Lyrics provider"
-                    >
-                      <option value="auto">Automatic · provider order</option>
-                      {lyricsProviderOrder.map((provider) => (
-                        <option key={provider} value={provider}>
-                          {provider}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div className="lyrics-navigation">
-                  <button
-                    className="topbar-button icon-button"
-                    onClick={goBack}
-                    disabled={!hasTransientLayer && backStack.length === 0}
-                    title="Back"
-                    aria-label="Back"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    className="topbar-button icon-button"
-                    onClick={navigateForward}
-                    disabled={forwardStack.length === 0}
-                    title="Forward"
-                    aria-label="Forward"
-                  >
-                    ›
-                  </button>
-                </div>
-                {lyrics?.status !== "ready" && (
-                  <button className="text-button" onClick={() => void openLyrics(player.item)}>
-                    Load lyrics
-                  </button>
-                )}
-              </div>
-              {lyrics?.status === "ready" && lyrics.data.synced && lyrics.data.lines.length > 0 ? (
-                <div
-                  ref={lyricsContainerRef}
-                  className="lyrics-lines"
-                  onWheel={() => setLyricsAutoScrollEnabled(false)}
-                  onTouchMove={() => setLyricsAutoScrollEnabled(false)}
-                  onPointerDown={() => setLyricsAutoScrollEnabled(false)}
-                  onKeyDown={() => setLyricsAutoScrollEnabled(false)}
-                >
-                  {lyrics.data.lines.map((line, index) => (
-                    <button
-                      ref={index === activeLyricIndex ? activeLyricRef : undefined}
-                      key={`${line.timeMs}-${index}`}
-                      className={index === activeLyricIndex ? "lyric-line active" : "lyric-line"}
-                      onClick={() => {
-                        setLyricsAutoScrollEnabled(true);
-                        if (audioRef.current) audioRef.current.currentTime = line.timeMs / 1000;
-                      }}
-                    >
-                      {line.text}
-                    </button>
-                  ))}
-                </div>
-              ) : lyrics?.status === "ready" ? (
-                <pre className="lyrics-text">{lyrics.data.text}</pre>
-              ) : (
-                <div className="state-panel">
-                  <p>Open lyrics to load the source provider chain.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-      {!playerExpanded && lyrics && (
-        <div className="detail-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel lyrics-panel">
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setLyrics(null)}>
-              ×
-            </button>
-            {lyrics.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Loading lyrics from Meld providers…</p>
-              </div>
-            )}
-            {lyrics.status === "error" && (
-              <div className="state-panel error">
-                <h2>Lyrics unavailable</h2>
-                <p>{lyrics.error}</p>
-              </div>
-            )}
-            {lyrics.status === "ready" && (
-              <>
-                <div className="section-heading">
-                  <div>
-                    <p className="eyebrow">
-                      {lyrics.data.provider}
-                      {lyrics.data.synced ? " · Synced" : " · Plain"}
-                    </p>
-                    <h2>{lyrics.data.matchedTitle}</h2>
-                    <p>{lyrics.data.matchedArtist}</p>
-                    <label className="lyrics-provider-picker">
-                      <span>Provider</span>
-                      <select
-                        value={lyricsProviderSelection}
-                        onChange={(event) => void changeLyricsProvider(event.target.value)}
-                        disabled={lyricsProviderLoading}
-                        aria-label="Lyrics provider"
-                      >
-                        <option value="auto">Automatic · provider order</option>
-                        {lyricsProviderOrder.map((provider) => (
-                          <option key={provider} value={provider}>
-                            {provider}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <div className="lyrics-navigation">
-                    <button
-                      className="topbar-button icon-button"
-                      onClick={goBack}
-                      disabled={!hasTransientLayer && backStack.length === 0}
-                      title="Back"
-                      aria-label="Back"
-                    >
-                      ‹
-                    </button>
-                    <button
-                      className="topbar-button icon-button"
-                      onClick={navigateForward}
-                      disabled={forwardStack.length === 0}
-                      title="Forward"
-                      aria-label="Forward"
-                    >
-                      ›
-                    </button>
-                  </div>
-                </div>
-                {lyrics.data.synced && lyrics.data.lines.length > 0 ? (
-                  <div
-                    ref={lyricsContainerRef}
-                    className="lyrics-lines"
-                    onWheel={() => setLyricsAutoScrollEnabled(false)}
-                    onTouchMove={() => setLyricsAutoScrollEnabled(false)}
-                    onPointerDown={() => setLyricsAutoScrollEnabled(false)}
-                    onKeyDown={() => setLyricsAutoScrollEnabled(false)}
-                  >
-                    {lyrics.data.lines.map((line, index) => (
-                      <button
-                        ref={index === activeLyricIndex ? activeLyricRef : undefined}
-                        key={`${line.timeMs}-${index}`}
-                        className={index === activeLyricIndex ? "lyric-line active" : "lyric-line"}
-                        onClick={() => {
-                          setLyricsAutoScrollEnabled(true);
-                          if (audioRef.current) audioRef.current.currentTime = line.timeMs / 1000;
-                        }}
-                      >
-                        {line.text}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <pre className="lyrics-text">{lyrics.data.text}</pre>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <DetailScreen
+        audioQuality={audioQuality}
+        detail={detail}
+        detailArtistSubscribed={detailArtistSubscribed}
+        detailMoreLoading={detailMoreLoading}
+        detailRefreshing={detailRefreshing}
+        loadDetailMore={loadDetailMore}
+        openDetailItem={openDetailItem}
+        openMenu={openMenu}
+        refreshPodcastDetail={refreshPodcastDetail}
+        setDetail={setDetail}
+        settings={settings}
+        toggleDetailArtistSubscription={toggleDetailArtistSubscription}
+      />
+      <PlaylistScreen
+        audioQuality={audioQuality}
+        loadPlaylistMore={loadPlaylistMore}
+        openMenu={openMenu}
+        playItem={playItem}
+        playlist={playlist}
+        selectedItems={selectedItems}
+        selectionMode={selectionMode}
+        setPlaylist={setPlaylist}
+        settings={settings}
+        toggleSelectedItem={toggleSelectedItem}
+      />
+      <PlayerBar
+        adjustVolumeByWheel={adjustVolumeByWheel}
+        audioRef={audioRef}
+        autoMixEnabledRef={autoMixEnabledRef}
+        clearSleepTimer={clearSleepTimer}
+        cycleRepeat={cycleRepeat}
+        durationSeconds={durationSeconds}
+        flushPlaytime={flushPlaytime}
+        formatTime={formatTime}
+        isPlaying={isPlaying}
+        loadAutomixItems={loadAutomixItems}
+        lyrics={lyrics}
+        openLyrics={openLyrics}
+        openPlayerMenu={openPlayerMenu}
+        playbackSeconds={playbackSeconds}
+        player={player}
+        playerItemState={playerItemState}
+        playItem={playItem}
+        playQueueIndex={playQueueIndex}
+        playtimeRef={playtimeRef}
+        queueContinuation={queueContinuation}
+        queueIndex={queueIndex}
+        queueItems={queueItems}
+        recordPlaytime={recordPlaytime}
+        recoverStream={recoverStream}
+        repeatMode={repeatMode}
+        seekPlayback={seekPlayback}
+        setDurationSeconds={setDurationSeconds}
+        setIsPlaying={setIsPlaying}
+        setLyricsAutoScrollEnabled={setLyricsAutoScrollEnabled}
+        setNotice={setNotice}
+        setPlaybackSeconds={setPlaybackSeconds}
+        setPlayer={setPlayer}
+        setPlayerExpanded={setPlayerExpanded}
+        setQueueContinuation={setQueueContinuation}
+        setQueueItems={setQueueItems}
+        setQueueOpen={setQueueOpen}
+        settings={settings}
+        shareItem={shareItem}
+        shuffleEnabled={shuffleEnabled}
+        sleepTimerEndOfSong={sleepTimerEndOfSong}
+        togglePlayback={togglePlayback}
+        togglePlayerFavorite={togglePlayerFavorite}
+        toggleShuffle={toggleShuffle}
+        updateVolume={updateVolume}
+        volume={volume}
+      />
+      <QueuePanel
+        clearQueue={clearQueue}
+        moveQueueItem={moveQueueItem}
+        player={player}
+        playQueueIndex={playQueueIndex}
+        queueIndex={queueIndex}
+        queueItems={queueItems}
+        queueOpen={queueOpen}
+        removeQueueItem={removeQueueItem}
+        setQueueOpen={setQueueOpen}
+      />
+      <ExpandedPlayer
+        activeLyricIndex={activeLyricIndex}
+        activeLyricRef={activeLyricRef}
+        adjustVolumeByWheel={adjustVolumeByWheel}
+        audioRef={audioRef}
+        backStack={backStack}
+        changeLyricsProvider={changeLyricsProvider}
+        cycleRepeat={cycleRepeat}
+        durationSeconds={durationSeconds}
+        formatTime={formatTime}
+        forwardStack={forwardStack}
+        goBack={goBack}
+        hasTransientLayer={hasTransientLayer}
+        isPlaying={isPlaying}
+        lyrics={lyrics}
+        lyricsContainerRef={lyricsContainerRef}
+        lyricsProviderLoading={lyricsProviderLoading}
+        lyricsProviderOrder={lyricsProviderOrder}
+        lyricsProviderSelection={lyricsProviderSelection}
+        navigateForward={navigateForward}
+        openLyrics={openLyrics}
+        openPlayerMenu={openPlayerMenu}
+        playbackSeconds={playbackSeconds}
+        player={player}
+        playerExpanded={playerExpanded}
+        playerItemState={playerItemState}
+        playQueueIndex={playQueueIndex}
+        queueContinuation={queueContinuation}
+        queueIndex={queueIndex}
+        queueItems={queueItems}
+        repeatMode={repeatMode}
+        seekByPlayerGesture={seekByPlayerGesture}
+        seekPlayback={seekPlayback}
+        setLyrics={setLyrics}
+        setLyricsAutoScrollEnabled={setLyricsAutoScrollEnabled}
+        setPlayerExpanded={setPlayerExpanded}
+        setQueueOpen={setQueueOpen}
+        shareItem={shareItem}
+        shuffleEnabled={shuffleEnabled}
+        togglePlayback={togglePlayback}
+        togglePlayerFavorite={togglePlayerFavorite}
+        toggleShuffle={toggleShuffle}
+        updateVolume={updateVolume}
+        volume={volume}
+      />
+      <LyricsPanel
+        activeLyricIndex={activeLyricIndex}
+        activeLyricRef={activeLyricRef}
+        audioRef={audioRef}
+        backStack={backStack}
+        changeLyricsProvider={changeLyricsProvider}
+        forwardStack={forwardStack}
+        goBack={goBack}
+        hasTransientLayer={hasTransientLayer}
+        lyrics={lyrics}
+        lyricsContainerRef={lyricsContainerRef}
+        lyricsProviderLoading={lyricsProviderLoading}
+        lyricsProviderOrder={lyricsProviderOrder}
+        lyricsProviderSelection={lyricsProviderSelection}
+        navigateForward={navigateForward}
+        playerExpanded={playerExpanded}
+        setLyrics={setLyrics}
+        setLyricsAutoScrollEnabled={setLyricsAutoScrollEnabled}
+      />
     </div>
   );
 }
