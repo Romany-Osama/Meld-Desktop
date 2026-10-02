@@ -40,7 +40,10 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => undefined }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: async () => "0.0.0-test" }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 it("mounts, renders the shell and starts the initial loads", async () => {
   const { default: App } = await import("./App");
@@ -118,4 +121,26 @@ it("closes the topmost layer before navigating back (U4-005)", async () => {
   // With no layer left, Back steps through the history.
   await click(screen.getByRole("button", { name: "Back" }));
   expect(route()).toBe("/library/mix");
+});
+
+it("restores the last safe page after a restart (U4-006)", async () => {
+  const { default: App } = await import("./App");
+  localStorage.clear();
+  const first = await act(async () => render(<App />));
+  await act(async () => void fireEvent.click(screen.getByTitle("Open album")));
+  expect(JSON.parse(localStorage.getItem("meld:lastRoute") ?? "null")).toEqual({
+    path: "/album/MPREb_test",
+    tab: "home",
+  });
+  first.unmount();
+  invoke.mockClear();
+  const { container } = await act(async () => render(<App />));
+  expect(container.querySelector("main")?.getAttribute("data-route")).toBe("/album/MPREb_test");
+  expect(invoke).toHaveBeenCalledWith("ytm_detail", { kind: "album", browseId: "MPREb_test" });
+  // Settings is never restored; the page under it is.
+  localStorage.setItem("meld:lastRoute", JSON.stringify({ path: "/settings/integrations", tab: "home" }));
+  cleanup();
+  const again = await act(async () => render(<App />));
+  expect(again.container.querySelector("main")?.getAttribute("data-route")).toBe("/home");
+  localStorage.clear();
 });

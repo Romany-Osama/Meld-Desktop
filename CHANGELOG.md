@@ -6,6 +6,11 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 
 ### Added
 - Settings → Storage → Playback cache: current size, a size limit and a Clear playback cache button.
+- Meld opens on the page you were on when you closed it (an album, artist, playlist, library tab, search or history). Settings, dialogs and searches for a pasted link are not reopened.
+
+### Changed
+- Back and Forward return to the page you left, including an album, artist or playlist page, the tab it was opened from and the scroll position.
+- Back and Escape close one layer at a time, topmost first: a dialog, then the menu, Settings, the lyrics, queue or expanded player, then an open page. Escape used to close Settings before a dialog opened from it.
 
 ### Fixed
 - **Offline downloads failed with "audio cache response failed: HTTP status client error (403 Forbidden)".** YouTube's media servers now serve only the first ~1 MB of stream links from the ANDROID_VR 1.65 client (the first one Meld tries) and refuse the rest. Playing could start and recover; downloading the whole file could not. Meld now checks every new stream link by reading a small piece past the first megabyte. A refused link is skipped straight away for another YouTube source, and that source is tried last for the next 30 minutes.

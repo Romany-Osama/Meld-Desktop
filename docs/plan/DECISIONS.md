@@ -145,3 +145,8 @@ Architecture and scope decisions, newest last. Each entry: context, decision, ev
 - **Decision:** `src/app/layers.ts` lists every overlay once, topmost first: dialogs, the item menu, the Settings page, player panels (lyrics, queue, expanded player), then nested screens (playlist, detail, Spotify playlist, Spotify liked). App derives `layerState` from its state; Back and Escape both close `topmostLayer(layerState)`, one layer per press. Only when nothing is open does Back step through the route history (D-027); Escape then does nothing. The Back button is enabled whenever a layer is open or history exists.
 - **Not a route:** overlays stay view state, not history entries. Dialogs and menus are short-lived, and restoring them after a restart would be wrong for confirmations and sign-in (U4-006).
 
+## D-029 — Restoring the last page (U4-006)
+- **Decision:** App stores the page route and its sidebar tab in `localStorage["meld:lastRoute"]` whenever the page changes (`src/app/lastRoute.ts`) and shows it again at start-up through the same `showRoute` used by back/forward. Home stores nothing.
+- **Never restored:** Settings (a modal whose Integrations page starts sign-ins), every dialog and confirmation (they are not routes, D-028), and a search for a link: re-running it would open the item, and for a video start playback by itself; it comes back as an empty search page. Spotify pages fall back to the library because the Spotify session is only known after start-up.
+- **Validation:** the stored value goes through `parseRoutePath` and a tab allow-list; anything malformed is ignored. Back/forward to a link search also shows the link without opening it; only a typed search opens links.
+

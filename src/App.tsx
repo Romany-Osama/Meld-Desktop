@@ -74,6 +74,7 @@ import {
   topLevelOf,
 } from "./app/routes";
 import { Layer, LayerState, topmostLayer } from "./app/layers";
+import { LAST_ROUTE_KEY, parseLastRoute, serializeLastRoute } from "./app/lastRoute";
 
 function App() {
   const { notice, setNotice } = useNotice();
@@ -1035,14 +1036,22 @@ function App() {
     await searchFor(value);
   };
 
-  /** Loads search results for `value` on the search page; `record` adds it to the search history (typed searches). */
-  const searchFor = async (value: string, record = true) => {
+  /**
+   * Loads search results for `value` on the search page. Typed searches (`typed`) are recorded in the search history and
+   * open a pasted link; a search shown again from history only shows the link in the box.
+   */
+  const searchFor = async (value: string, typed = true) => {
+    const record = typed;
     setSubmittedQuery(value);
     if (record && settings.pauseSearchHistory !== true)
       void invoke("search_history_add", { query: value })
         .then(() => loadSearchHistory())
         .catch(() => undefined);
     const parsedUrl = parseYouTubeUrl(value);
+    if (parsedUrl && !typed) {
+      setSearch({ status: "idle", data: { items: [], continuation: null } });
+      return;
+    }
     if (parsedUrl) {
       setSearch({ status: "idle", data: { items: [], continuation: null } });
       const item: YtItem =
@@ -2475,6 +2484,24 @@ function App() {
   });
   const currentRoute: Route = settingsOpen ? { name: "settings", page: settingsPage } : pageRoute;
   const pageRouteKey = routeKey(pageRoute);
+
+  // U4-006: show the last safe page again after a restart, and remember the page being shown.
+  const lastRouteRestoredRef = useRef(false);
+  const restoreLastRoute = useEffectEvent(() => {
+    const saved = parseLastRoute(localStorage.getItem(LAST_ROUTE_KEY));
+    if (saved) void showRoute(saved.route, saved.tab);
+  });
+  useEffect(() => restoreLastRoute(), []);
+  const lastRouteValue = serializeLastRoute(pageRoute, active);
+  useEffect(() => {
+    // The first render still shows Home; storing it would overwrite the page that is being restored.
+    if (!lastRouteRestoredRef.current) {
+      lastRouteRestoredRef.current = true;
+      return;
+    }
+    if (lastRouteValue) localStorage.setItem(LAST_ROUTE_KEY, lastRouteValue);
+    else localStorage.removeItem(LAST_ROUTE_KEY);
+  }, [lastRouteValue]);
 
   useEffect(() => {
     const target = pendingScrollRef.current;
