@@ -8,10 +8,12 @@ use crate::*;
 /// failed for five minutes so the next resolve uses another client.
 #[tauri::command]
 pub fn ytm_report_stream_failure(
-    video_id: String,
-    stream_url: String,
+    video_id: VideoId,
+    stream_url: LongText,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let video_id = video_id.into_inner();
+    let stream_url = stream_url.into_inner();
     let id = video_id.trim();
     if id.is_empty() {
         return Ok(());
@@ -47,7 +49,8 @@ pub fn ytm_report_stream_failure(
 
 /// Copyable, redacted report of the last resolution for a song (PLAY-006).
 #[tauri::command]
-pub fn ytm_playback_report(video_id: String) -> IpcResult<String> {
+pub fn ytm_playback_report(video_id: VideoId) -> IpcResult<String> {
+    let video_id = video_id.into_inner();
     let id = video_id.trim();
     let attempts = resolver_attempts()
         .lock()
@@ -75,14 +78,19 @@ pub fn ytm_playback_report(video_id: String) -> IpcResult<String> {
 
 #[tauri::command]
 pub async fn ytm_next(
-    video_id: String,
-    playlist_id: Option<String>,
-    set_video_id: Option<String>,
+    video_id: VideoId,
+    playlist_id: Opt<YtId>,
+    set_video_id: Opt<YtId>,
     index: Option<i32>,
-    params: Option<String>,
-    continuation: Option<String>,
+    params: Opt<Token>,
+    continuation: Opt<Token>,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<QueuePage> {
+    let video_id = video_id.into_inner();
+    let playlist_id = playlist_id.into_string();
+    let set_video_id = set_video_id.into_string();
+    let params = params.into_string();
+    let continuation = continuation.into_string();
     let visitor_data = visitor(&state).await?;
     let session = auth_session(&state)?;
     let data_sync_id = session.as_ref().map(|value| value.data_sync_id.as_str());
@@ -93,9 +101,10 @@ pub async fn ytm_next(
 
 #[tauri::command]
 pub async fn ytm_related(
-    browse_id: String,
+    browse_id: YtId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<Vec<YtItem>> {
+    let browse_id = browse_id.into_inner();
     let id = browse_id.trim();
     if id.is_empty() {
         return Err(IpcError::from("related browse id is empty".to_owned()));
@@ -111,9 +120,10 @@ pub async fn ytm_related(
 
 #[tauri::command]
 pub async fn ytm_queue_continuation(
-    continuation: String,
+    continuation: Token,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<QueuePage> {
+    let continuation = continuation.into_inner();
     let token = continuation.trim();
     if token.is_empty() {
         return Err(IpcError::from("queue continuation is empty".to_owned()));
@@ -233,9 +243,10 @@ pub fn library_player_cache(state: tauri::State<'_, RuntimeState>) -> IpcResult<
 
 #[tauri::command]
 pub fn player_cache_remove(
-    song_id: String,
+    song_id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let song_id = song_id.into_inner();
     let id = song_id.trim();
     if id.is_empty() {
         return Err(IpcError::from("player cache song id is empty".to_owned()));
@@ -270,11 +281,14 @@ pub fn player_cache_remove(
 
 #[tauri::command]
 pub async fn ytm_player(
-    video_id: String,
-    playlist_id: Option<String>,
-    audio_quality: Option<String>,
+    video_id: VideoId,
+    playlist_id: Opt<YtId>,
+    audio_quality: Opt<Keyword>,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<PlayerPayload> {
+    let video_id = video_id.into_inner();
+    let playlist_id = playlist_id.into_string();
+    let audio_quality = audio_quality.into_string();
     let id = video_id.trim().to_owned();
     if id.is_empty() {
         return Err(IpcError::from("video id is empty".to_owned()));

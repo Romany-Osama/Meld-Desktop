@@ -40,6 +40,10 @@ const VISITOR_PREFIX: &str = "Cg";
 mod download_resume;
 mod ipc;
 pub(crate) use ipc::error::{IpcError, IpcResult};
+pub(crate) use ipc::payload::{
+    Keyword, LibraryId, LongText, Name, Opt, SpotifyId, SpotifyUri, Text, Token, VideoId, YtId,
+    MAX_LIST_ARGUMENT,
+};
 mod player_cache;
 mod resolver;
 mod secrets;

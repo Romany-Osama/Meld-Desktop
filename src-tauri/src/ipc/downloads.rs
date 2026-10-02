@@ -5,9 +5,10 @@ use crate::*;
 
 #[tauri::command]
 pub fn download_info(
-    song_id: String,
+    song_id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<Option<DownloadInfo>> {
+    let song_id = song_id.into_inner();
     let id = song_id.trim();
     let db = state
         .db
@@ -32,7 +33,8 @@ pub fn download_info(
 }
 
 #[tauri::command]
-pub fn download_cancel(song_id: String) -> IpcResult<()> {
+pub fn download_cancel(song_id: LibraryId) -> IpcResult<()> {
+    let song_id = song_id.into_inner();
     let id = song_id.trim();
     if id.is_empty() {
         return Err(IpcError::from("download song id is empty".to_owned()));
@@ -51,7 +53,8 @@ pub fn download_cancel(song_id: String) -> IpcResult<()> {
 }
 
 #[tauri::command]
-pub fn download_remove(song_id: String, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
+pub fn download_remove(song_id: LibraryId, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
+    let song_id = song_id.into_inner();
     let id = song_id.trim();
     if id.is_empty() {
         return Err(IpcError::from("download song id is empty".to_owned()));
@@ -91,10 +94,11 @@ pub fn download_remove(song_id: String, state: tauri::State<'_, RuntimeState>) -
 #[tauri::command]
 pub async fn download_start(
     item: YtItem,
-    audio_quality: Option<String>,
+    audio_quality: Opt<Keyword>,
     app: tauri::AppHandle,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let audio_quality = audio_quality.into_string();
     let video_id = item
         .video_id
         .as_deref()

@@ -5,9 +5,10 @@ use crate::*;
 
 #[tauri::command]
 pub async fn ytm_delete_uploaded_song(
-    entity_id: String,
+    entity_id: Token,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<bool> {
+    let entity_id = entity_id.into_inner();
     let entity_id = entity_id.trim();
     if entity_id.is_empty() {
         return Err(IpcError::from("uploaded entity id is empty".to_owned()));
@@ -92,9 +93,10 @@ pub fn library_saved_podcasts(state: tauri::State<'_, RuntimeState>) -> IpcResul
 
 #[tauri::command]
 pub async fn sync_youtube_library(
-    mode: String,
+    mode: Keyword,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<YouTubeSyncResult> {
+    let mode = mode.into_inner();
     let mode = mode.trim().to_lowercase();
     if !matches!(
         mode.as_str(),
@@ -181,9 +183,10 @@ pub async fn ytm_history(state: tauri::State<'_, RuntimeState>) -> IpcResult<Rem
 
 #[tauri::command]
 pub async fn library_refetch_item(
-    id: String,
+    id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<Option<YtItem>> {
+    let id = id.into_inner();
     let video_id = id.trim();
     if video_id.is_empty() {
         return Err(IpcError::from("refetch item id is empty".to_owned()));
@@ -251,11 +254,14 @@ pub fn library_save_item(item: YtItem, state: tauri::State<'_, RuntimeState>) ->
 
 #[tauri::command]
 pub fn library_edit_item(
-    item_id: String,
-    title: String,
-    artist: String,
+    item_id: LibraryId,
+    title: Name,
+    artist: Text,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let item_id = item_id.into_inner();
+    let title = title.into_inner();
+    let artist = artist.into_inner();
     let id = item_id.trim();
     let title = title.trim();
     if id.is_empty() || title.is_empty() {
@@ -323,9 +329,10 @@ pub fn library_toggle_liked(
 
 #[tauri::command]
 pub async fn ytm_remove_from_history(
-    token: String,
+    token: Token,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let token = token.into_inner();
     let token = token.trim();
     if token.is_empty() {
         return Err(IpcError::from("history feedback token is empty".to_owned()));
@@ -337,11 +344,12 @@ pub async fn ytm_remove_from_history(
 
 #[tauri::command]
 pub async fn ytm_toggle_like(
-    video_id: String,
+    video_id: VideoId,
     liked: bool,
     item: Option<YtItem>,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let video_id = video_id.into_inner();
     let id = video_id.trim();
     if id.is_empty() {
         return Err(IpcError::from("video id is empty".to_owned()));
@@ -378,10 +386,11 @@ pub async fn ytm_toggle_like(
 
 #[tauri::command]
 pub async fn ytm_toggle_library(
-    video_id: String,
+    video_id: VideoId,
     add_to_library: bool,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let video_id = video_id.into_inner();
     let id = video_id.trim();
     if id.is_empty() {
         return Err(IpcError::from("video id is empty".to_owned()));
@@ -407,9 +416,10 @@ pub async fn ytm_toggle_library(
 
 #[tauri::command]
 pub fn library_item_state(
-    id: String,
+    id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<LibraryItemState> {
+    let id = id.into_inner();
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let pinned = db
         .query_row(
@@ -509,7 +519,8 @@ pub fn speed_dial_items(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<
 }
 
 #[tauri::command]
-pub fn library_remove_item(id: String, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
+pub fn library_remove_item(id: LibraryId, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
+    let id = id.into_inner();
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute("UPDATE songs SET in_library = 0 WHERE id = ?1", params![id])
         .map_err(|e| format!("library remove failed: {e}"))?;
@@ -555,9 +566,10 @@ pub fn history_clear(state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
 
 #[tauri::command]
 pub fn library_stats(
-    period: String,
+    period: Keyword,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<StatsPayload> {
+    let period = period.into_inner();
     let period = period.trim().to_lowercase();
     let cutoff = match period.as_str() {
         "day" => now_seconds() - 86_400,
@@ -844,10 +856,11 @@ pub fn library_local_files(state: tauri::State<'_, RuntimeState>) -> IpcResult<V
 
 #[tauri::command]
 pub fn library_top_songs(
-    period: String,
+    period: Keyword,
     limit: i64,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<Vec<YtItem>> {
+    let period = period.into_inner();
     let db = state
         .db
         .lock()
@@ -1132,9 +1145,10 @@ pub fn library_playlists(
 
 #[tauri::command]
 pub fn library_artist_state(
-    artist_id: String,
+    artist_id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<bool> {
+    let artist_id = artist_id.into_inner();
     let artist_id = artist_id.trim();
     if artist_id.is_empty() {
         return Err(IpcError::from("artist id is empty".to_owned()));
@@ -1154,13 +1168,17 @@ pub fn library_artist_state(
 
 #[tauri::command]
 pub async fn library_toggle_artist_bookmarked(
-    artist_id: String,
-    name: String,
-    thumbnail: Option<String>,
-    channel_id: Option<String>,
+    artist_id: LibraryId,
+    name: Text,
+    thumbnail: Opt<LongText>,
+    channel_id: Opt<YtId>,
     bookmarked: bool,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let artist_id = artist_id.into_inner();
+    let name = name.into_inner();
+    let thumbnail = thumbnail.into_string();
+    let channel_id = channel_id.into_string();
     let artist_id = artist_id.trim();
     let name = name.trim();
     if artist_id.is_empty() || name.is_empty() {
@@ -1230,12 +1248,14 @@ pub async fn ytm_refresh_saved_podcasts(state: tauri::State<'_, RuntimeState>) -
 
 #[tauri::command]
 pub async fn ytm_toggle_episode_saved(
-    video_id: String,
+    video_id: VideoId,
     saved: bool,
-    set_video_id: Option<String>,
+    set_video_id: Opt<YtId>,
     item: Option<YtItem>,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let video_id = video_id.into_inner();
+    let set_video_id = set_video_id.into_string();
     let video_id = video_id.trim();
     if video_id.is_empty() {
         return Err(IpcError::from("episode video id is empty".to_owned()));
@@ -1289,13 +1309,17 @@ pub async fn ytm_toggle_episode_saved(
 
 #[tauri::command]
 pub async fn ytm_toggle_podcast_saved(
-    podcast_id: String,
+    podcast_id: YtId,
     saved: bool,
-    title: String,
-    author: Option<String>,
-    thumbnail: Option<String>,
+    title: Text,
+    author: Opt<Text>,
+    thumbnail: Opt<LongText>,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let podcast_id = podcast_id.into_inner();
+    let title = title.into_inner();
+    let author = author.into_string();
+    let thumbnail = thumbnail.into_string();
     let podcast_id = podcast_id.trim();
     let playlist_id = podcast_id.strip_prefix("MPSP").unwrap_or(podcast_id).trim();
     if podcast_id.is_empty() || playlist_id.is_empty() {
@@ -1323,10 +1347,12 @@ pub async fn ytm_toggle_podcast_saved(
 
 #[tauri::command]
 pub async fn ytm_add_to_playlist(
-    playlist_id: String,
-    video_id: String,
+    playlist_id: YtId,
+    video_id: VideoId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let playlist_id = playlist_id.into_inner();
+    let video_id = video_id.into_inner();
     let playlist_id = playlist_id.trim().trim_start_matches("VL");
     let video_id = video_id.trim();
     if playlist_id.is_empty() || video_id.is_empty() {
@@ -1340,11 +1366,14 @@ pub async fn ytm_add_to_playlist(
 
 #[tauri::command]
 pub async fn ytm_remove_from_playlist(
-    playlist_id: String,
-    video_id: String,
-    set_video_id: String,
+    playlist_id: YtId,
+    video_id: VideoId,
+    set_video_id: YtId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let playlist_id = playlist_id.into_inner();
+    let video_id = video_id.into_inner();
+    let set_video_id = set_video_id.into_inner();
     let playlist_id = playlist_id.trim().trim_start_matches("VL");
     let video_id = video_id.trim();
     let set_video_id = set_video_id.trim();
@@ -1361,9 +1390,10 @@ pub async fn ytm_remove_from_playlist(
 
 #[tauri::command]
 pub async fn ytm_create_playlist(
-    title: String,
+    title: Name,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<YtItem> {
+    let title = title.into_inner();
     let title = title.trim();
     if title.is_empty() {
         return Err(IpcError::from("playlist title is empty".to_owned()));
@@ -1404,9 +1434,10 @@ pub async fn ytm_create_playlist(
 
 #[tauri::command]
 pub fn library_create_playlist(
-    title: String,
+    title: Name,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<YtItem> {
+    let title = title.into_inner();
     let title = title.trim();
     if title.is_empty() {
         return Err(IpcError::from("playlist title is empty".to_owned()));
@@ -1438,10 +1469,11 @@ pub fn library_create_playlist(
 
 #[tauri::command]
 pub fn library_add_to_playlist(
-    playlist_id: String,
+    playlist_id: LibraryId,
     item: YtItem,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<bool> {
+    let playlist_id = playlist_id.into_inner();
     let playlist_id = playlist_id.trim();
     if playlist_id.is_empty() || item.id.trim().is_empty() {
         return Err(IpcError::from("playlist or item id is empty".to_owned()));
@@ -1471,10 +1503,12 @@ pub fn library_add_to_playlist(
 
 #[tauri::command]
 pub fn library_remove_from_playlist(
-    playlist_id: String,
-    song_id: String,
+    playlist_id: LibraryId,
+    song_id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let playlist_id = playlist_id.into_inner();
+    let song_id = song_id.into_inner();
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute(
         "DELETE FROM playlist_songs WHERE playlist_id = ?1 AND song_id = ?2",
@@ -1486,9 +1520,10 @@ pub fn library_remove_from_playlist(
 
 #[tauri::command]
 pub fn library_playlist_songs(
-    playlist_id: String,
+    playlist_id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<Vec<YtItem>> {
+    let playlist_id = playlist_id.into_inner();
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.browse_id, s.playlist_id, s.video_id, s.set_video_id, s.explicit, s.music_video_type FROM playlist_songs ps INNER JOIN songs s ON s.id = ps.song_id WHERE ps.playlist_id = ?1 ORDER BY ps.position ASC").map_err(|e| format!("playlist songs query failed: {e}"))?;
     let rows = statement
