@@ -92,3 +92,9 @@
 - `feat/source-parity-next` commit a0227856 (like-response/avatar fix) is not on `main` — owner to confirm porting.
 
 **Next task:** merge #24, then the router PR, then U4-008 (separate server state from view state), U4-009…U4-015, TR-M1.
+
+## Session 6 (continued)
+- Merged: #26 (U4-003…007), #27 (U4-008/009), #28 (U4-010/011), #29 (U4-012/013), #30 (U4-014), #31 (U4-015).
+- Open: **#32** `feat/s5-004-permissions`: TR-M1 partial (D-038), S5-001/002 (D-039), S5-003 (D-040), S5-004/005 (D-041). All local checks passed (JS checks, cargo fmt, clippy -D warnings, cargo test); merge after Windows CI.
+- Partial: TR-M1 (helpers still in lib.rs, App.tsx still holds menu actions/playback). Known limit: local playlist removal removes every copy (needs per-entry ids).
+- Next task: merge #32, then **S5-007** (structured IPC errors), then S5-006. Owner decision still open: commit a0227856 on feat/source-parity-next.

@@ -16,7 +16,6 @@ import {
   PersistentPlayback,
   PlayerPayload,
   PlaylistContinuationPage,
-  PlaylistSort,
   QueuePage,
   SettingEntry,
   SpotifyTrackItem,
@@ -87,6 +86,18 @@ import { useLibraryData } from "./features/library/useLibraryData";
 import { useHistoryData } from "./features/history/useHistoryData";
 import { useDetailData } from "./features/detail/useDetailData";
 import { playlistIdOf, usePlaylistData } from "./features/playlist/usePlaylistData";
+import { RecapDialog } from "./features/stats/RecapDialog";
+import { ItemInfoDialog } from "./features/menu/ItemInfoDialog";
+import { LogoutDialog } from "./features/accounts/LogoutDialog";
+import { CreatePlaylistDialog } from "./features/playlist/CreatePlaylistDialog";
+import { PlaylistPickerDialog } from "./features/playlist/PlaylistPickerDialog";
+import { ArtistPickerDialog } from "./features/menu/ArtistPickerDialog";
+import { SleepTimerDialog } from "./features/player/SleepTimerDialog";
+import { SpeedDialDialog } from "./features/home/SpeedDialDialog";
+import { EditItemDialog } from "./features/library/EditItemDialog";
+import { YoutubeMatchDialog } from "./features/spotify/YoutubeMatchDialog";
+import { SpotifyAddDialog } from "./features/spotify/SpotifyAddDialog";
+import { SelectionBar } from "./features/selection/SelectionBar";
 
 function App() {
   const { notices, setNotice, dismiss: dismissNotice } = useNotice();
@@ -2785,154 +2796,27 @@ function App() {
       </main>
 
       {selectionMode && selectedItems.length > 0 && (
-        <div className="selection-action-bar" role="toolbar" aria-label="Selected song actions">
-          <strong>{selectedItems.length} selected</strong>
-          <button className="primary-button" onClick={() => void playSelectedItems(false)}>
-            Play
-          </button>
-          <button className="secondary-button" onClick={() => void playSelectedItems(true)}>
-            Shuffle
-          </button>
-          <button className="secondary-button" onClick={() => queueSelectedItems(true)}>
-            Play next
-          </button>
-          <button className="secondary-button" onClick={() => queueSelectedItems(false)}>
-            Add to queue
-          </button>
-          <button
-            className="secondary-button"
-            onClick={() => {
-              setPlaylistPickerItems([...selectedItems]);
-              void loadLocalPlaylists();
-            }}
-          >
-            Add to playlist
-          </button>
-          <button className="secondary-button" onClick={() => void likeSelectedItems()}>
-            Like / dislike all
-          </button>
-          <button className="secondary-button" onClick={downloadSelectedItems}>
-            Download
-          </button>
-          <button className="secondary-button" onClick={() => void removeSelectedDownloads()}>
-            Remove download
-          </button>
-          <button className="secondary-button" onClick={closeSelection}>
-            Clear
-          </button>
-        </div>
+        <SelectionBar
+          closeSelection={closeSelection}
+          downloadSelectedItems={downloadSelectedItems}
+          likeSelectedItems={likeSelectedItems}
+          loadLocalPlaylists={loadLocalPlaylists}
+          playSelectedItems={playSelectedItems}
+          queueSelectedItems={queueSelectedItems}
+          removeSelectedDownloads={removeSelectedDownloads}
+          selectedItems={selectedItems}
+          setPlaylistPickerItems={setPlaylistPickerItems}
+        />
       )}
 
-      {recapOpen && stats.status === "ready" && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setRecapOpen(false)}>
-          <div className="detail-panel recap-panel" onClick={(event) => event.stopPropagation()}>
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setRecapOpen(false)}>
-              ×
-            </button>
-            <p className="eyebrow">Meld Desktop</p>
-            <h2>Local listening recap</h2>
-            <p className="muted-copy">
-              A device-only recap calculated from your Meld playback history. It is not the remote YouTube Music Wrapped
-              feed.
-            </p>
-            <div className="recap-grid">
-              <div className="stats-summary-card">
-                <strong>{stats.data.totalMinutes}</strong>
-                <span>Minutes listened</span>
-              </div>
-              <div className="stats-summary-card">
-                <strong>{stats.data.uniqueSongs}</strong>
-                <span>Unique songs</span>
-              </div>
-              <div className="stats-summary-card">
-                <strong>{stats.data.totalPlays}</strong>
-                <span>Plays</span>
-              </div>
-            </div>
-            {stats.data.rows[0] && (
-              <div className="recap-highlight">
-                <span>Top song</span>
-                <strong>{stats.data.rows[0].item.title}</strong>
-                <small>
-                  {stats.data.rows[0].item.subtitle} · {stats.data.rows[0].plays} plays
-                </small>
-              </div>
-            )}
-            {stats.data.artists[0] && (
-              <div className="recap-highlight">
-                <span>Top artist</span>
-                <strong>{stats.data.artists[0].title}</strong>
-                <small>{stats.data.artists[0].plays} plays</small>
-              </div>
-            )}
-            <button className="primary-button" onClick={() => setRecapOpen(false)}>
-              Done
-            </button>
-          </div>
-        </div>
-      )}
+      {recapOpen && stats.status === "ready" && <RecapDialog setRecapOpen={setRecapOpen} stats={stats} />}
       {spotifyAddItem && spotifyAddState && (
-        <div
-          className="detail-overlay"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => {
-            setSpotifyAddItem(null);
-            setSpotifyAddState(null);
-          }}
-        >
-          <div className="detail-panel picker-panel" onClick={(event) => event.stopPropagation()}>
-            <button
-              className="close-button"
-              title="Close"
-              aria-label="Close"
-              onClick={() => {
-                setSpotifyAddItem(null);
-                setSpotifyAddState(null);
-              }}
-            >
-              ×
-            </button>
-            <p className="eyebrow">Spotify</p>
-            <h2>Add to Spotify playlist</h2>
-            {spotifyAddState.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Matching the song and loading Spotify playlists…</p>
-              </div>
-            )}
-            {spotifyAddState.status === "error" && (
-              <div className="state-panel error">
-                <p>{spotifyAddState.error}</p>
-              </div>
-            )}
-            {spotifyAddState.status === "ready" && (
-              <>
-                {spotifyAddState.data.match && (
-                  <p className="muted-copy">
-                    Matched: {spotifyAddState.data.match.name} · {spotifyAddState.data.match.artist}
-                  </p>
-                )}
-                <div className="picker-list">
-                  {spotifyAddState.data.playlists.length === 0 ? (
-                    <p className="muted-copy">No Spotify playlists were returned.</p>
-                  ) : (
-                    spotifyAddState.data.playlists.map((playlist) => (
-                      <button
-                        className="menu-option"
-                        key={playlist.id}
-                        onClick={() => void addToSpotifyPlaylist(playlist)}
-                      >
-                        {playlist.name}
-                        {playlist.owner ? ` · ${playlist.owner}` : ""}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+        <SpotifyAddDialog
+          addToSpotifyPlaylist={addToSpotifyPlaylist}
+          setSpotifyAddItem={setSpotifyAddItem}
+          setSpotifyAddState={setSpotifyAddState}
+          spotifyAddState={spotifyAddState}
+        />
       )}
       <ErrorBoundary
         name="Spotify liked songs"
@@ -2981,100 +2865,27 @@ function App() {
         />
       </ErrorBoundary>
       {youtubeMatchItem && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setYoutubeMatchItem(null)}>
-          <div className="detail-panel picker-panel" onClick={(event) => event.stopPropagation()}>
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setYoutubeMatchItem(null)}>
-              ×
-            </button>
-            <p className="eyebrow">Change YouTube version</p>
-            <h2>{youtubeMatchItem.match.name}</h2>
-            <p className="muted-copy">
-              Current match: {youtubeMatchItem.item.title} · {youtubeMatchItem.item.videoId}
-            </p>
-            <label className="form-field">
-              <span>Paste YouTube URL or 11-character video ID</span>
-              <input
-                value={youtubeMatchUrl}
-                onChange={(event) => setYoutubeMatchUrl(event.target.value)}
-                placeholder="https://music.youtube.com/watch?v=…"
-                autoFocus
-              />
-            </label>
-            {youtubeMatchPreview?.status === "loading" && (
-              <div className="state-panel">
-                <div className="spinner" />
-                <p>Searching YouTube Music…</p>
-              </div>
-            )}
-            {youtubeMatchPreview?.status === "error" && (
-              <div className="state-panel error">
-                <p>{youtubeMatchPreview.error}</p>
-              </div>
-            )}
-            {youtubeMatchPreview?.status === "ready" && youtubeMatchPreview.data && (
-              <div className="match-preview">
-                <strong>{youtubeMatchPreview.data.title}</strong>
-                <span>{youtubeMatchPreview.data.subtitle}</span>
-                <small>{youtubeMatchPreview.data.videoId}</small>
-              </div>
-            )}
-            <div className="dialog-actions">
-              <button className="secondary-button" onClick={() => setYoutubeMatchItem(null)}>
-                Cancel
-              </button>
-              <button
-                className="primary-button"
-                disabled={
-                  youtubeMatchPreview?.status !== "ready" ||
-                  !youtubeMatchPreview.data?.videoId ||
-                  youtubeMatchPreview.data.videoId === youtubeMatchItem.item.videoId
-                }
-                onClick={() => void confirmYoutubeVersion()}
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
+        <YoutubeMatchDialog
+          confirmYoutubeVersion={confirmYoutubeVersion}
+          setYoutubeMatchItem={setYoutubeMatchItem}
+          setYoutubeMatchUrl={setYoutubeMatchUrl}
+          youtubeMatchItem={youtubeMatchItem}
+          youtubeMatchPreview={youtubeMatchPreview}
+          youtubeMatchUrl={youtubeMatchUrl}
+        />
       )}
       {editItem && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setEditItem(null)}>
-          <div className="detail-panel picker-panel" onClick={(event) => event.stopPropagation()}>
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setEditItem(null)}>
-              ×
-            </button>
-            <p className="eyebrow">Edit song</p>
-            <h2>{editItem.title}</h2>
-            <label className="form-field">
-              <span>Song title</span>
-              <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
-            </label>
-            <label className="form-field">
-              <span>Artist</span>
-              <input value={editArtist} onChange={(event) => setEditArtist(event.target.value)} />
-            </label>
-            <button
-              className="primary-button"
-              disabled={!editTitle.trim()}
-              onClick={async () => {
-                try {
-                  await invoke("library_edit_item", {
-                    itemId: editItem.id,
-                    title: editTitle.trim(),
-                    artist: editArtist.trim(),
-                  });
-                  setEditItem(null);
-                  setNotice(`Updated “${editTitle.trim()}”.`, "success");
-                  if (active === "library") void reloadCurrentLibrary();
-                } catch (error) {
-                  setNotice(`Song edit failed: ${errorMessage(error)}`, "error");
-                }
-              }}
-            >
-              Save changes
-            </button>
-          </div>
-        </div>
+        <EditItemDialog
+          active={active}
+          editArtist={editArtist}
+          editItem={editItem}
+          editTitle={editTitle}
+          reloadCurrentLibrary={reloadCurrentLibrary}
+          setEditArtist={setEditArtist}
+          setEditItem={setEditItem}
+          setEditTitle={setEditTitle}
+          setNotice={setNotice}
+        />
       )}
       {menuItem && menuContext && (
         <ItemMenu
@@ -3088,289 +2899,64 @@ function App() {
         />
       )}
       {speedDialogOpen && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setSpeedDialogOpen(false)}>
-          <div className="detail-panel speed-dialog" onClick={(event) => event.stopPropagation()}>
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setSpeedDialogOpen(false)}>
-              ×
-            </button>
-            <p className="eyebrow">Player</p>
-            <h2>{settings.varispeed === true ? "Playback speed" : "Tempo and pitch"}</h2>
-            <p className="muted-copy">
-              {settings.varispeed === true
-                ? "Change speed with pitch following, matching Meld’s varispeed mode."
-                : "Change playback tempo. Desktop keeps pitch with the native audio element when varispeed is off."}
-            </p>
-            <label className="speed-control">
-              <strong>x{playbackSpeed.toFixed(2)}</strong>
-              <input
-                type="range"
-                min="0.25"
-                max="2"
-                step="0.05"
-                value={playbackSpeed}
-                onChange={(event) => setPlaybackSpeed(Number(event.currentTarget.value))}
-                aria-label="Playback speed"
-              />
-            </label>
-            <div className="dialog-actions">
-              <button className="secondary-button" onClick={() => setPlaybackSpeed(1)}>
-                Reset
-              </button>
-              <button className="primary-button" onClick={() => setSpeedDialogOpen(false)}>
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
+        <SpeedDialDialog
+          playbackSpeed={playbackSpeed}
+          setPlaybackSpeed={setPlaybackSpeed}
+          setSpeedDialogOpen={setSpeedDialogOpen}
+          settings={settings}
+        />
       )}
       {sleepTimerOpen && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setSleepTimerOpen(false)}>
-          <div className="detail-panel sleep-timer-panel" onClick={(event) => event.stopPropagation()}>
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setSleepTimerOpen(false)}>
-              ×
-            </button>
-            <p className="eyebrow">Player</p>
-            <h2>Sleep timer</h2>
-            <p className="muted-copy">Stop playback after a set time or when the current song ends.</p>
-            <label className="sleep-timer-value">
-              <strong>{sleepTimerMinutes} minutes</strong>
-              <input
-                type="range"
-                min="5"
-                max="120"
-                step="5"
-                value={sleepTimerMinutes}
-                onChange={(event) => setSleepTimerMinutes(Number(event.currentTarget.value))}
-                aria-label="Sleep timer minutes"
-              />
-            </label>
-            <label className="setting-row">
-              <span>
-                <strong>Stop after current song</strong>
-                <small>After the timer expires, finish this song and pause.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={sleepTimerStopAfterCurrent}
-                onChange={(event) => setSleepTimerStopAfterCurrent(event.target.checked)}
-              />
-            </label>
-            <label className="setting-row">
-              <span>
-                <strong>Fade out</strong>
-                <small>Lower volume during the final minute.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={sleepTimerFadeOut}
-                onChange={(event) => setSleepTimerFadeOut(event.target.checked)}
-              />
-            </label>
-            <div className="dialog-actions">
-              <button className="secondary-button" onClick={() => clearSleepTimer()}>
-                Clear timer
-              </button>
-              <button
-                className="secondary-button"
-                onClick={() =>
-                  void invoke("settings_set", { key: "sleepTimerDefault", value: String(sleepTimerMinutes) })
-                    .then(() => {
-                      setSleepTimerDefault(sleepTimerMinutes);
-                      setNotice(`Sleep timer default set to ${sleepTimerMinutes} minutes.`);
-                    })
-                    .catch((error) =>
-                      setNotice(`Sleep timer default could not be saved: ${errorMessage(error)}`, "error"),
-                    )
-                }
-              >
-                Set as default
-              </button>
-              <button className="secondary-button" onClick={() => startSleepTimer(true)}>
-                End of song
-              </button>
-              <button className="primary-button" onClick={() => startSleepTimer(false)}>
-                Start timer
-              </button>
-            </div>
-          </div>
-        </div>
+        <SleepTimerDialog
+          clearSleepTimer={clearSleepTimer}
+          setNotice={setNotice}
+          setSleepTimerDefault={setSleepTimerDefault}
+          setSleepTimerFadeOut={setSleepTimerFadeOut}
+          setSleepTimerMinutes={setSleepTimerMinutes}
+          setSleepTimerOpen={setSleepTimerOpen}
+          setSleepTimerStopAfterCurrent={setSleepTimerStopAfterCurrent}
+          sleepTimerFadeOut={sleepTimerFadeOut}
+          sleepTimerMinutes={sleepTimerMinutes}
+          sleepTimerStopAfterCurrent={sleepTimerStopAfterCurrent}
+          startSleepTimer={startSleepTimer}
+        />
       )}
       {artistPickerItem && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setArtistPickerItem(null)}>
-          <div className="detail-panel picker-panel" onClick={(event) => event.stopPropagation()}>
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setArtistPickerItem(null)}>
-              ×
-            </button>
-            <p className="eyebrow">Artist selection</p>
-            <h2>{artistPickerItem.title}</h2>
-            <p className="muted-copy">Meld found more than one source artist for this item.</p>
-            <div className="picker-list">
-              {artistPickerItem.artists
-                .filter((artist) => artist.id)
-                .map((artist) => (
-                  <button
-                    className="menu-option"
-                    key={artist.id}
-                    onClick={() => {
-                      setArtistPickerItem(null);
-                      void openItem({
-                        id: artist.id as string,
-                        kind: "artist",
-                        title: artist.name,
-                        subtitle: "Artist",
-                        artists: [],
-                        browseId: artist.id,
-                      });
-                    }}
-                  >
-                    {artist.name}
-                  </button>
-                ))}
-            </div>
-          </div>
-        </div>
+        <ArtistPickerDialog
+          artistPickerItem={artistPickerItem}
+          openItem={openItem}
+          setArtistPickerItem={setArtistPickerItem}
+        />
       )}
       {playlistPickerItems && (
-        <div className="detail-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel picker-panel">
-            <button
-              className="close-button"
-              title="Close"
-              aria-label="Close"
-              onClick={() => setPlaylistPickerItems(null)}
-            >
-              ×
-            </button>
-            <p className="eyebrow">Add to playlist</p>
-            <h2>
-              {playlistPickerItems.length === 1
-                ? playlistPickerItems[0].title
-                : `${playlistPickerItems.length} selected songs`}
-            </h2>
-            <button className="primary-button" onClick={openCreatePlaylistDialog}>
-              Create playlist
-            </button>
-            <div className="playlist-picker-toolbar">
-              <label className="library-search">
-                <span>Search</span>
-                <input
-                  value={playlistPickerSearch}
-                  onChange={(event) => setPlaylistPickerSearch(event.target.value)}
-                  placeholder="Search playlists"
-                  aria-label="Search playlists to add to"
-                />
-              </label>
-              <select
-                className="library-sort"
-                value={playlistPickerSort}
-                onChange={(event) => setPlaylistPickerSort(event.target.value as PlaylistSort)}
-                aria-label="Sort playlists to add to"
-              >
-                <option value="name">Name</option>
-                <option value="count">Song count</option>
-                <option value="created">Recently added</option>
-              </select>
-              <button
-                className="secondary-button"
-                onClick={() => setPlaylistPickerSortDescending((value) => !value)}
-                title="Reverse playlist order"
-              >
-                {playlistPickerSortDescending ? "Descending" : "Ascending"}
-              </button>
-            </div>
-            <div className="picker-list">
-              {visiblePlaylistPicker.length === 0 ? (
-                <p className="muted-copy">
-                  {playlistPickerSearch.trim() ? "No matching playlists." : "No playlists exist yet."}
-                </p>
-              ) : (
-                visiblePlaylistPicker.map((item) => (
-                  <button className="menu-option" key={item.id} onClick={() => void addToSelectedPlaylist(item.id)}>
-                    {item.title}
-                    {item.songCount === undefined ? "" : ` · ${item.songCount} song${item.songCount === 1 ? "" : "s"}`}
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
+        <PlaylistPickerDialog
+          addToSelectedPlaylist={addToSelectedPlaylist}
+          openCreatePlaylistDialog={openCreatePlaylistDialog}
+          playlistPickerItems={playlistPickerItems}
+          playlistPickerSearch={playlistPickerSearch}
+          playlistPickerSort={playlistPickerSort}
+          playlistPickerSortDescending={playlistPickerSortDescending}
+          setPlaylistPickerItems={setPlaylistPickerItems}
+          setPlaylistPickerSearch={setPlaylistPickerSearch}
+          setPlaylistPickerSort={setPlaylistPickerSort}
+          setPlaylistPickerSortDescending={setPlaylistPickerSortDescending}
+          visiblePlaylistPicker={visiblePlaylistPicker}
+        />
       )}
       {createPlaylistOpen && (
-        <div className="detail-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel picker-panel">
-            <button
-              className="close-button"
-              title="Close"
-              aria-label="Close"
-              onClick={() => setCreatePlaylistOpen(false)}
-            >
-              ×
-            </button>
-            <p className="eyebrow">My Playlists</p>
-            <h2>Create playlist</h2>
-            <p className="muted-copy">
-              Creates a playlist on this device. YouTube Music saved playlists appear after a connected-account sync.
-            </p>
-            {sessionStatus.authenticated && settings.ytmSync === true && (
-              <label className="setting-row playlist-sync-toggle">
-                <span>
-                  <strong>Sync with YouTube Music</strong>
-                  <small>Uses the live authenticated playlist/create path.</small>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={createSyncedPlaylist}
-                  onChange={(event) => setCreateSyncedPlaylist(event.target.checked)}
-                />
-              </label>
-            )}
-            <input
-              className="playlist-name-input"
-              value={newPlaylistTitle}
-              onChange={(event) => setNewPlaylistTitle(event.target.value)}
-              placeholder="Playlist name"
-              autoFocus
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void createLocalPlaylist();
-              }}
-            />
-            <button
-              className="primary-button"
-              disabled={!newPlaylistTitle.trim()}
-              onClick={() => void createLocalPlaylist()}
-            >
-              Create playlist
-            </button>
-          </div>
-        </div>
+        <CreatePlaylistDialog
+          createLocalPlaylist={createLocalPlaylist}
+          createSyncedPlaylist={createSyncedPlaylist}
+          newPlaylistTitle={newPlaylistTitle}
+          sessionStatus={sessionStatus}
+          setCreatePlaylistOpen={setCreatePlaylistOpen}
+          setCreateSyncedPlaylist={setCreateSyncedPlaylist}
+          setNewPlaylistTitle={setNewPlaylistTitle}
+          settings={settings}
+        />
       )}
       {logoutDialogOpen && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setLogoutDialogOpen(false)}>
-          <div className="detail-panel picker-panel" onClick={(event) => event.stopPropagation()}>
-            <button
-              className="close-button"
-              title="Close"
-              aria-label="Close"
-              onClick={() => setLogoutDialogOpen(false)}
-            >
-              ×
-            </button>
-            <p className="eyebrow">Google / YouTube Music</p>
-            <h2>Disconnect account?</h2>
-            <p className="muted-copy">
-              Choose whether to keep your Meld library. Offline downloaded files are kept when local library data is
-              cleared, matching Meld’s logout choices.
-            </p>
-            <div className="dialog-actions">
-              <button className="secondary-button" onClick={() => void confirmGoogleLogout(true)}>
-                Clear local data
-              </button>
-              <button className="primary-button" onClick={() => void confirmGoogleLogout(false)}>
-                Keep local data
-              </button>
-            </div>
-          </div>
-        </div>
+        <LogoutDialog confirmGoogleLogout={confirmGoogleLogout} setLogoutDialogOpen={setLogoutDialogOpen} />
       )}
       <ErrorBoundary name="Settings" variant="panel" resetKey={settingsOpen} onClose={() => setSettingsOpen(false)}>
         <SettingsScreen
@@ -3397,34 +2983,7 @@ function App() {
           spotifyStatus={spotifyStatus}
         />
       </ErrorBoundary>
-      {infoItem && (
-        <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setInfoItem(null)}>
-          <div className="detail-panel info-panel" onClick={(event) => event.stopPropagation()}>
-            <button className="close-button" title="Close" aria-label="Close" onClick={() => setInfoItem(null)}>
-              ×
-            </button>
-            <p className="eyebrow">Song details</p>
-            <h2>{infoItem.title || "Untitled"}</h2>
-            <p className="muted-copy">{infoItem.subtitle}</p>
-            <div className="info-grid">
-              <span>Type</span>
-              <strong>{infoItem.kind}</strong>
-              <span>Video ID</span>
-              <strong>{infoItem.videoId || "Not available"}</strong>
-              <span>Explicit</span>
-              <strong>{infoItem.explicit ? "Yes" : "No"}</strong>
-              <span>Music video type</span>
-              <strong>{infoItem.musicVideoType || "Not reported"}</strong>
-              {infoItem.artists.length > 0 && (
-                <>
-                  <span>Artists</span>
-                  <strong>{infoItem.artists.map((value) => value.name).join(", ")}</strong>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {infoItem && <ItemInfoDialog infoItem={infoItem} setInfoItem={setInfoItem} />}
       <ErrorBoundary name="This page" variant="panel" resetKey={detailRef} onClose={() => setDetailRef(null)}>
         <DetailScreen
           audioQuality={audioQuality}

@@ -11,15 +11,31 @@ import {
 import {
   checkUiInvariants,
   checkLogoutClearsWebview,
+  readRustSource,
   readUiSource,
   registeredCommands,
   RESTORED_UI_COMMANDS,
 } from "../lib/ui-invariants.mjs";
 import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
 import {
+  COMMANDS,
+  allowPermission,
+  callersOf,
+  checkCapabilityGrants,
+  checkCommandModules,
+  checkIpcInventory,
+  externalWindowLabels,
+  renderBuildRs,
+  renderInventory,
+  renderPermissionSet,
+} from "../lib/ipc-inventory.mjs";
+import { inventoryState } from "../ipc-inventory.mjs";
+import {
+  checkAppComposition,
   checkCapabilities,
   checkDestructivePolicy,
   checkErrorBoundaries,
+  checkEs2020Lib,
   checkOccurrenceKeys,
   checkFeatureModules,
   checkScreenSplit,
@@ -187,7 +203,7 @@ test("logout: both sign-out commands clear WebView data (TR-H6)", () => {
   assert.deepEqual(checkLogoutClearsWebview(ok), []);
   const v018 = ok.replace("    let _ = window.clear_all_browsing_data();\n}\n\n", "}\n\n");
   assert.deepEqual(checkLogoutClearsWebview(v018), ["account_logout no longer clears WebView browsing data"]);
-  assert.deepEqual(checkLogoutClearsWebview(readFileSync("src-tauri/src/lib.rs", "utf8")), []);
+  assert.deepEqual(checkLogoutClearsWebview(readRustSource()), []);
 });
 
 test("security: asset scope points at the real data folder, not Tauri's identifier folder", () => {
@@ -321,5 +337,91 @@ test("ui: list keys and selection tell duplicate songs apart (U4-015)", () => {
   ]);
   assert.deepEqual(checkOccurrenceKeys("checked={selectedItems.some((value) => value.id === item.id)}"), [
     "selection is checked by id; use isSelected(occurrence key)",
+  ]);
+});
+
+test("ui: App.tsx composes features and stays under its size cap (TR-M1)", () => {
+  const read = (path) => (existsSync(path) ? readFileSync(path, "utf8") : null);
+  assert.deepEqual(checkAppComposition(read), []);
+  const inline = (path) =>
+    path === "src/App.tsx" ? read(path) + '\n<div className="detail-overlay" role="dialog" />' : read(path);
+  assert.deepEqual(checkAppComposition(inline), ["App.tsx renders an inline dialog; move it to a feature"]);
+  const grown = (path) => (path === "src/App.tsx" ? read(path) + "\n".repeat(400) : read(path));
+  assert.match(checkAppComposition(grown)[0], /the cap is 3200/);
+});
+
+test("source stays inside the ES2020 lib that CI type-checks against", () => {
+  assert.deepEqual(checkEs2020Lib("const last = list[list.length - 1];"), []);
+  assert.deepEqual(checkEs2020Lib("const last = list.at(-1);"), [
+    "Array.prototype.at is not in the ES2020 lib; use index access",
+  ]);
+});
+
+test("ipc: every registered command has an owner, a risk class and a caller (S5-001)", () => {
+  const registered = registeredCommands(readFileSync("src-tauri/src/lib.rs", "utf8"));
+  assert.deepEqual(checkIpcInventory(registered), []);
+  assert.deepEqual(inventoryState().problems, []);
+  assert.deepEqual(checkIpcInventory([...registered, "new_command"]), [
+    "new_command is registered but not in the IPC inventory",
+  ]);
+  assert.deepEqual(checkIpcInventory(registered.filter((command) => command !== "settings_get")), [
+    "settings_get is in the IPC inventory but not registered",
+  ]);
+  assert.deepEqual(checkIpcInventory(["x"], { x: { owner: "nowhere", risk: "mild" } }), [
+    "x: unknown owner nowhere",
+    "x: unknown risk class mild",
+  ]);
+  assert.deepEqual(callersOf("history_clear", { "a.ts": 'invoke("history_clear")', "b.ts": "history_clear" }), [
+    "a.ts",
+  ]);
+  assert.match(renderInventory(["settings_get"], {}, COMMANDS), /\| `settings_get` \| read-local \| \*\*none\*\* \|/);
+});
+
+test("ipc: each command is registered from its owner's module (S5-003)", () => {
+  const lib = readFileSync("src-tauri/src/lib.rs", "utf8");
+  assert.deepEqual(checkCommandModules(lib), []);
+  const moved = lib.replace("ipc::settings::settings_get", "ipc::library::settings_get");
+  assert.deepEqual(checkCommandModules(moved), ["settings_get is registered from ipc::library; its owner is settings"]);
+  const flat = lib.replace("ipc::settings::settings_get", "settings_get");
+  assert.deepEqual(checkCommandModules(flat), ["settings_get must be registered as ipc::settings::settings_get"]);
+});
+
+test("ipc: the main window gets app commands only through owner permission sets (S5-004)", () => {
+  assert.equal(allowPermission("history_items"), "allow-history-items");
+  assert.match(renderBuildRs(["b_cmd", "a_cmd"]), /"a_cmd",\n {4}"b_cmd",/);
+  assert.match(
+    renderPermissionSet("settings", ["settings_get", "ytm_home"]),
+    /identifier = "ipc-settings"[\s\S]*"allow-settings-get",\n\]/,
+  );
+  const registered = ["settings_get", "ytm_home"];
+  const main = {
+    identifier: "default",
+    windows: ["main"],
+    permissions: ["core:default", "ipc-settings", "ipc-catalog"],
+  };
+  assert.deepEqual(checkCapabilityGrants([main], registered, ["google-login"]), []);
+  assert.deepEqual(
+    checkCapabilityGrants([{ ...main, permissions: ["core:default", "ipc-settings"] }], registered, []),
+    ["main capability does not grant ipc-catalog"],
+  );
+  assert.deepEqual(
+    checkCapabilityGrants([{ ...main, permissions: [...main.permissions, "allow-ytm-home"] }], registered, []),
+    ['capability "default" grants allow-ytm-home outside a set'],
+  );
+});
+
+test("ipc: login windows that load remote sites never get IPC (S5-005)", () => {
+  const rust =
+    'WebviewWindowBuilder::new(&app, "google-login", WebviewUrl::External(url))\n' +
+    'WebviewWindowBuilder::new(\n        &app,\n        "spotify-login",\n        WebviewUrl::External(url)';
+  assert.deepEqual(externalWindowLabels(rust), ["google-login", "spotify-login"]);
+  assert.deepEqual(externalWindowLabels(readRustSource()), ["google-login", "spotify-login"]);
+  const main = { identifier: "default", windows: ["main"], permissions: [] };
+  assert.deepEqual(
+    checkCapabilityGrants([main, { identifier: "login", windows: ["google-login"] }], [], ["google-login"]),
+    ['capability "login" gives IPC to the login window google-login'],
+  );
+  assert.deepEqual(checkCapabilityGrants([{ ...main, windows: ["main", "*"] }], [], []), [
+    'capability "default" uses the window pattern *',
   ]);
 });
