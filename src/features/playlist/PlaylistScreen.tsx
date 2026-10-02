@@ -39,7 +39,7 @@ export function PlaylistScreen({
     <>
       {playlist && (
         <div className="detail-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel">
+          <div className="detail-panel" data-screen-scroll>
             <button className="close-button" title="Close" aria-label="Close" onClick={closePlaylist}>
               ×
             </button>

@@ -35,6 +35,10 @@ const responses: Record<string, unknown> = {
   search_history_items: [],
   history_items: [],
   library_playlists: [],
+  library_mix_songs: [],
+  library_albums: [],
+  library_artists: [],
+  library_item_state: { liked: false, youtubeLiked: false, inLibrary: false, uploaded: false, pinned: false },
 };
 // Per-test answers that take precedence over `responses` (for example a deferred, slow answer).
 const overrides: Record<string, (args: unknown) => Promise<unknown>> = {};
@@ -258,4 +262,52 @@ it("shows search results as they were left when going back (U4-010)", async () =
   expect(route()).toBe("/search?q=lofi");
   expect(screen.getAllByText("Lofi result").length).toBeGreaterThan(0);
   expect(invoke).not.toHaveBeenCalledWith("ytm_search", expect.anything());
+});
+
+it("returns to the library with the filter it was left with (U4-010)", async () => {
+  const { default: App } = await import("./App");
+  const { container } = await act(async () => render(<App />));
+  const route = () => container.querySelector("main")?.getAttribute("data-route");
+  const click = async (element: HTMLElement) => act(async () => void fireEvent.click(element));
+  const librarySearch = () => screen.getByPlaceholderText<HTMLInputElement>("Search your library");
+  await click(screen.getByRole("button", { name: /Library/ }));
+  await act(async () => void fireEvent.change(librarySearch(), { target: { value: "lofi" } }));
+  await click(screen.getByRole("button", { name: /History/ }));
+  await click(screen.getByRole("button", { name: /Library/ }));
+  // A later visit changes the filter …
+  await act(async () => void fireEvent.change(librarySearch(), { target: { value: "" } }));
+  await click(screen.getByRole("button", { name: "Back" }));
+  expect(route()).toBe("/history/local");
+  await click(screen.getByRole("button", { name: "Back" }));
+  // … but Back returns to the first visit as it was left.
+  expect(route()).toBe("/library/mix");
+  expect(librarySearch().value).toBe("lofi");
+});
+
+it("returns to the scroll position inside an album page (U4-010)", async () => {
+  const { default: App } = await import("./App");
+  const { container } = await act(async () => render(<App />));
+  const route = () => container.querySelector("main")?.getAttribute("data-route");
+  const click = async (element: HTMLElement) => act(async () => void fireEvent.click(element));
+  await click(screen.getByTitle("Open album"));
+  const panel = container.querySelector<HTMLElement>("[data-screen-scroll]")!;
+  panel.scrollTop = 420;
+  await click(screen.getByRole("button", { name: /History/ }));
+  expect(container.querySelector("[data-screen-scroll]")).toBeNull();
+  await click(screen.getByRole("button", { name: "Back" }));
+  expect(route()).toBe("/album/MPREb_test");
+  expect(container.querySelector<HTMLElement>("[data-screen-scroll]")?.scrollTop).toBe(420);
+});
+
+it("builds the item menu from the capability model (U4-011)", async () => {
+  const { default: App } = await import("./App");
+  await act(async () => render(<App />));
+  await act(async () => void fireEvent.click(screen.getByRole("button", { name: "More options for Test Album" })));
+  const menu = screen.getByRole("dialog");
+  const labels = [...menu.querySelectorAll(".menu-option")].map((button) => button.textContent);
+  // An album has no track actions; the model offers pinning and queueing only.
+  expect(labels).toEqual(["Pin to Speed Dial", "Add to queue"]);
+  invoke.mockClear();
+  await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Pin to Speed Dial" })));
+  expect(invoke).toHaveBeenCalledWith("speed_dial_toggle", expect.objectContaining({ pinned: true }));
 });

@@ -165,3 +165,17 @@ export function checkServerState(readFile) {
       problems.push(`App.tsx keeps ${name} in useState; it is server state`);
   return problems;
 }
+
+// U4-011: the item menu is rendered from `itemMenuEntries` (src/app/capabilities.ts); App.tsx must not grow its own
+// per-action conditionals again.
+export function checkCapabilities(readFile) {
+  const problems = [];
+  const app = readFile("src/App.tsx") ?? "";
+  const model = readFile("src/app/capabilities.ts");
+  if (model === null) return ["src/app/capabilities.ts is missing"];
+  if (!/export function itemMenuEntries\(/.test(model)) problems.push("capabilities.ts must export itemMenuEntries");
+  if (!app.includes("<ItemMenu")) problems.push("App.tsx no longer renders <ItemMenu>");
+  if (!/canPerform\(/.test(app)) problems.push("performMenuAction no longer checks canPerform");
+  if (/performMenuAction\(\s*"/.test(app)) problems.push("App.tsx calls performMenuAction with a literal action");
+  return problems;
+}
