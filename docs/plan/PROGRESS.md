@@ -23,7 +23,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [ ] PLAY-021 (P1) Main removed quality support entirely
 - [ ] PLAY-031 (P1) v0.1.8 has no expiry recovery
 - [ ] PLAY-035 (P1) Main's effect is keyed only by song ID
-- [ ] PLAY-055 (P1) Main removed resume entirely
+- [ ] PLAY-055 (P1) Main removed resume entirely — partial: Windows smoke + upgrade test cover app-restart state; cancel/restart resume tests pending
 - [x] PLAY-056 (P1) v0.1.8 can leak an “active download” lock on early return — active_download_guard_clears_the_map_on_early_return
 - [x] PLAY-091 (P1) No branch/version contract test — checks.test.mjs versions
 
@@ -133,7 +133,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [ ] R6-072 (P1) Flaky test policy
 - [ ] R6-076 (P1) Caching
 - [ ] R6-077 (P1) PR artifacts
-- [ ] R6-078 (P1) Release workflow separated
+- [ ] R6-078 (P1) Release workflow separated — partial: tag-triggered release with signed updater artifacts; Authenticode pending (D-010)
 - [ ] R6-079 (P1) Linting for Rust and TS
 - [ ] TR-M2 (P1) No frontend test suite
 
@@ -1146,16 +1146,16 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 
 ## Phase 10 · M10.1 Updater, signing, installer, portable, uninstaller
 
-- [ ] S5-063 (P1) Add `tauri-plugin-updater` with a signed manifest
+- [x] S5-063 (P1) Add `tauri-plugin-updater` with a signed manifest — minisign key in Actions secrets, pubkey in tauri.conf.json, latest.json per release; updates::tests, release.test.mjs
 - [ ] S5-064 (P1) Code-sign Windows binaries
-- [ ] S5-065 (P1) Updater UX
+- [ ] S5-065 (P1) Updater UX — partial: on-demand + daily check, notes, progress, signature verify, explicit install; background download/"update on close" pending
 - [ ] S5-066 (P1) Update channels
 - [ ] S5-067 (P1) Rollback safety
 - [ ] S5-068 (P1) Portable updater
 - [ ] S5-069 (P1) Installer and uninstaller
-- [ ] S5-072 (P1) Reproducible CI release pipeline
-- [ ] S5-073 (P1) Software bill of materials and license notices
-- [ ] S5-074 (P1) Release provenance
+- [ ] S5-072 (P1) Reproducible CI release pipeline — partial: pipeline, audits, checksums, smoke done; Authenticode signing pending (D-010)
+- [x] S5-073 (P1) Software bill of materials and license notices — sbom.cdx.json + THIRD-PARTY-NOTICES.txt per release; release.test.mjs
+- [x] S5-074 (P1) Release provenance — actions/attest-build-provenance in release.yml
 - [ ] TR-M10 (P1) No signed updater/release trust path
 
 ## Phase 10 · M10.2 Final verification

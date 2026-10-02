@@ -22,3 +22,19 @@
 - Code-signing certificate and updater keys for releases (Phase 8).
 
 **Next task:** TR-H5 (timeouts/stall regression tests), then TR-H4, TR-H6, TR-M4 to finish Phase 0; then Phase 1 M1.1 starting at U4-001.
+
+## 2026-10-02 — Session 2 (finish Phase 0, first release pipeline)
+
+**Done**
+- Deleted the 17 inherited upstream Meld tags (owner confirmed the repo is not a fork; D-008).
+- PR #15: regression tests and small refactors for TR-H4 (restore streams `song.db` to disk, size caps), TR-H5 (timeouts, stall detection), TR-H6 (sign-out removes every session row; CI guard that both logouts clear WebView data), TR-M4 (measured playtime in stats).
+- PR #16: signed in-app updates (Rust-side `tauri-plugin-updater`, Settings → About, daily quiet check, pre-update DB backup), Tauri 2.12, Vitest, release workflow (build → Windows smoke → publish) producing NSIS setup, portable ZIP (now with taskbar icons, `portable.marker`, notices), `.sig` files, `latest.json`, `SHA256SUMS.txt`, CycloneDX SBOM, `THIRD-PARTY-NOTICES.txt`, provenance attestations; npm/cargo audits (D-010…D-013).
+- Windows smoke on `windows-latest` passed: silent install of 0.1.8 → seeded plaintext secrets → install 0.2.0 over it → secrets sealed, no plaintext in the file, library kept; portable ZIP starts; silent uninstall keeps data.
+- Updater key pair generated; private key + password stored as Actions secrets, backup handed to the owner, local copies deleted.
+
+**Blockers / owner actions**
+- Authenticode certificate (D-010): apply for SignPath Foundation (free for OSS) or Azure Trusted Signing; until then releases are unsigned and say so.
+- Manual check on a real PC: Google/Spotify sign-in and playback (cannot be automated without real accounts).
+- Branch protection review requirement (S5-097) needs a second maintainer.
+
+**Next task:** Phase 1 M1.1 — U4-001 (split `App.tsx` into route-level screens), with M1.4 test harness work (R6-075: ESLint, Prettier) alongside.
