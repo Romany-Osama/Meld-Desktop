@@ -5,13 +5,17 @@ use crate::*;
 
 #[tauri::command]
 pub async fn fetch_lyrics(
-    title: String,
-    artist: String,
+    title: Text,
+    artist: Text,
     duration: i32,
-    album: Option<String>,
-    id: Option<String>,
+    album: Opt<Text>,
+    id: Opt<LibraryId>,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<LyricsPayload> {
+    let title = title.into_inner();
+    let artist = artist.into_inner();
+    let album = album.into_string();
+    let id = id.into_string();
     match timeout(
         Duration::from_secs(30),
         fetch_lyrics_inner(title, artist, duration, album, id, state, true),
@@ -27,13 +31,17 @@ pub async fn fetch_lyrics(
 
 #[tauri::command]
 pub async fn fetch_lyrics_fresh(
-    title: String,
-    artist: String,
+    title: Text,
+    artist: Text,
     duration: i32,
-    album: Option<String>,
-    id: Option<String>,
+    album: Opt<Text>,
+    id: Opt<LibraryId>,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<LyricsPayload> {
+    let title = title.into_inner();
+    let artist = artist.into_inner();
+    let album = album.into_string();
+    let id = id.into_string();
     match timeout(
         Duration::from_secs(30),
         fetch_lyrics_inner(title, artist, duration, album, id, state, false),
@@ -49,14 +57,19 @@ pub async fn fetch_lyrics_fresh(
 
 #[tauri::command]
 pub async fn fetch_lyrics_from_provider(
-    title: String,
-    artist: String,
+    title: Text,
+    artist: Text,
     duration: i32,
-    album: Option<String>,
-    id: Option<String>,
-    provider: String,
+    album: Opt<Text>,
+    id: Opt<LibraryId>,
+    provider: Keyword,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<LyricsPayload> {
+    let title = title.into_inner();
+    let artist = artist.into_inner();
+    let album = album.into_string();
+    let id = id.into_string();
+    let provider = provider.into_inner();
     const PROVIDERS: [&str; 8] = [
         "BetterLyrics",
         "Paxsenix",

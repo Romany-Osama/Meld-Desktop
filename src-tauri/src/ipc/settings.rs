@@ -22,10 +22,12 @@ pub fn settings_get(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<Sett
 
 #[tauri::command]
 pub fn settings_set(
-    key: String,
-    value: String,
+    key: Keyword,
+    value: LongText,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let key = key.into_inner();
+    let value = value.into_inner();
     if !allowed_setting(&key) {
         return Err(IpcError::from(format!("unsupported Meld setting: {key}")));
     }

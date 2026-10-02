@@ -5,10 +5,11 @@ use crate::*;
 
 #[tauri::command]
 pub async fn spotify_playlist_tracks(
-    playlist_id: String,
+    playlist_id: SpotifyId,
     offset: Option<i64>,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<SpotifyTrackPage> {
+    let playlist_id = playlist_id.into_inner();
     let playlist_id = playlist_id.trim();
     if playlist_id.is_empty() {
         return Err(IpcError::from("Spotify playlist id is required".to_owned()));
@@ -32,10 +33,12 @@ pub async fn spotify_playlist_tracks(
 
 #[tauri::command]
 pub async fn spotify_remove_from_playlist(
-    playlist_id: String,
-    uid: String,
+    playlist_id: SpotifyId,
+    uid: SpotifyId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let playlist_id = playlist_id.into_inner();
+    let uid = uid.into_inner();
     let playlist_id = playlist_id.trim();
     let uid = uid.trim();
     if playlist_id.is_empty() || uid.is_empty() {
@@ -52,11 +55,17 @@ pub async fn spotify_remove_from_playlist(
 
 #[tauri::command]
 pub async fn spotify_move_in_playlist(
-    playlist_id: String,
-    uids: Vec<String>,
-    before_uid: Option<String>,
+    playlist_id: SpotifyId,
+    uids: Vec<SpotifyId>,
+    before_uid: Opt<SpotifyId>,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let playlist_id = playlist_id.into_inner();
+    if uids.len() > MAX_LIST_ARGUMENT {
+        return Err(IpcError::invalid("uids list is too long"));
+    }
+    let uids: Vec<String> = uids.into_iter().map(String::from).collect();
+    let before_uid = before_uid.into_string();
     let playlist_id = playlist_id.trim();
     let uids: Vec<String> = uids
         .into_iter()
@@ -76,10 +85,12 @@ pub async fn spotify_move_in_playlist(
 
 #[tauri::command]
 pub async fn spotify_rename_playlist(
-    playlist_id: String,
-    new_name: String,
+    playlist_id: SpotifyId,
+    new_name: Name,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let playlist_id = playlist_id.into_inner();
+    let new_name = new_name.into_inner();
     let playlist_id = playlist_id.trim();
     let new_name = new_name.trim();
     if playlist_id.is_empty() || new_name.is_empty() {
@@ -110,9 +121,10 @@ pub async fn spotify_liked_tracks(
 
 #[tauri::command]
 pub async fn spotify_library_node(
-    folder_uri: Option<String>,
+    folder_uri: Opt<SpotifyUri>,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<SpotifyLibraryNode> {
+    let folder_uri = folder_uri.into_string();
     let token = spotify_token(&state)?;
     let variables = json!({ "filters": ["Playlists"], "order": Value::Null, "textFilter": "", "features": ["LIKED_SONGS", "YOUR_EPISODES_V2", "PRERELEASES", "EVENTS"], "limit": 100, "offset": 0, "flatten": false, "expandedFolders": [], "folderUri": folder_uri, "includeFoldersWhenFlattening": true });
     let response = spotify_graphql_post("libraryV3", variables, &token).await?;
@@ -131,9 +143,10 @@ pub async fn spotify_playlists(
 
 #[tauri::command]
 pub fn spotify_match_for_youtube(
-    youtube_id: String,
+    youtube_id: VideoId,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<Option<SpotifyTrackMatch>> {
+    let youtube_id = youtube_id.into_inner();
     let db = state
         .db
         .lock()
@@ -150,12 +163,16 @@ pub fn spotify_match_for_youtube(
 
 #[tauri::command]
 pub fn spotify_override_youtube(
-    spotify_id: String,
-    youtube_id: String,
-    title: String,
-    artist: String,
+    spotify_id: LibraryId,
+    youtube_id: VideoId,
+    title: Text,
+    artist: Text,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let spotify_id = spotify_id.into_inner();
+    let youtube_id = youtube_id.into_inner();
+    let title = title.into_inner();
+    let artist = artist.into_inner();
     let spotify_id = spotify_id.trim();
     let youtube_id = youtube_id.trim();
     if spotify_id.is_empty() || youtube_id.is_empty() {
@@ -173,18 +190,23 @@ pub fn spotify_override_youtube(
 
 #[tauri::command]
 pub async fn spotify_resolve_youtube(
-    youtube_id: Option<String>,
-    title: String,
-    artist: String,
+    youtube_id: Opt<VideoId>,
+    title: Text,
+    artist: Text,
     duration_sec: i64,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<Option<SpotifyTrackMatch>> {
+    let youtube_id = youtube_id.into_string();
+    let title = title.into_inner();
+    let artist = artist.into_inner();
     if let Some(youtube_id) = youtube_id
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        if let Some(cached) = spotify_match_for_youtube(youtube_id.to_owned(), state.clone())? {
+        if let Some(cached) =
+            spotify_match_for_youtube(VideoId::parse(youtube_id.to_owned())?, state.clone())?
+        {
             return Ok(Some(cached));
         }
     }
@@ -246,10 +268,12 @@ pub async fn spotify_resolve_youtube(
 
 #[tauri::command]
 pub async fn spotify_add_to_playlist(
-    playlist_id: String,
-    track_uri: String,
+    playlist_id: SpotifyId,
+    track_uri: SpotifyUri,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let playlist_id = playlist_id.into_inner();
+    let track_uri = track_uri.into_inner();
     let playlist_id = playlist_id.trim();
     let track_uri = track_uri.trim();
     if playlist_id.is_empty() || track_uri.is_empty() {

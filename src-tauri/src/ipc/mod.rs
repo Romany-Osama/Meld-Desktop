@@ -7,6 +7,7 @@ pub mod downloads;
 pub mod error;
 pub mod library;
 pub mod lyrics;
+pub mod payload;
 pub mod player;
 pub mod settings;
 pub mod spotify;

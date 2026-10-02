@@ -12,6 +12,7 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 - Pasting a Spotify playlist link or a `meld:` link into search opens that page. Pasting a Spotify song, album or artist link explains that it cannot be opened directly and to search by name.
 
 ### Changed
+- Security: Meld checks every id, token and text value the window sends to the app (length and allowed characters) before using it for a request or the database.
 - Security: the Meld window may call only the app commands granted to it, grouped by area (Tauri app-command permissions). The Google and Spotify sign-in windows still get no access to Meld's commands.
 - Meld asks before anything that cannot be undone: deleting an uploaded song, removing a song from YouTube Music history or a YouTube Music playlist, removing a download, clearing playback or search history, removing a Spotify playlist track. If the change fails, the screen goes back to how it was.
 - Back and Forward return to the page you left, including an album, artist or playlist page, the tab it was opened from and the scroll position.
