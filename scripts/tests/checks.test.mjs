@@ -11,12 +11,13 @@ import {
 import {
   checkUiInvariants,
   checkLogoutClearsWebview,
+  readRustSource,
   readUiSource,
   registeredCommands,
   RESTORED_UI_COMMANDS,
 } from "../lib/ui-invariants.mjs";
 import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
-import { COMMANDS, callersOf, checkIpcInventory, renderInventory } from "../lib/ipc-inventory.mjs";
+import { COMMANDS, callersOf, checkCommandModules, checkIpcInventory, renderInventory } from "../lib/ipc-inventory.mjs";
 import { inventoryState } from "../ipc-inventory.mjs";
 import {
   checkAppComposition,
@@ -191,7 +192,7 @@ test("logout: both sign-out commands clear WebView data (TR-H6)", () => {
   assert.deepEqual(checkLogoutClearsWebview(ok), []);
   const v018 = ok.replace("    let _ = window.clear_all_browsing_data();\n}\n\n", "}\n\n");
   assert.deepEqual(checkLogoutClearsWebview(v018), ["account_logout no longer clears WebView browsing data"]);
-  assert.deepEqual(checkLogoutClearsWebview(readFileSync("src-tauri/src/lib.rs", "utf8")), []);
+  assert.deepEqual(checkLogoutClearsWebview(readRustSource()), []);
 });
 
 test("security: asset scope points at the real data folder, not Tauri's identifier folder", () => {
@@ -363,4 +364,13 @@ test("ipc: every registered command has an owner, a risk class and a caller (S5-
     "a.ts",
   ]);
   assert.match(renderInventory(["settings_get"], {}, COMMANDS), /\| `settings_get` \| read-local \| \*\*none\*\* \|/);
+});
+
+test("ipc: each command is registered from its owner's module (S5-003)", () => {
+  const lib = readFileSync("src-tauri/src/lib.rs", "utf8");
+  assert.deepEqual(checkCommandModules(lib), []);
+  const moved = lib.replace("ipc::settings::settings_get", "ipc::library::settings_get");
+  assert.deepEqual(checkCommandModules(moved), ["settings_get is registered from ipc::library; its owner is settings"]);
+  const flat = lib.replace("ipc::settings::settings_get", "settings_get");
+  assert.deepEqual(checkCommandModules(flat), ["settings_get must be registered as ipc::settings::settings_get"]);
 });

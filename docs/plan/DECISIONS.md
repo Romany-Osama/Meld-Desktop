@@ -220,3 +220,10 @@ Architecture and scope decisions, newest last. Each entry: context, decision, ev
 - **Guard and tests:** `npm run check:security` fails when a registered command is missing from the inventory, an entry is stale, an owner or risk class is unknown, a command has no caller, or the generated document is out of date. `checks.test.mjs` (ipc inventory).
 - **Use:** S5-004 (app-command permissions) groups commands by owner and risk class from this table; S5-003 splits lib.rs along the owner column.
 
+## D-040 — Commands split into `src-tauri/src/ipc/<owner>.rs` (S5-003)
+- **Context:** lib.rs was 11,390 lines: 101 of the 104 registered commands, their helpers, the database layer, InnerTube and Spotify clients and the tests in one file.
+- **Decision:** every registered `#[tauri::command]` moved, unchanged, into the module of its owner from the IPC inventory (D-039): `ipc/{account,spotify,catalog,library,downloads,player,lyrics,settings,backup}.rs` (the update commands already lived in `updates.rs`, owner `system`). Each module starts with `use crate::*;`, so the bodies keep using the helpers that are still in lib.rs; lib.rs re-imports the modules so internal callers and tests keep working. lib.rs is now 7,900 lines.
+- **Deviation from the plan:** the plan asked for one `register()` per module. Tauri accepts a single `invoke_handler`, and `generate_handler!` cannot be assembled from several macros, so lib.rs keeps one `generate_handler!` that names every command by path (`ipc::library::history_items`). `checkCommandModules` (`npm run check:security`) fails if a command is registered from a module other than its owner's, or without a module path.
+- **Tests:** the Rust test that checks every `DELETE FROM songs` keeps downloads safe now scans lib.rs and all ipc modules. The TR-H6 logout guard reads every Rust file (`readRustSource`). `checks.test.mjs` (command modules).
+- **Next (TR-M1 backend half):** move the helpers next to their commands (db, innertube, spotify, lyrics, playback) per §4.1, module by module, with `cargo test` after each move.
+

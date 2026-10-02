@@ -38,10 +38,10 @@ export function registeredCommands(libSource) {
 
 /** Body of a top-level Rust function, from its signature to the next top-level item. */
 export function rustFunctionBody(libSource, name) {
-  const start = libSource.search(new RegExp(`\\nfn ${name}\\(`));
+  const start = libSource.search(new RegExp(`\\n(pub(\\([a-z]+\\))? )?(async )?fn ${name}\\(`));
   if (start < 0) return null;
   const rest = libSource.slice(start + 1);
-  const end = rest.search(/\n(#\[|fn |pub fn |async fn |struct |const |static |impl |mod )/);
+  const end = rest.search(/\n(#\[|fn |pub fn |pub async fn |async fn |struct |const |static |impl |mod )/);
   return end < 0 ? rest : rest.slice(0, end);
 }
 
@@ -57,6 +57,15 @@ export function checkLogoutClearsWebview(libSource) {
       problems.push(`${name} no longer clears WebView browsing data`);
   }
   return problems;
+}
+
+/** Every Rust source file of the app (lib.rs and the ipc/ modules, S5-003), concatenated. */
+export function readRustSource(root = "src-tauri/src") {
+  return readdirSync(root, { recursive: true })
+    .filter((name) => name.endsWith(".rs"))
+    .sort()
+    .map((name) => "\n" + readFileSync(join(root, name), "utf8"))
+    .join("\n");
 }
 
 /** All UI source under src/ (.ts and .tsx, without tests), concatenated: App.tsx is split into feature modules (U4-001). */

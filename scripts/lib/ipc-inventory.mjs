@@ -161,6 +161,32 @@ export function checkIpcInventory(registered, inventory = COMMANDS) {
   return problems;
 }
 
+/** Modules outside ipc/ that already own their commands. */
+export const COMMAND_MODULES_OUTSIDE_IPC = { updates: "system" };
+
+/** S5-003: generate_handler! names every command as `ipc::<owner>::<command>` (or an allowed module above). */
+export function checkCommandModules(libSource, inventory = COMMANDS) {
+  const match = libSource.match(/generate_handler!\[([^\]]*)\]/);
+  if (!match) return ["generate_handler! not found"];
+  const problems = [];
+  for (const path of match[1]
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)) {
+    const parts = path.split("::");
+    const command = parts[parts.length - 1];
+    const owner = inventory[command]?.owner;
+    if (!owner) continue; // reported by checkIpcInventory
+    const module = parts.length === 3 && parts[0] === "ipc" ? parts[1] : null;
+    const outside = parts.length === 2 ? COMMAND_MODULES_OUTSIDE_IPC[parts[0]] : undefined;
+    if (module === null && outside === undefined)
+      problems.push(`${command} must be registered as ipc::${owner}::${command}`);
+    else if ((module ?? outside) !== owner)
+      problems.push(`${command} is registered from ${module ? `ipc::${module}` : parts[0]}; its owner is ${owner}`);
+  }
+  return problems;
+}
+
 /** Frontend files (relative to src/, without tests) that name the command in a string. */
 export function callersOf(command, files) {
   const pattern = new RegExp(`["'\`]${command}["'\`]`);

@@ -13,7 +13,7 @@ import {
   checkScreenSplit,
   checkServerState,
 } from "./lib/ui-structure.mjs";
-import { checkLogoutClearsWebview, checkUiInvariants, readUiSource } from "./lib/ui-invariants.mjs";
+import { checkLogoutClearsWebview, checkUiInvariants, readRustSource, readUiSource } from "./lib/ui-invariants.mjs";
 
 const problems = [
   ...checkScreenSplit((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
@@ -31,7 +31,7 @@ const problems = [
   ),
   ...checkAppComposition((path) => (existsSync(path) ? readFileSync(path, "utf8") : null)),
   ...checkUiInvariants(readUiSource()),
-  ...checkLogoutClearsWebview(readFileSync("src-tauri/src/lib.rs", "utf8")),
+  ...checkLogoutClearsWebview(readRustSource()),
 ];
 if (problems.length > 0) {
   for (const problem of problems) console.error(`ui invariants: ${problem}`);

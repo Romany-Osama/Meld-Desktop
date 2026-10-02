@@ -63,13 +63,13 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] U4-013 (P0) Centralize notifications — src/app/notifications.ts + NoticeStack (D-034); notifications.test.ts, featureModules.test.tsx, App.test.tsx (error with Retry)
 - [x] U4-014 (P0) Add an error boundary per major route and player — src/components/ErrorBoundary.tsx + PlayerAudio (D-036); ErrorBoundary.test.tsx, App.test.tsx (broken album page), checks.test.mjs (error boundaries)
 - [x] U4-015 (P0) Use stable domain IDs plus occurrence IDs — src/lib/identity.ts + occurrence-keyed selection (D-037); identity.test.ts, featureModules.test.tsx (duplicate selection), screens.test.tsx (PlaylistScreen), checks.test.mjs (occurrence keys)
-- [ ] TR-M1 (P1) Monolithic frontend and backend — partial: App.tsx dialogs moved to features + size cap (D-038, checks.test.mjs app composition); backend split pending (S5-003)
+- [ ] TR-M1 (P1) Monolithic frontend and backend — partial: App.tsx dialogs moved to features + size cap (D-038, checks.test.mjs app composition); commands split into ipc/ modules (S5-003, D-040); helpers still in lib.rs
 
 ## Phase 1 · M1.2 Typed IPC and capability model
 
 - [x] S5-001 (P0) Inventory every Tauri command with an owner, caller, and risk class — scripts/lib/ipc-inventory.mjs + docs/ipc-commands.md (D-039); checks.test.mjs (ipc inventory), npm run check:security
 - [x] S5-002 (P0) Remove or gate unused commands — none unused (104/104 called); check:security fails on a command without a caller (D-039); checks.test.mjs (ipc inventory)
-- [ ] S5-003 (P0) Split commands into Rust modules by domain
+- [x] S5-003 (P0) Split commands into Rust modules by domain — src-tauri/src/ipc/<owner>.rs, one path-qualified generate_handler! (D-040); cargo test (every_song_delete_protects_downloaded_songs scans ipc/), checks.test.mjs (command modules)
 - [ ] S5-004 (P0) Adopt Tauri v2 app-command permissions
 - [ ] S5-005 (P0) Keep remote login windows IPC-less — and test it
 - [ ] S5-006 (P0) Typed, validated IPC payloads

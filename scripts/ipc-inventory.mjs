@@ -3,7 +3,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { registeredCommands } from "./lib/ui-invariants.mjs";
-import { callersOf, checkIpcInventory, renderInventory } from "./lib/ipc-inventory.mjs";
+import { callersOf, checkCommandModules, checkIpcInventory, renderInventory } from "./lib/ipc-inventory.mjs";
 
 export const INVENTORY_DOC = "docs/ipc-commands.md";
 
@@ -16,10 +16,11 @@ export function frontendFiles(root = "src") {
 }
 
 export function inventoryState() {
-  const registered = registeredCommands(readFileSync("src-tauri/src/lib.rs", "utf8"));
+  const lib = readFileSync("src-tauri/src/lib.rs", "utf8");
+  const registered = registeredCommands(lib);
   const files = frontendFiles();
   const doc = renderInventory(registered, files) + "\n";
-  const problems = checkIpcInventory(registered);
+  const problems = [...checkIpcInventory(registered), ...checkCommandModules(lib)];
   // S5-002: a command nothing calls is attack surface only; unregister it or gate it behind a debug feature.
   for (const command of registered)
     if (callersOf(command, files).length === 0)
