@@ -4,11 +4,16 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 
 ## [Unreleased]
 
+### Added
+- Settings → Storage → Playback cache: current size, a size limit and a Clear playback cache button.
+
 ### Fixed
 - **Offline downloads failed with "audio cache response failed: HTTP status client error (403 Forbidden)".** YouTube's media servers now serve only the first ~1 MB of stream links from the ANDROID_VR 1.65 client (the first one Meld tries) and refuse the rest. Playing could start and recover; downloading the whole file could not. Meld now checks every new stream link by reading a small piece past the first megabyte. A refused link is skipped straight away for another YouTube source, and that source is tried last for the next 30 minutes.
 - Downloads send range requests the way the player does. If a link is refused during a download, Meld picks another source and continues from the bytes it already has (up to two retries). A partial file that no longer matches is restarted cleanly.
 - A download or cache file that was cut short is no longer saved as complete. The partial file is kept, and the next try resumes from it.
 - Download and cache errors no longer include the signed stream URL.
+- The playback cache no longer grows without limit. Settings → Storage shows how much space it uses and lets you pick a limit (Off, 512 MB to 20 GB; default 2 GB). The songs played longest ago are removed first, and offline downloads are never touched. Half-written files left by a crash are cleaned up at start-up, except downloads that can still resume.
+- Skipping quickly through songs no longer starts a full background download for every song. At most two background cache jobs exist at once. Skipping stops the previous song's job within a quarter of a second, and closing the app stops them all and removes their half-written files.
 
 ## [0.3.0] — Playback and search fixes, stronger YouTube fallbacks
 

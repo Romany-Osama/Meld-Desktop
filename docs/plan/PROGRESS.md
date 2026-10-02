@@ -463,10 +463,10 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 
 ## Phase 4 · M4.3 One-stream cache/download engine
 
-- [ ] PLAY-041 (P0) No cache quota or eviction
-- [ ] PLAY-042 (P0) Unlimited concurrent player-cache jobs
+- [x] PLAY-041 (P0) No cache quota or eviction — player_cache::tests::cache_stress_never_exceeds_quota_after_commit, tests::player_cache_quota_evicts_oldest_files_and_never_downloads; Settings → Storage shows usage and limit
+- [x] PLAY-042 (P0) Unlimited concurrent player-cache jobs — player_cache::tests::rapid_skipping_never_runs_more_than_two_fills, cancelled_fill_releases_socket_and_file_promptly
 - [ ] PLAY-028 (P1) Playback and cache download the same song twice
-- [ ] PLAY-043 (P1) Player-cache jobs survive skip/close
+- [x] PLAY-043 (P1) Player-cache jobs survive skip/close — player_cache::tests::cancelled_fill_releases_socket_and_file_promptly, stalled_fill_gives_up_after_the_idle_limit; exit handler cancels fills and removes `.part` files
 - [ ] PLAY-044 (P1) No final byte-count validation — partial: downloads and player cache reject transfers shorter than the announced length (`transfer_complete`); unknown-length container probe pending
 - [ ] PLAY-045 (P1) No content-type/container validation
 - [ ] PLAY-046 (P1) Redirect targets are not revalidated
@@ -481,10 +481,10 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [ ] PLAY-057 (P1) SQLite background writers lack a concurrency policy
 - [ ] PLAY-058 (P1) Player-cache errors are silent
 - [ ] R6-022 (P1) Correct the cached MIME type
-- [ ] R6-023 (P1) Cap player cache size
+- [x] R6-023 (P1) Cap player cache size — LRU limit (Off/512 MB…20 GB, default 2 GB), enforced after each fill, on limit change and at start-up
 - [ ] R6-024 (P1) Avoid double downloads
 - [ ] R6-025 (P1) Validate cache completeness
-- [ ] R6-026 (P1) Clean orphaned `.part` files at startup
+- [x] R6-026 (P1) Clean orphaned `.part` files at startup — tests::startup_cleanup_removes_orphans_but_keeps_downloads_and_resumable_parts
 - [ ] R6-027 (P1) Download queue with concurrency limits
 - [ ] R6-028 (P1) Gapless and crossfade timing tests
 - [ ] R6-029 (P1) Audio device change recovery

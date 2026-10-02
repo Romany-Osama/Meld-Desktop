@@ -39,6 +39,7 @@ const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 const VISITOR_PREFIX: &str = "Cg";
 
+mod player_cache;
 mod resolver;
 mod secrets;
 mod updates;
@@ -210,7 +211,7 @@ const SCHEMA_SQL: &str = "PRAGMA foreign_keys = ON;
 static HTTP: OnceLock<Client> = OnceLock::new();
 static MUSIXMATCH_TOKEN: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static DOWNLOAD_CANCELS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
-static PLAYER_CACHE_ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static PLAYER_CACHE_JOBS: OnceLock<Mutex<player_cache::CacheJobs>> = OnceLock::new();
 static PLAYER_CACHE_BLOCKED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn build_http_client(connect: Duration, request: Duration) -> Client {
@@ -2209,12 +2210,6 @@ fn download_retry(status: reqwest::StatusCode, offset: i64) -> DownloadRetry {
     }
 }
 
-/// A transfer is complete only when it delivered every byte the server announced (PLAY-044, partial:
-/// lengths the server does not announce are not validated yet).
-fn transfer_complete(bytes: i64, expected: Option<i64>) -> bool {
-    bytes > 0 && expected.is_none_or(|expected| bytes == expected)
-}
-
 fn can_resume_partial_download(existing_bytes: i64, status: reqwest::StatusCode) -> bool {
     existing_bytes > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT
 }
@@ -2268,8 +2263,8 @@ async fn cache_download_artwork(song_id: &str, source_url: Option<&str>) -> Opti
     Some(path.to_string_lossy().to_string())
 }
 
-fn player_cache_active() -> &'static Mutex<HashSet<String>> {
-    PLAYER_CACHE_ACTIVE.get_or_init(|| Mutex::new(HashSet::new()))
+fn player_cache_jobs() -> &'static Mutex<player_cache::CacheJobs> {
+    PLAYER_CACHE_JOBS.get_or_init(|| Mutex::new(player_cache::CacheJobs::default()))
 }
 
 fn player_cache_blocked() -> &'static Mutex<HashSet<String>> {
@@ -2358,6 +2353,205 @@ fn download_cancel(song_id: String) -> Result<(), String> {
     }
 }
 
+fn player_cache_limit_mb(db: &Connection) -> i64 {
+    let stored: Option<String> = db
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'playerCacheLimitMb'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    player_cache::parse_limit_mb(stored.as_deref())
+}
+
+/// Deletes least-recently-used playback-cache files until the cache fits the user's limit (PLAY-041).
+/// A file Windows will not delete (for example the one playing right now) keeps its row and is retried
+/// next time. Returns the number of entries removed.
+fn enforce_player_cache_quota(db: &Connection) -> Result<usize, String> {
+    let quota = player_cache::limit_bytes(player_cache_limit_mb(db));
+    let mut statement = db
+        .prepare("SELECT song_id, path, bytes, cached_at FROM player_cache")
+        .map_err(|error| format!("player cache quota query failed: {error}"))?;
+    let rows: Vec<(player_cache::CacheEntry, String)> = statement
+        .query_map([], |row| {
+            Ok((
+                player_cache::CacheEntry {
+                    song_id: row.get(0)?,
+                    bytes: row.get(2)?,
+                    used_at: row.get(3)?,
+                },
+                row.get::<_, String>(1)?,
+            ))
+        })
+        .map_err(|error| format!("player cache quota query failed: {error}"))?
+        .filter_map(Result::ok)
+        .collect();
+    drop(statement);
+    let entries: Vec<player_cache::CacheEntry> =
+        rows.iter().map(|(entry, _)| entry.clone()).collect();
+    let mut removed = 0;
+    for song_id in player_cache::plan_eviction(&entries, quota) {
+        let Some((_, path)) = rows.iter().find(|(entry, _)| entry.song_id == song_id) else {
+            continue;
+        };
+        let gone = match fs::remove_file(path) {
+            Ok(()) => true,
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+        };
+        if gone {
+            db.execute(
+                "DELETE FROM player_cache WHERE song_id = ?1",
+                params![song_id],
+            )
+            .map_err(|error| format!("player cache eviction failed: {error}"))?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn files_in(directory: &Path) -> Vec<PathBuf> {
+    fs::read_dir(directory)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Start-up housekeeping (R6-026): drop rows whose cache file vanished, delete abandoned `.part` files and
+/// unreferenced playback-cache files, then apply the cache limit. Finished offline downloads are never
+/// deleted here; only `.part` files that no download can resume.
+fn clean_media_on_startup(db: &Connection) -> Result<(usize, usize), String> {
+    let cache_dir = player_cache_path("probe").parent().map(Path::to_path_buf);
+    let download_dir = download_cache_path("probe").parent().map(Path::to_path_buf);
+    clean_media_dirs(db, cache_dir.as_deref(), download_dir.as_deref())
+}
+
+fn clean_media_dirs(
+    db: &Connection,
+    cache_dir: Option<&Path>,
+    download_dir: Option<&Path>,
+) -> Result<(usize, usize), String> {
+    let cache_rows: Vec<(String, String)> = db
+        .prepare("SELECT song_id, path FROM player_cache")
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect()
+        })
+        .map_err(|error| format!("player cache cleanup query failed: {error}"))?;
+    for (song_id, path) in &cache_rows {
+        if !Path::new(path).is_file() {
+            db.execute(
+                "DELETE FROM player_cache WHERE song_id = ?1",
+                params![song_id],
+            )
+            .map_err(|error| format!("player cache cleanup failed: {error}"))?;
+        }
+    }
+    let known: HashSet<PathBuf> = cache_rows
+        .iter()
+        .map(|(_, path)| PathBuf::from(path))
+        .collect();
+    let resumable: HashSet<PathBuf> = db
+        .prepare("SELECT path FROM downloads WHERE state != 'completed'")
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .map_err(|error| format!("download cleanup query failed: {error}"))?
+        .into_iter()
+        .map(|path| PathBuf::from(format!("{path}.part")))
+        .collect();
+    let mut candidates = cache_dir.map(files_in).unwrap_or_default();
+    candidates.extend(
+        download_dir
+            .map(files_in)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|path| path.extension().is_some_and(|ext| ext == "part")),
+    );
+    let mut deleted = 0;
+    for file in player_cache::orphaned_files(&candidates, &known, &resumable) {
+        if fs::remove_file(&file).is_ok() {
+            deleted += 1;
+        }
+    }
+    let evicted = enforce_player_cache_quota(db)?;
+    Ok((deleted, evicted))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayerCacheUsage {
+    bytes: i64,
+    songs: i64,
+    limit_mb: i64,
+}
+
+#[tauri::command]
+fn player_cache_usage(state: tauri::State<'_, RuntimeState>) -> Result<PlayerCacheUsage, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database state poisoned".to_owned())?;
+    let (bytes, songs) = db
+        .query_row(
+            "SELECT COALESCE(SUM(bytes), 0), COUNT(*) FROM player_cache",
+            [],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .map_err(|error| format!("player cache usage failed: {error}"))?;
+    Ok(PlayerCacheUsage {
+        bytes,
+        songs,
+        limit_mb: player_cache_limit_mb(&db),
+    })
+}
+
+/// Empties the playback cache. Offline downloads are not touched.
+#[tauri::command]
+fn player_cache_clear(state: tauri::State<'_, RuntimeState>) -> Result<usize, String> {
+    if let Ok(jobs) = player_cache_jobs().lock() {
+        jobs.cancel_all();
+    }
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database state poisoned".to_owned())?;
+    let paths: Vec<(String, String)> = db
+        .prepare("SELECT song_id, path FROM player_cache")
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect()
+        })
+        .map_err(|error| format!("player cache read failed: {error}"))?;
+    let mut removed = 0;
+    for (song_id, path) in paths {
+        let gone = match fs::remove_file(&path) {
+            Ok(()) => true,
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+        };
+        if gone {
+            db.execute(
+                "DELETE FROM player_cache WHERE song_id = ?1",
+                params![song_id],
+            )
+            .map_err(|error| format!("player cache removal failed: {error}"))?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 #[tauri::command]
 fn library_player_cache(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, String> {
     let db = state
@@ -2416,6 +2610,9 @@ fn player_cache_remove(
     let id = song_id.trim();
     if id.is_empty() {
         return Err("player cache song id is empty".to_owned());
+    }
+    if let Ok(jobs) = player_cache_jobs().lock() {
+        jobs.cancel(id);
     }
     player_cache_blocked()
         .lock()
@@ -2604,7 +2801,7 @@ async fn download_start(
         }
         file.flush().await.map_err(|error| format!("download cache flush failed: {error}"))?;
         drop(file);
-        if !transfer_complete(bytes, total_bytes) {
+        if !player_cache::transfer_complete(bytes, total_bytes) {
             // The partial file is kept so the next attempt resumes from it.
             return Err(format!("download incomplete: received {bytes} of {} bytes", total_bytes.unwrap_or(0)));
         }
@@ -2672,22 +2869,31 @@ async fn ytm_player(
         .lock()
         .map_err(|_| "player cache state poisoned".to_owned())?
         .remove(&id);
-    let cached = {
+    let (cached, cache_limit_mb) = {
         let db = state
             .db
             .lock()
             .map_err(|_| "database state poisoned".to_owned())?;
-        db.query_row(
-            "SELECT path, bytes FROM player_cache WHERE song_id = ?1 AND quality = ?2",
-            params![id, requested_quality],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-        )
-        .optional()
-        .map_err(|error| format!("player cache state read failed: {error}"))?
+        let cached = db
+            .query_row(
+                "SELECT path, bytes FROM player_cache WHERE song_id = ?1 AND quality = ?2",
+                params![id, requested_quality],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .map_err(|error| format!("player cache state read failed: {error}"))?;
+        (cached, player_cache_limit_mb(&db))
     };
     if let Some((path, _bytes)) =
         cached.filter(|(path, bytes)| *bytes > 0 && Path::new(path).is_file())
     {
+        // Playing from the cache counts as a use for least-recently-used eviction.
+        if let Ok(db) = state.db.lock() {
+            let _ = db.execute(
+                "UPDATE player_cache SET cached_at = ?1 WHERE song_id = ?2",
+                params![now_seconds(), id],
+            );
+        }
         return Ok(PlayerPayload {
             video_id: id,
             title: None,
@@ -2705,41 +2911,33 @@ async fn ytm_player(
     let cache_url = payload.stream_url.clone();
     let cache_id = id.clone();
     let cache_path = player_cache_path(&cache_id);
-    let should_start = {
-        let mut active = player_cache_active()
+    let started = if cache_limit_mb == 0 {
+        // The user turned the playback cache off.
+        player_cache::Start::Busy
+    } else {
+        player_cache_jobs()
             .lock()
-            .map_err(|_| "player cache state poisoned".to_owned())?;
-        active.insert(cache_id.clone())
+            .map_err(|_| "player cache state poisoned".to_owned())?
+            .start(&cache_id)
     };
-    if should_start {
+    if let player_cache::Start::Started(cancel) = started {
         tokio::spawn(async move {
+            let part_path = PathBuf::from(format!("{}.part", cache_path.to_string_lossy()));
             let result: Result<(), String> = async {
-                if let Some(parent) = cache_path.parent() { tokio::fs::create_dir_all(parent).await.map_err(|error| format!("player cache directory failed: {error}"))?; }
-                let response = http().get(&cache_url).timeout(TRANSFER_TIMEOUT).header(RANGE, "bytes=0-").send().await.map_err(|error| format!("player cache request failed: {}", error.without_url()))?.error_for_status().map_err(|error| format!("player cache response failed: {}", error.without_url()))?;
-                let mut file = tokio::fs::File::create(format!("{}.part", cache_path.to_string_lossy())).await.map_err(|error| format!("player cache file failed: {error}"))?;
-                let expected = response.content_length().map(|value| value as i64);
-                let mut stream = response.bytes_stream();
-                let mut bytes = 0_i64;
-                while let Some(chunk) = next_chunk_within(&mut stream, STALL_TIMEOUT, "player cache").await? {
-                    let chunk = chunk.map_err(|error| format!("player cache stream failed: {error}"))?;
-                    file.write_all(&chunk).await.map_err(|error| format!("player cache write failed: {error}"))?;
-                    bytes += chunk.len() as i64;
-                }
-                file.flush().await.map_err(|error| format!("player cache flush failed: {error}"))?;
-                drop(file);
-                if !transfer_complete(bytes, expected) { return Err(format!("player cache incomplete: {bytes} bytes")); }
+                let bytes = player_cache::fill(http(), &cache_url, &part_path, &cancel, STALL_TIMEOUT, TRANSFER_TIMEOUT).await?;
                 if player_cache_is_blocked(&cache_id) { return Err("player cache was removed".to_owned()); }
-                fs::rename(format!("{}.part", cache_path.to_string_lossy()), &cache_path).map_err(|error| format!("player cache finalize failed: {error}"))?;
+                fs::rename(&part_path, &cache_path).map_err(|error| format!("player cache finalize failed: {error}"))?;
                 if player_cache_is_blocked(&cache_id) { let _ = fs::remove_file(&cache_path); return Err("player cache was removed".to_owned()); }
                 let db = Connection::open(database_path()).map_err(|error| format!("player cache database open failed: {error}"))?;
                 db.execute("INSERT INTO player_cache (song_id, path, bytes, cached_at, quality) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(song_id) DO UPDATE SET path=excluded.path, bytes=excluded.bytes, cached_at=excluded.cached_at, quality=excluded.quality", params![cache_id, cache_path.to_string_lossy().to_string(), bytes, now_seconds(), requested_quality]).map_err(|error| format!("player cache state write failed: {error}"))?;
+                enforce_player_cache_quota(&db)?;
                 Ok(())
             }.await;
             if result.is_err() {
-                let _ = fs::remove_file(format!("{}.part", cache_path.to_string_lossy()));
+                let _ = fs::remove_file(&part_path);
             }
-            if let Ok(mut active) = player_cache_active().lock() {
-                active.remove(&cache_id);
+            if let Ok(mut jobs) = player_cache_jobs().lock() {
+                jobs.finish(&cache_id);
             }
         });
     }
@@ -8443,7 +8641,8 @@ fn history_items(state: tauri::State<'_, RuntimeState>) -> Result<Vec<YtItem>, S
 fn allowed_setting(key: &str) -> bool {
     matches!(
         key,
-        "ytmSync"
+        "playerCacheLimitMb"
+            | "ytmSync"
             | "useLoginForBrowse"
             | "hideExplicit"
             | "hideVideoSongs"
@@ -8769,7 +8968,7 @@ fn backup_restore(state: tauri::State<'_, RuntimeState>) -> Result<String, Strin
 #[tauri::command]
 fn settings_get(state: tauri::State<'_, RuntimeState>) -> Result<Vec<SettingEntry>, String> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
-    let mut statement = db.prepare("SELECT key, value FROM settings WHERE key IN ('ytmSync', 'useLoginForBrowse', 'hideExplicit', 'hideVideoSongs', 'enableBetterLyrics', 'enablePaxsenix', 'enableLrclib', 'enableKugou', 'enableLyricsPlus', 'enableMusixmatch', 'shuffleMode', 'repeatMode', 'similarContent', 'autoLoadMore', 'disableLoadMoreWhenRepeatAll', 'autoDownloadOnLike', 'autoSkipNextOnError', 'persistentShuffleAcrossQueues', 'rememberShuffleAndRepeat', 'shufflePlaylistFirst', 'preventDuplicateTracksInQueue', 'varispeed', 'seekExtraSeconds', 'audioQuality', 'playerVolume', 'equalizerEnabled', 'equalizerLow', 'equalizerMid', 'equalizerHigh', 'pauseOnMute', 'persistentQueue', 'pauseListenHistory', 'pauseSearchHistory', 'sleepTimerDefault', 'sidebarCollapsed', 'lyricsProviderOrder', 'show_liked_playlist', 'show_downloaded_playlist', 'show_uploaded_playlist', 'show_top_playlist', 'show_cached_playlist') ORDER BY key").map_err(|e| format!("settings read failed: {e}"))?;
+    let mut statement = db.prepare("SELECT key, value FROM settings WHERE key IN ('ytmSync', 'useLoginForBrowse', 'hideExplicit', 'hideVideoSongs', 'enableBetterLyrics', 'enablePaxsenix', 'enableLrclib', 'enableKugou', 'enableLyricsPlus', 'enableMusixmatch', 'shuffleMode', 'repeatMode', 'similarContent', 'autoLoadMore', 'disableLoadMoreWhenRepeatAll', 'autoDownloadOnLike', 'autoSkipNextOnError', 'persistentShuffleAcrossQueues', 'rememberShuffleAndRepeat', 'shufflePlaylistFirst', 'preventDuplicateTracksInQueue', 'varispeed', 'seekExtraSeconds', 'audioQuality', 'playerVolume', 'equalizerEnabled', 'equalizerLow', 'equalizerMid', 'equalizerHigh', 'pauseOnMute', 'persistentQueue', 'pauseListenHistory', 'pauseSearchHistory', 'sleepTimerDefault', 'sidebarCollapsed', 'lyricsProviderOrder', 'show_liked_playlist', 'show_downloaded_playlist', 'show_uploaded_playlist', 'show_top_playlist', 'show_cached_playlist', 'playerCacheLimitMb') ORDER BY key").map_err(|e| format!("settings read failed: {e}"))?;
     let rows = statement
         .query_map([], |row| {
             Ok(SettingEntry {
@@ -8794,6 +8993,14 @@ fn settings_set(
     if key == "repeatMode" {
         if !matches!(value.as_str(), "0" | "1" | "2") {
             return Err("Meld repeatMode must be 0 (off), 1 (one), or 2 (all)".to_owned());
+        }
+    } else if key == "playerCacheLimitMb" {
+        let limit = value.trim().parse::<i64>().ok();
+        if !limit.is_some_and(|limit| player_cache::LIMIT_CHOICES_MB.contains(&limit)) {
+            return Err(
+                "playerCacheLimitMb must be one of 0, 512, 1024, 2048, 5120, 10240, 20480"
+                    .to_owned(),
+            );
         }
     } else if key == "audioQuality" {
         if !matches!(value.as_str(), "auto" | "high" | "low") {
@@ -8846,6 +9053,14 @@ fn settings_set(
     }
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key, value]).map_err(|e| format!("settings write failed: {e}"))?;
+    if key == "playerCacheLimitMb" {
+        if value.trim() == "0" {
+            if let Ok(jobs) = player_cache_jobs().lock() {
+                jobs.cancel_all();
+            }
+        }
+        enforce_player_cache_quota(&db)?;
+    }
     Ok(())
 }
 
@@ -9793,11 +10008,30 @@ pub fn run() {
                 let _ = scope.allow_directory(&directory, true);
             }
             prewarm_player_js();
+            std::thread::spawn(|| {
+                if let Ok(db) = Connection::open(database_path()) {
+                    let _ = clean_media_on_startup(&db);
+                }
+            });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![updates::app_update_check, updates::app_update_install, updates::app_open_releases_page, ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, ytm_podcast_channels, library_saved_podcasts, ytm_refresh_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_browse, ytm_browse_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, ytm_report_stream_failure, ytm_playback_report, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, fetch_lyrics, fetch_lyrics_fresh, fetch_lyrics_from_provider, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, library_artist_state, library_toggle_artist_bookmarked, speed_dial_toggle, speed_dial_items, open_google_login, account_refresh_profile, account_logout, clear_local_library_keep_downloads, session_status, open_spotify_login, spotify_session_status, spotify_logout])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .invoke_handler(tauri::generate_handler![updates::app_update_check, updates::app_update_install, updates::app_open_releases_page, ytm_history, ytm_remove_from_history, spotify_profile, spotify_library_node, spotify_playlists, spotify_playlist_tracks, spotify_remove_from_playlist, spotify_move_in_playlist, spotify_rename_playlist, spotify_liked_tracks, spotify_match_for_youtube, spotify_override_youtube, spotify_resolve_youtube, spotify_add_to_playlist, ytm_delete_uploaded_song, ytm_refetch, ytm_toggle_episode_saved, local_files_pick, library_local_files, library_downloads, library_player_cache, ytm_toggle_podcast_saved, download_start, download_info, download_cancel, download_remove, player_cache_remove, player_cache_usage, player_cache_clear, ytm_podcast_channels, library_saved_podcasts, ytm_refresh_saved_podcasts, library_downloaded_podcasts, library_albums, library_artists, ytm_home, ytm_home_continuation, ytm_search, ytm_search_continuation, sync_youtube_library, ytm_add_to_playlist, ytm_remove_from_playlist, ytm_create_playlist, ytm_playlist, ytm_playlist_continuation, ytm_browse, ytm_browse_continuation, ytm_detail, ytm_detail_continuation, ytm_podcast_cache_detail_page, ytm_next, ytm_related, ytm_queue_continuation, ytm_player, ytm_report_stream_failure, ytm_playback_report, history_add, history_record_playtime, history_items, history_clear, library_top_songs, library_stats, search_history_add, search_history_items, search_history_clear, ytm_toggle_like, fetch_lyrics, fetch_lyrics_fresh, fetch_lyrics_from_provider, library_toggle_liked, library_edit_item, library_refetch_item, ytm_toggle_library, settings_get, settings_set, backup_create, backup_restore, library_save_item, library_remove_item, library_songs, library_mix_songs, library_liked_songs, library_uploaded_songs, library_playlists, library_create_playlist, library_add_to_playlist, library_remove_from_playlist, library_playlist_songs, library_item_state, library_artist_state, library_toggle_artist_bookmarked, speed_dial_toggle, speed_dial_items, open_google_login, account_refresh_profile, account_logout, clear_local_library_keep_downloads, session_status, open_spotify_login, spotify_session_status, spotify_logout])
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Closing the app abandons every background cache fill (PLAY-043): stop them and remove
+                // their half-written files instead of leaving `.part` files behind.
+                if let Ok(jobs) = player_cache_jobs().lock() {
+                    for song_id in jobs.cancel_all() {
+                        let _ = fs::remove_file(format!(
+                            "{}.part",
+                            player_cache_path(&song_id).to_string_lossy()
+                        ));
+                    }
+                }
+            }
+        });
 }
 
 #[cfg(test)]
@@ -10006,13 +10240,120 @@ mod tests {
         assert!(!can_resume_partial_download(1024, reqwest::StatusCode::OK));
     }
 
+    fn cache_test_db() -> Connection {
+        let store = MemKeyStore(Mutex::new(None));
+        let db = Connection::open_in_memory().expect("db");
+        initialize_database(&db, &store).expect("schema");
+        db
+    }
+
+    fn write_file(path: &Path, bytes: usize) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, vec![1_u8; bytes]).unwrap();
+    }
+
     #[test]
-    fn truncated_transfers_never_count_as_complete() {
-        assert!(transfer_complete(4_001_721, Some(4_001_721)));
-        assert!(!transfer_complete(1_048_576, Some(4_001_721)));
-        assert!(!transfer_complete(0, None));
-        assert!(!transfer_complete(0, Some(0)));
-        assert!(transfer_complete(512, None));
+    fn player_cache_quota_evicts_oldest_files_and_never_downloads() {
+        let root = std::env::temp_dir().join(format!("meld-quota-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let db = cache_test_db();
+        db.execute(
+            "INSERT INTO settings (key, value) VALUES ('playerCacheLimitMb', '512')",
+            [],
+        )
+        .unwrap();
+        // Three 200 MB rows (files are tiny; the row byte counts drive the quota) in a 512 MB cache.
+        for (index, used_at) in [(0, 300), (1, 100), (2, 200)] {
+            let path = root.join(format!("cache/{index}.audio"));
+            write_file(&path, 16);
+            db.execute(
+                "INSERT INTO player_cache (song_id, path, bytes, cached_at, quality) VALUES (?1, ?2, ?3, ?4, 'auto')",
+                params![format!("song-{index}"), path.to_string_lossy().to_string(), 200 * 1024 * 1024, used_at],
+            )
+            .unwrap();
+        }
+        let download = root.join("downloads/d.audio");
+        write_file(&download, 16);
+        db.execute(
+            "INSERT INTO downloads (song_id, path, bytes, total_bytes, state, downloaded_at) VALUES ('song-1', ?1, 999999999, 999999999, 'completed', 1)",
+            params![download.to_string_lossy().to_string()],
+        )
+        .unwrap();
+        assert_eq!(enforce_player_cache_quota(&db).unwrap(), 1);
+        let left: Vec<String> = db
+            .prepare("SELECT song_id FROM player_cache ORDER BY song_id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, vec!["song-0".to_owned(), "song-2".to_owned()]);
+        assert!(!root.join("cache/1.audio").exists());
+        assert!(download.exists(), "offline downloads are never evicted");
+        // Turning the cache off empties it.
+        db.execute(
+            "UPDATE settings SET value = '0' WHERE key = 'playerCacheLimitMb'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(enforce_player_cache_quota(&db).unwrap(), 2);
+        assert!(download.exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn startup_cleanup_removes_orphans_but_keeps_downloads_and_resumable_parts() {
+        let root = std::env::temp_dir().join(format!("meld-cleanup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let cache = root.join("player-cache");
+        let downloads = root.join("downloads");
+        let db = cache_test_db();
+        let kept = cache.join("kept.audio");
+        write_file(&kept, 8);
+        write_file(&cache.join("orphan.audio"), 8);
+        write_file(&cache.join("abandoned.audio.part"), 8);
+        db.execute(
+            "INSERT INTO player_cache (song_id, path, bytes, cached_at, quality) VALUES ('kept', ?1, 8, 1, 'auto'), ('vanished', ?2, 8, 1, 'auto')",
+            params![kept.to_string_lossy().to_string(), cache.join("vanished.audio").to_string_lossy().to_string()],
+        )
+        .unwrap();
+        let finished = downloads.join("finished.audio");
+        let unknown_finished = downloads.join("not-in-db.audio");
+        let resumable = downloads.join("resume.audio");
+        write_file(&finished, 8);
+        write_file(&unknown_finished, 8);
+        write_file(&downloads.join("resume.audio.part"), 8);
+        write_file(&downloads.join("stale.audio.part"), 8);
+        db.execute(
+            "INSERT INTO downloads (song_id, path, bytes, state, downloaded_at) VALUES ('f', ?1, 8, 'completed', 1), ('r', ?2, 8, 'failed', 1)",
+            params![finished.to_string_lossy().to_string(), resumable.to_string_lossy().to_string()],
+        )
+        .unwrap();
+        let (deleted, _) = clean_media_dirs(&db, Some(&cache), Some(&downloads)).unwrap();
+        assert_eq!(deleted, 3);
+        assert!(kept.exists());
+        assert!(!cache.join("orphan.audio").exists());
+        assert!(!cache.join("abandoned.audio.part").exists());
+        assert!(
+            finished.exists() && unknown_finished.exists(),
+            "finished downloads are never deleted"
+        );
+        assert!(downloads.join("resume.audio.part").exists());
+        assert!(!downloads.join("stale.audio.part").exists());
+        let vanished: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM player_cache WHERE song_id = 'vanished'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(vanished, 0);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn player_cache_limit_setting_is_validated() {
+        assert!(allowed_setting("playerCacheLimitMb"));
     }
 
     #[test]
