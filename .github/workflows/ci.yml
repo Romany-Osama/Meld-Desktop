@@ -45,6 +45,13 @@ jobs:
           npm run check:versions
           npm run check:security
           npm run check:ui
+          npm run check:tooling
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier
+        run: npm run format:check
 
       - name: Script tests
         run: npm run test:scripts

@@ -4,6 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { checkVersions, cargoPackageVersion, cargoLockVersion, readRepo } from "../lib/versions.mjs";
 import { checkSecurityConfig, checkBundleConfig, checkTrackedFiles, ALLOWED_ASSET_SCOPE } from "../lib/security-config.mjs";
 import { checkUiInvariants, checkLogoutClearsWebview, registeredCommands, RESTORED_UI_COMMANDS } from "../lib/ui-invariants.mjs";
+import { checkTooling, crlfIndexEntries } from "../lib/tooling.mjs";
 
 const goodRepo = () => ({
   packageJson: { version: "0.2.0" },
@@ -103,4 +104,38 @@ test("security: asset scope points at the real data folder, not Tauri's identifi
   assert.ok(ALLOWED_ASSET_SCOPE.every((entry) => entry.startsWith("$DATA/Meld Desktop/")));
   const legacy = checkSecurityConfig(conf({ ...goodSecurity, assetProtocol: { enable: true, scope: ["$APPDATA/Meld Desktop/player-cache/**"] } }));
   assert.ok(legacy.some((problem) => problem.includes("asset protocol scope")));
+});
+
+test("tooling: lint, format and line-ending rules are configured and run in CI (TR-L9)", () => {
+  const good = {
+    packageJson: { scripts: { lint: "eslint . --max-warnings 0", "format:check": "prettier --check ." } },
+    ciYml: "run: npm run lint\nrun: npm run format:check\nrun: cargo fmt --all -- --check\n",
+    gitattributes: "* text=auto eol=lf\n*.ps1   text eol=crlf\n",
+  };
+  assert.deepEqual(checkTooling(good), []);
+  assert.equal(checkTooling({ ...good, packageJson: { scripts: { lint: "eslint ." } } }).length, 1);
+  assert.equal(checkTooling({ ...good, ciYml: "run: npm run lint\nrun: cargo fmt --all -- --check\n" }).length, 1);
+  assert.equal(checkTooling({ ...good, gitattributes: "* text=auto\n" }).length, 2);
+});
+
+test("tooling: the real repository passes the tooling check", () => {
+  assert.deepEqual(
+    checkTooling({
+      packageJson: JSON.parse(readFileSync("package.json", "utf8")),
+      ciYml: readFileSync(".github/workflows/ci.yml", "utf8"),
+      gitattributes: readFileSync(".gitattributes", "utf8"),
+    }),
+    [],
+  );
+});
+
+test("tooling: CRLF or mixed committed files are reported, PowerShell scripts are exempt (TR-L9)", () => {
+  const eol = [
+    "i/lf    w/lf    attr/text=auto eol=lf \tsrc/App.tsx",
+    "i/crlf  w/crlf  attr/text=auto eol=lf \tsrc/bad.ts",
+    "i/mixed w/mixed attr/text=auto eol=lf \tdocs/mixed.md",
+    "i/crlf  w/crlf  attr/text eol=crlf    \tscripts/smoke/windows-smoke.ps1",
+    "i/-text w/-text attr/-text            \tsrc-tauri/icons/icon.png",
+  ].join("\n");
+  assert.deepEqual(crlfIndexEntries(eol), ["src/bad.ts", "docs/mixed.md"]);
 });

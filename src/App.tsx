@@ -1951,7 +1951,7 @@ function App() {
   const playQueueIndex = async (index: number) => {
     let items = queueItems;
     let continuation = queueContinuation;
-    let continuationKind = queueContinuationKind ?? "next";
+    const continuationKind = queueContinuationKind ?? "next";
     try {
       while (index >= items.length && continuation && settings.autoLoadMore !== false && !(settings.disableLoadMoreWhenRepeatAll === true && repeatMode === "all")) {
         const previousContinuation = continuation;
