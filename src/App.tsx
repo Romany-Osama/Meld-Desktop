@@ -70,6 +70,7 @@ import {
 import { Layer, LayerState, topmostLayer } from "./app/layers";
 import { LAST_ROUTE_KEY, parseLastRoute, serializeLastRoute } from "./app/lastRoute";
 import { parseLink } from "./app/links";
+import { captureScreenState, ScreenState, screenStateMatches } from "./app/screenState";
 import { useResourceCache } from "./data/useResource";
 import type { DetailRef, PodcastFilter, TopPeriod } from "./data/keys";
 import { useHomeData } from "./features/home/useHomeData";
@@ -400,12 +401,66 @@ function App() {
     setInfoItem(null);
   };
 
-  /** The page being shown, as a history entry (route, selected tab, scroll offset). */
+  // An open album, playlist or Spotify screen scrolls inside its own panel; everything else scrolls the page.
+  const nestedScreenOpen =
+    detailRef !== null || openPlaylist !== null || spotifyOpenPlaylist !== null || spotifyLikedOpen;
+  const scrollElement = (): HTMLElement | null =>
+    nestedScreenOpen ? document.querySelector<HTMLElement>("[data-screen-scroll]") : pageScrollRef.current;
+
+  /** The page being shown, as a history entry (route, selected tab, scroll offset, filters and sorts). */
   const currentEntry = (): HistoryEntry => ({
     route: pageRoute,
     tab: active,
-    scrollTop: pageScrollRef.current?.scrollTop ?? 0,
+    scrollTop: scrollElement()?.scrollTop ?? 0,
+    screen: captureScreenState(pageRoute, {
+      library: {
+        search: librarySearch,
+        sort: librarySort,
+        sortDescending: librarySortDescending,
+        mixSort: libraryMixSort,
+        mixSortDescending: libraryMixSortDescending,
+        view: libraryView,
+        podcastFilter,
+        topPeriod,
+        playlistSearch,
+        playlistSort,
+        playlistSortDescending,
+        playlistView,
+      },
+      history: { query: historyQuery },
+      spotify: { query: spotifyDetailQuery, sort: spotifyDetailSort, descending: spotifyDetailSortDescending },
+    }),
   });
+
+  /** Puts back the filters, sorts and layout a screen had when it was left (U4-010). */
+  const applyScreenState = (screen: ScreenState) => {
+    switch (screen.kind) {
+      case "library": {
+        const state = screen.state;
+        setLibrarySearch(state.search);
+        setLibrarySort(state.sort);
+        setLibrarySortDescending(state.sortDescending);
+        setLibraryMixSort(state.mixSort);
+        setLibraryMixSortDescending(state.mixSortDescending);
+        setLibraryView(state.view);
+        setPodcastFilter(state.podcastFilter);
+        setTopPeriod(state.topPeriod);
+        setPlaylistSearch(state.playlistSearch);
+        setPlaylistSort(state.playlistSort);
+        setPlaylistSortDescending(state.playlistSortDescending);
+        setPlaylistView(state.playlistView);
+        return;
+      }
+      case "history":
+        setHistoryQuery(screen.state.query);
+        return;
+      case "spotify":
+        setSpotifyDetailQuery(screen.state.query);
+        setSpotifyDetailSort(screen.state.sort);
+        setSpotifyDetailSortDescending(screen.state.descending);
+        return;
+    }
+  };
 
   const pushHistory = () => {
     pendingScrollRef.current = null;
@@ -424,6 +479,8 @@ function App() {
 
   const restoreEntry = (entry: HistoryEntry) => {
     pendingScrollRef.current = entry.scrollTop;
+    // In the same update as the route, so the screen loads once, with the filters it was left with.
+    if (screenStateMatches(entry.route, entry.screen)) applyScreenState(entry.screen);
     void showRoute(entry.route, entry.tab);
   };
 
@@ -2189,14 +2246,28 @@ function App() {
     else localStorage.removeItem(LAST_ROUTE_KEY);
   }, [lastRouteValue]);
 
-  useEffect(() => {
+  const restorePendingScroll = useEffectEvent(() => {
     const target = pendingScrollRef.current;
-    const element = pageScrollRef.current;
+    const element = scrollElement();
     if (target === null || !element) return;
     element.scrollTop = target;
     // Pages that load their content keep the target until they are tall enough to reach it.
     if (Math.abs(element.scrollTop - target) < 2) pendingScrollRef.current = null;
-  }, [pageRouteKey, home.status, search.status, library.status, history.status, detail?.status, playlist?.status]);
+  });
+  useEffect(
+    () => restorePendingScroll(),
+    [
+      pageRouteKey,
+      home.status,
+      search.status,
+      library.status,
+      history.status,
+      detail?.status,
+      playlist?.status,
+      spotifyPlaylistTracks.status,
+      spotifyLikedTracks.status,
+    ],
+  );
 
   return (
     <div className={settings.sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>

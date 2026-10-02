@@ -20,7 +20,11 @@ export function SpotifyLikedScreen({
     <>
       {spotifyLikedOpen && (
         <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setSpotifyLikedOpen(false)}>
-          <div className="detail-panel spotify-playlist-panel" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="detail-panel spotify-playlist-panel"
+            data-screen-scroll
+            onClick={(event) => event.stopPropagation()}
+          >
             <button
               className="close-button"
               title="Close"

@@ -57,7 +57,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [x] U4-007 (P0) Add deep-link parsing — src/app/links.ts (D-030); links.test.ts, App.test.tsx (pasted links)
 - [x] U4-008 (P0) Separate server state from view state — src/data/resourceCache.ts + 6 data hooks (D-031); resourceCache.test.ts, checks.test.mjs (server state), App.test.tsx
 - [x] U4-009 (P0) Use request identities and cancellation per screen — request ids + per-screen scopes (D-031); resourceCache.test.ts (superseded/aborted), App.test.tsx (slow page, slow search)
-- [ ] U4-010 (P0) Preserve screen state on back
+- [x] U4-010 (P0) Preserve screen state on back — src/app/screenState.ts + cached pages (D-032); screenState.test.ts, App.test.tsx (cached search, library filter, album scroll, detail without refetch)
 - [ ] U4-011 (P0) Centralize capability checks
 - [ ] U4-012 (P0) Centralize destructive-action policy
 - [ ] U4-013 (P0) Centralize notifications

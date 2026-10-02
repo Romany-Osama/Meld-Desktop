@@ -36,7 +36,7 @@ export function DetailScreen({
     <>
       {detail && (
         <div className="detail-overlay" role="dialog" aria-modal="true">
-          <div className="detail-panel">
+          <div className="detail-panel" data-screen-scroll>
             <button className="close-button" title="Close" aria-label="Close" onClick={closeDetail}>
               ×
             </button>

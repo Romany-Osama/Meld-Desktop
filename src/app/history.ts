@@ -1,12 +1,15 @@
 // U4-004: navigation history holds routes (with their parameters) plus the view state needed to return to them.
 import { Route, sameRoute, TopLevel } from "./routes";
+import type { ScreenState } from "./screenState";
 
 export type HistoryEntry = {
   route: Route;
   /** Sidebar destination that was selected (detail pages open on top of it). */
   tab: TopLevel;
-  /** Scroll offset of the page when it was left. */
+  /** Scroll offset of the page (or the open album/playlist screen) when it was left. */
   scrollTop: number;
+  /** Filters, sorts and layout of the screen when it was left (U4-010). */
+  screen?: ScreenState | null;
 };
 
 export type NavHistory = { back: HistoryEntry[]; forward: HistoryEntry[] };

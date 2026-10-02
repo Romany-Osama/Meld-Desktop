@@ -12,6 +12,7 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 ### Changed
 - Back and Forward return to the page you left, including an album, artist or playlist page, the tab it was opened from and the scroll position.
 - Back and Forward show a search, album, artist or playlist page you visited in the last 10 minutes straight away, as you left it, instead of loading it again.
+- Back and Forward also bring back the Library search text, sort order, grid/list layout, podcast filter and top-songs period, the History search, the filter and sort of a Spotify playlist, and the scroll position inside an album, artist or playlist page.
 - Back and Escape close one layer at a time, topmost first: a dialog, then the menu, Settings, the lyrics, queue or expanded player, then an open page. Escape used to close Settings before a dialog opened from it.
 
 ### Fixed

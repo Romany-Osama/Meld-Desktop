@@ -56,7 +56,11 @@ export function SpotifyPlaylistScreen({
     <>
       {spotifyOpenPlaylist && (
         <div className="detail-overlay" role="dialog" aria-modal="true" onClick={() => setSpotifyOpenPlaylist(null)}>
-          <div className="detail-panel spotify-playlist-panel" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="detail-panel spotify-playlist-panel"
+            data-screen-scroll
+            onClick={(event) => event.stopPropagation()}
+          >
             <button
               className="close-button"
               title="Close"
