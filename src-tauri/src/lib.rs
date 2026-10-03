@@ -50,6 +50,7 @@ pub(crate) use ipc::payload::{
     MAX_LIST_ARGUMENT,
 };
 mod player_cache;
+mod potoken;
 mod resolver;
 mod secrets;
 mod updates;
@@ -1601,6 +1602,7 @@ fn sapisid_hash_for(cookie: &str, origin: &str) -> Option<String> {
     Some(format!("SAPISIDHASH {timestamp}_{digest}"))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn player_request_body(
     video_id: &str,
     playlist_id: Option<&str>,
@@ -1609,6 +1611,7 @@ fn player_request_body(
     signature_timestamp: Option<u32>,
     data_sync_id: Option<&str>,
     cpn: &str,
+    po_token: Option<&str>,
 ) -> Value {
     let mut client_context = json!({
         "clientName": client.name,
@@ -1652,6 +1655,9 @@ fn player_request_body(
     if let Some(sts) = signature_timestamp {
         body["playbackContext"] = json!({ "contentPlaybackContext": { "signatureTimestamp": sts, "html5Preference": "HTML5_PREF_WANTS" } });
     }
+    if let Some(token) = po_token.filter(|_| client.po_token) {
+        body["serviceIntegrityDimensions"] = json!({ "poToken": token });
+    }
     body
 }
 
@@ -1664,6 +1670,7 @@ async fn player_post(
     signature_timestamp: Option<u32>,
     session: Option<&AuthSession>,
     cpn: &str,
+    po_token: Option<&str>,
 ) -> Result<Value, String> {
     let session = session.filter(|_| client.auth != resolver::Auth::None);
     let origin = format!("https://{}", client.host);
@@ -1677,6 +1684,7 @@ async fn player_post(
             .map(|value| value.data_sync_id.as_str())
             .filter(|value| !value.is_empty()),
         cpn,
+        po_token,
     );
     let mut request = http()
         .post(format!("{origin}/youtubei/v1/player?prettyPrint=false"))
@@ -1739,6 +1747,7 @@ fn player_metadata(response: &Value, video_id: &str) -> PlayerPayload {
 }
 
 /// Try one client: /player → playability → audio format → (solve) → validated URL.
+#[allow(clippy::too_many_arguments)]
 async fn try_player_client(
     video_id: &str,
     playlist_id: Option<&str>,
@@ -1747,8 +1756,10 @@ async fn try_player_client(
     client: &resolver::ClientProfile,
     session: Option<&AuthSession>,
     signature_timestamp: Option<u32>,
+    tokens: Option<&potoken::Tokens>,
 ) -> Result<PlayerPayload, (resolver::Category, String)> {
     use resolver::Category;
+    let tokens = tokens.filter(|_| client.po_token);
     let cpn = random_cpn();
     let response = player_post(
         video_id,
@@ -1758,6 +1769,7 @@ async fn try_player_client(
         signature_timestamp,
         session,
         &cpn,
+        tokens.map(|value| value.player.as_str()),
     )
     .await
     .map_err(|error| (Category::Network, error))?;
@@ -1811,6 +1823,11 @@ async fn try_player_client(
         &cpn,
     )
     .map_err(|error| (Category::CipherUnsolved, error))?;
+    let stream_url = match tokens {
+        Some(tokens) => resolver::with_pot(&stream_url, &tokens.stream)
+            .map_err(|error| (Category::CipherUnsolved, error))?,
+        None => stream_url,
+    };
     probe_stream_access(&stream_url, candidate.content_length).await?;
     let mut payload = player_metadata(&response, video_id);
     payload.stream_url = stream_url;
@@ -1849,6 +1866,7 @@ async fn resolve_player_payload(
     }
     let mut attempts = Vec::new();
     let mut js_state: Option<Result<u32, String>> = None;
+    let mut po_state: Option<Result<potoken::Tokens, String>> = None;
     let mut result = None;
     for client in &clients {
         let signature_timestamp = if client.uses_player_js {
@@ -1870,7 +1888,20 @@ async fn resolve_player_payload(
         } else {
             None
         };
-        match try_player_client(
+        let tokens = if client.po_token {
+            if po_state.is_none() {
+                let binding = session
+                    .as_ref()
+                    .map(|value| value.data_sync_id.as_str())
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(&visitor_data);
+                po_state = Some(potoken::webview::tokens(id, binding).await);
+            }
+            po_state.as_ref().and_then(|value| value.as_ref().ok())
+        } else {
+            None
+        };
+        let mut outcome = try_player_client(
             id,
             playlist_id,
             audio_quality,
@@ -1878,9 +1909,35 @@ async fn resolve_player_payload(
             client,
             session.as_ref(),
             signature_timestamp,
+            tokens,
         )
-        .await
+        .await;
+        if tokens.is_some()
+            && matches!(&outcome, Err((category, _)) if resolver::retry_without_po_token(*category))
         {
+            // A rejected token must not make a client worse than before PLAY-010: try once without it.
+            outcome = try_player_client(
+                id,
+                playlist_id,
+                audio_quality,
+                &visitor_data,
+                client,
+                session.as_ref(),
+                signature_timestamp,
+                None,
+            )
+            .await;
+        }
+        if let (Err((category, _)), Some(Err(reason))) = (&outcome, &po_state) {
+            if client.po_token && resolver::retry_without_po_token(*category) {
+                attempts.push(resolver::Attempt {
+                    client: client.key,
+                    category: resolver::Category::PoTokenUnavailable,
+                    detail: resolver::redact(reason),
+                });
+            }
+        }
+        match outcome {
             Ok(payload) => {
                 if let Ok(mut memory) = resolver_memory().lock() {
                     memory.record_success(id, client.key);
@@ -6618,6 +6675,8 @@ pub fn run() {
                 let _ = scope.allow_directory(&directory, true);
             }
             prewarm_player_js();
+            potoken::webview::install(app.handle().clone());
+            potoken::webview::prewarm();
             std::thread::spawn(|| {
                 if let Ok(db) = Connection::open(database_path()) {
                     let _ = clean_media_on_startup(&db);
@@ -6669,14 +6728,24 @@ mod tests {
             {
                 let client = resolver::CLIENTS.iter().find(|c| c.key == key).unwrap();
                 let started = std::time::Instant::now();
+                // PLAY-010: optional externally minted tokens bound to MELD_LIVE_VISITOR.
+                let visitor = std::env::var("MELD_LIVE_VISITOR").unwrap_or_default();
+                let tokens = match (
+                    std::env::var("MELD_LIVE_POT_PLAYER"),
+                    std::env::var("MELD_LIVE_POT_STREAM"),
+                ) {
+                    (Ok(player), Ok(stream)) => Some(potoken::Tokens { player, stream }),
+                    _ => None,
+                };
                 match try_player_client(
                     &video,
                     None,
                     "high",
-                    "",
+                    &visitor,
                     client,
                     None,
                     client.uses_player_js.then_some(sts),
+                    tokens.as_ref(),
                 )
                 .await
                 {
@@ -6777,6 +6846,7 @@ mod tests {
             Some(20725),
             Some("DSID"),
             "cpn1234567890abc",
+            Some("PLAYERTOKEN"),
         );
         assert_eq!(body["context"]["client"]["clientName"], "TVHTML5");
         assert_eq!(
@@ -6786,15 +6856,25 @@ mod tests {
         assert_eq!(body["playlistId"], "PL1");
         assert_eq!(body["cpn"], "cpn1234567890abc");
         assert_eq!(body["context"]["user"]["onBehalfOfUser"], "DSID");
+        // PLAY-010: TV is not a browser client, so it never carries a PO token.
+        assert!(body.get("serviceIntegrityDimensions").is_none());
+        let remix = resolver::CLIENTS
+            .iter()
+            .find(|c| c.key == "WEB_REMIX")
+            .unwrap();
+        let body = player_request_body("vid", None, "VIS", remix, Some(1), None, "c", Some("PT"));
+        assert_eq!(body["serviceIntegrityDimensions"]["poToken"], "PT");
+        let body = player_request_body("vid", None, "VIS", remix, Some(1), None, "c", None);
+        assert!(body.get("serviceIntegrityDimensions").is_none());
         let vr = resolver::CLIENTS
             .iter()
             .find(|c| c.key == "ANDROID_VR_1_65_10")
             .unwrap();
-        let body = player_request_body("vid", None, "VIS", vr, None, None, "c");
+        let body = player_request_body("vid", None, "VIS", vr, None, None, "c", None);
         assert!(body.get("playbackContext").is_none() && body.get("playlistId").is_none());
         assert_eq!(body["context"]["client"]["androidSdkVersion"], 32);
         let embedded = resolver::CLIENTS.iter().find(|c| c.embedded).unwrap();
-        let body = player_request_body("vid", None, "VIS", embedded, Some(1), None, "c");
+        let body = player_request_body("vid", None, "VIS", embedded, Some(1), None, "c", None);
         assert_eq!(
             body["context"]["thirdParty"]["embedUrl"],
             "https://www.youtube.com/"

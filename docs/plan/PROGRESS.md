@@ -438,7 +438,7 @@ Tick a box only when the task's Done-when criterion is met and tests exist. Sour
 - [ ] PLAY-007 (P1) Missing content hints
 - [ ] PLAY-008 (P1) Main dropped playlist context
 - [x] PLAY-009 (P1) No client playback nonce
-- [ ] PLAY-010 (P1) No PoToken capability
+- [x] PLAY-010 (P1) No PoToken capability — BotGuard in a hidden, IPC-less webview mints player + stream tokens for the browser clients; fallback without token and explicit `PoTokenUnavailable` reason (D-048); potoken::tests::*, resolver::tests::browser_clients_take_po_tokens_and_pot_is_added_safely
 - [ ] PLAY-011 (P1) Client-specific stream headers are discarded
 - [ ] PLAY-012 (P1) Browser request identity differs from resolver client
 - [ ] PLAY-013 (P1) No stream-host allowlist

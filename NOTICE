@@ -23,3 +23,7 @@ src-tauri/vendor/ejs/ contains the yt-dlp EJS solver 0.8.0
 https://github.com/davidbonnet/astring). Their license texts are in
 src-tauri/vendor/ejs/LICENSE and src-tauri/vendor/ejs/BUNDLED-LICENSES.txt
 and in THIRD-PARTY-NOTICES.txt shipped with every release.
+
+src-tauri/src/potoken/ follows the BotGuard / WebPO protocol as documented by
+LuanRT/BgUtils (https://github.com/LuanRT/BgUtils, MIT, Copyright (c) 2024
+LuanRT). No BgUtils code is bundled; the driver is an independent implementation.
