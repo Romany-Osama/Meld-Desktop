@@ -40,6 +40,9 @@ const VISITOR_PREFIX: &str = "Cg";
 mod download_resume;
 mod ipc;
 pub(crate) use ipc::error::{IpcError, IpcResult};
+pub(crate) use ipc::limits::{
+    clamp_limit, clamp_spotify_offset, collect_continuations, PageBudget,
+};
 pub(crate) use ipc::payload::{
     Keyword, LibraryId, LongText, Name, Opt, SpotifyId, SpotifyUri, Text, Token, VideoId, YtId,
     MAX_LIST_ARGUMENT,
@@ -3344,27 +3347,19 @@ fn parse_library_playlists_page(response: &Value) -> (Vec<YtItem>, Option<String
 }
 
 async fn fetch_all_library_playlists(session: &AuthSession) -> Result<Vec<YtItem>, String> {
-    let mut response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "browseId": "FEmusic_liked_playlists" }), Some(session)).await?;
-    let mut playlists = Vec::new();
-    let mut seen_ids = HashSet::new();
-    let mut seen_continuations = HashSet::new();
-    loop {
-        let (page_items, continuation) = parse_library_playlists_page(&response);
-        for item in page_items {
-            let key = item.browse_id.clone().unwrap_or_else(|| item.id.clone());
-            if seen_ids.insert(key) {
-                playlists.push(item);
-            }
-        }
-        let Some(token) = continuation else {
-            break;
-        };
-        if !seen_continuations.insert(token.clone()) {
-            break;
-        }
-        response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "continuation": token }), Some(session)).await?;
-    }
-    Ok(playlists)
+    let response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "browseId": "FEmusic_liked_playlists" }), Some(session)).await?;
+    let collected = collect_continuations(
+        parse_library_playlists_page(&response),
+        |item: &YtItem| item.browse_id.clone().unwrap_or_else(|| item.id.clone()),
+        |token| async move {
+            let response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "continuation": token }), Some(session)).await?;
+            Ok(parse_library_playlists_page(&response))
+        },
+        PageBudget::default(),
+        "library playlists",
+    )
+    .await?;
+    Ok(collected.items)
 }
 
 fn parse_library_page(response: &Value, tab_index: usize) -> (Vec<YtItem>, Option<String>) {
@@ -3574,26 +3569,19 @@ async fn fetch_all_library_items(
     browse_id: &str,
     tab_index: usize,
 ) -> Result<Vec<YtItem>, String> {
-    let mut response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "browseId": browse_id }), Some(session)).await?;
-    let mut items = Vec::new();
-    let mut seen_ids = HashSet::new();
-    let mut seen_continuations = HashSet::new();
-    loop {
-        let (page_items, continuation) = parse_library_items(&response, tab_index);
-        for item in page_items {
-            if seen_ids.insert(item.id.clone()) {
-                items.push(item);
-            }
-        }
-        let Some(token) = continuation else {
-            break;
-        };
-        if !seen_continuations.insert(token.clone()) {
-            break;
-        }
-        response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "continuation": token }), Some(session)).await?;
-    }
-    Ok(items)
+    let response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "browseId": browse_id }), Some(session)).await?;
+    let collected = collect_continuations(
+        parse_library_items(&response, tab_index),
+        |item: &YtItem| item.id.clone(),
+        |token| async move {
+            let response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "continuation": token }), Some(session)).await?;
+            Ok(parse_library_items(&response, tab_index))
+        },
+        PageBudget::default(),
+        browse_id,
+    )
+    .await?;
+    Ok(collected.items)
 }
 
 fn saved_episode_rows(db: &Connection) -> Result<Vec<YtItem>, String> {
@@ -3701,26 +3689,19 @@ async fn fetch_all_library_songs(
     tab_index: Option<i32>,
 ) -> Result<Vec<YtItem>, String> {
     let tab_index = tab_index.unwrap_or(0).max(0) as usize;
-    let mut response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "browseId": browse_id }), Some(session)).await?;
-    let mut songs = Vec::new();
-    let mut seen_ids = HashSet::new();
-    let mut seen_continuations = HashSet::new();
-    loop {
-        let (page_songs, continuation) = parse_library_page(&response, tab_index);
-        for item in page_songs {
-            if seen_ids.insert(item.id.clone()) {
-                songs.push(item);
-            }
-        }
-        let Some(token) = continuation else {
-            break;
-        };
-        if !seen_continuations.insert(token.clone()) {
-            break;
-        }
-        response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "continuation": token }), Some(session)).await?;
-    }
-    Ok(songs)
+    let response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "browseId": browse_id }), Some(session)).await?;
+    let collected = collect_continuations(
+        parse_library_page(&response, tab_index),
+        |item: &YtItem| item.id.clone(),
+        |token| async move {
+            let response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "continuation": token }), Some(session)).await?;
+            Ok(parse_library_page(&response, tab_index))
+        },
+        PageBudget::default(),
+        browse_id,
+    )
+    .await?;
+    Ok(collected.items)
 }
 
 async fn fetch_all_playlist_songs(
@@ -3728,31 +3709,21 @@ async fn fetch_all_playlist_songs(
     playlist_id: &str,
 ) -> Result<Vec<YtItem>, String> {
     let browse_id = format!("VL{playlist_id}");
-    let mut response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "browseId": browse_id }), Some(session)).await?;
-    let mut songs = Vec::new();
-    let mut seen_ids = HashSet::new();
-    let mut seen_continuations = HashSet::new();
+    let response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "browseId": browse_id }), Some(session)).await?;
     let first_page = parse_playlist(&response, playlist_id);
-    for item in first_page.songs {
-        if seen_ids.insert(item.id.clone()) {
-            songs.push(item);
-        }
-    }
-    let mut continuation = first_page.continuation;
-    while let Some(token) = continuation {
-        if !seen_continuations.insert(token.clone()) {
-            break;
-        }
-        response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "continuation": token }), Some(session)).await?;
-        let page = parse_playlist_continuation(&response);
-        for item in page.songs {
-            if seen_ids.insert(item.id.clone()) {
-                songs.push(item);
-            }
-        }
-        continuation = page.continuation;
-    }
-    Ok(songs)
+    let collected = collect_continuations(
+        (first_page.songs, first_page.continuation),
+        |item: &YtItem| item.id.clone(),
+        |token| async move {
+            let response = post("browse", json!({ "context": context(&session.visitor_data, true, Some(&session.data_sync_id)), "continuation": token }), Some(session)).await?;
+            let page = parse_playlist_continuation(&response);
+            Ok((page.songs, page.continuation))
+        },
+        PageBudget::default(),
+        "playlist songs",
+    )
+    .await?;
+    Ok(collected.items)
 }
 
 fn upsert_catalog_mappings(

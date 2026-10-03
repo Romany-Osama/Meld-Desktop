@@ -872,7 +872,7 @@ pub fn library_top_songs(
         "year" => now_seconds() - 31_536_000,
         _ => 0,
     };
-    let capped_limit = limit.clamp(1, 500);
+    let capped_limit = clamp_limit(limit);
     let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.browse_id, s.playlist_id, s.video_id, s.set_video_id, s.explicit, s.music_video_type FROM songs s INNER JOIN history h ON h.song_id = s.id WHERE h.played_at >= ?1 GROUP BY s.id ORDER BY COUNT(h.id) DESC, MAX(h.played_at) DESC LIMIT ?2").map_err(|error| format!("top songs query failed: {error}"))?;
     let rows = statement
         .query_map(params![cutoff, capped_limit], |row| {
