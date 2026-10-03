@@ -159,7 +159,10 @@ it("restores the last safe page after a restart (U4-006)", async () => {
   invoke.mockClear();
   const { container } = await act(async () => render(<App />));
   expect(container.querySelector("main")?.getAttribute("data-route")).toBe("/album/MPREb_test");
-  expect(invoke).toHaveBeenCalledWith("ytm_detail", { kind: "album", browseId: "MPREb_test" });
+  expect(invoke).toHaveBeenCalledWith(
+    "ytm_detail",
+    expect.objectContaining({ kind: "album", browseId: "MPREb_test", requestId: expect.any(String) }),
+  );
   // Settings is never restored; the page under it is.
   localStorage.setItem("meld:lastRoute", JSON.stringify({ path: "/settings/integrations", tab: "home" }));
   cleanup();
@@ -180,10 +183,13 @@ it("opens pasted YouTube Music links as pages (U4-007)", async () => {
     });
   await search("https://music.youtube.com/browse/MPREb_test");
   expect(route()).toBe("/album/MPREb_test");
-  expect(invoke).toHaveBeenCalledWith("ytm_detail", { kind: "album", browseId: "MPREb_test" });
+  expect(invoke).toHaveBeenCalledWith("ytm_detail", expect.objectContaining({ kind: "album", browseId: "MPREb_test" }));
   await search("music.youtube.com/playlist?list=OLAK5uy_test");
   expect(route()).toBe("/playlist/OLAK5uy_test");
-  expect(invoke).toHaveBeenCalledWith("ytm_playlist", { playlistId: "OLAK5uy_test" });
+  expect(invoke).toHaveBeenCalledWith(
+    "ytm_playlist",
+    expect.objectContaining({ playlistId: "OLAK5uy_test", requestId: expect.any(String) }),
+  );
   // A link opens its page without a search page in between: Back closes the playlist screen (D-028), then returns to
   // the album the link was pasted on.
   await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Back" })));

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState, useRef, useMemo, useEffect, RefObject } from "react";
 import { errorMessage } from "../../lib/util";
+import { invokeCancellable } from "../../lib/cancellable";
 import { YtItem, LoadState, LyricsPayload } from "../../types";
 import { lyricsProviderNames, lyricProviderSettingKeys } from "./providers";
 import type { SetNotice } from "../../app/notifications";
@@ -19,6 +20,9 @@ export function useLyrics({ setNotice, settings }: LyricsDeps) {
   const [lyricsAutoScrollEnabled, setLyricsAutoScrollEnabled] = useState(true);
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
   const activeLyricRef = useRef<HTMLButtonElement | null>(null);
+  // One lookup at a time (S5-009): a new song or provider cancels the lookup still running for the previous one.
+  const lyricsRequestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => lyricsRequestRef.current?.abort(), []);
 
   const moveLyricsProvider = async (provider: string, direction: -1 | 1) => {
     const enabled = (value: string) =>
@@ -42,6 +46,9 @@ export function useLyrics({ setNotice, settings }: LyricsDeps) {
 
   const requestLyrics = async (item: YtItem, provider = "auto", forceRefresh = false) => {
     const artist = item.artists.map((value) => value.name).join(", ") || item.subtitle || "";
+    lyricsRequestRef.current?.abort();
+    const request = new AbortController();
+    lyricsRequestRef.current = request;
     setLyricsAutoScrollEnabled(true);
     setLyricsProviderLoading(true);
     setLyrics({
@@ -66,10 +73,12 @@ export function useLyrics({ setNotice, settings }: LyricsDeps) {
         id: item.videoId ?? item.id,
         ...(provider === "auto" ? {} : { provider }),
       };
-      const data = await invoke<LyricsPayload>(command, args);
+      const data = await invokeCancellable<LyricsPayload>(command, args, request.signal);
+      if (request.signal.aborted) return;
       setLyricsProviderSelection(data.provider);
       setLyrics({ status: "ready", data });
     } catch (error) {
+      if (request.signal.aborted) return;
       setLyrics({
         status: "error",
         data: {
@@ -83,7 +92,10 @@ export function useLyrics({ setNotice, settings }: LyricsDeps) {
         error: errorMessage(error),
       });
     } finally {
-      setLyricsProviderLoading(false);
+      if (lyricsRequestRef.current === request) {
+        lyricsRequestRef.current = null;
+        setLyricsProviderLoading(false);
+      }
     }
   };
 

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { invokeCancellable } from "../../lib/cancellable";
 import type { PlaylistPage, YtItem } from "../../types";
 import type { ResourceCache } from "../../data/resourceCache";
 import { useResource } from "../../data/useResource";
@@ -13,13 +14,13 @@ const PLAYLIST_FALLBACK = {
 
 export const playlistIdOf = (item: YtItem) => item.browseId ?? item.id;
 
-async function fetchPlaylist(item: YtItem): Promise<PlaylistPage> {
+async function fetchPlaylist(item: YtItem, signal?: AbortSignal): Promise<PlaylistPage> {
   const playlistId = playlistIdOf(item);
   if (playlistId.startsWith("LOCAL_")) {
     const songs = await invoke<YtItem[]>("library_playlist_songs", { playlistId });
     return { playlist: item, songs };
   }
-  return invoke<PlaylistPage>("ytm_playlist", { playlistId });
+  return invokeCancellable<PlaylistPage>("ytm_playlist", { playlistId }, signal);
 }
 
 /** Server state of the open playlist (U4-008). Which playlist is open (`openPlaylist`) is the caller's view state. */
@@ -40,13 +41,17 @@ export function usePlaylistData({
     const target = playlistKey(playlistIdOf(item));
     if (reuse && cache.isFresh(target, FRESH_FOR_MS)) return { status: "ready" as const };
     const placeholder: PlaylistPage = { playlist: item, songs: [] };
-    return cache.load(target, () => fetchPlaylist(item), { scope: "playlist", placeholder, empty: placeholder });
+    return cache.load(target, (signal) => fetchPlaylist(item, signal), {
+      scope: "playlist",
+      placeholder,
+      empty: placeholder,
+    });
   };
 
   /** Re-reads the songs of the open playlist after an edit. */
   const reloadPlaylist = async () => {
     if (!openPlaylist) return;
-    await cache.load(playlistKey(playlistIdOf(openPlaylist)), () => fetchPlaylist(openPlaylist), {
+    await cache.load(playlistKey(playlistIdOf(openPlaylist)), (signal) => fetchPlaylist(openPlaylist, signal), {
       scope: "playlist",
     });
   };

@@ -35,6 +35,7 @@ export const COMMANDS = {
   app_update_check: c("system", "remote-read"),
   app_update_install: c("system", "system"),
   app_open_releases_page: c("system", "system"),
+  request_cancel: c("system", "write-local"),
   // account
   open_google_login: c("account", "credentials"),
   account_refresh_profile: c("account", "credentials"),

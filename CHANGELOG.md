@@ -5,6 +5,7 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 ## [Unreleased]
 
 ### Added
+- The library sync message has a Cancel button.
 - Settings → Storage → Playback cache: current size, a size limit and a Clear playback cache button.
 - Meld opens on the page you were on when you closed it (an album, artist, playlist, library tab, search or history). Settings, dialogs and searches for a pasted link are not reopened.
 - Undo after unliking a song, unpinning from Speed Dial, removing something from your library or a local playlist, unsubscribing from a podcast or artist and unsaving an episode.
@@ -12,6 +13,7 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 - Pasting a Spotify playlist link or a `meld:` link into search opens that page. Pasting a Spotify song, album or artist link explains that it cannot be opened directly and to search by name.
 
 ### Changed
+- Leaving a search, album, artist or playlist page, or switching to another song's lyrics, stops the request that was still loading instead of letting it finish in the background.
 - Security: Meld checks every id, token and text value the window sends to the app (length and allowed characters) before using it for a request or the database.
 - Security: the Meld window may call only the app commands granted to it, grouped by area (Tauri app-command permissions). The Google and Spotify sign-in windows still get no access to Meld's commands.
 - Meld asks before anything that cannot be undone: deleting an uploaded song, removing a song from YouTube Music history or a YouTube Music playlist, removing a download, clearing playback or search history, removing a Spotify playlist track. If the change fails, the screen goes back to how it was.
