@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listenEvent } from "../../lib/events";
 import { useCallback, useEffect, useState } from "react";
 import { AudioQuality } from "../../lib/audioQuality";
 import { errorMessage } from "../../lib/util";
@@ -20,8 +20,8 @@ export function useDownloads({ audioQuality, setNotice, settings, destructive }:
 
   useEffect(() => {
     let stop: (() => void) | undefined;
-    void listen<DownloadInfo>("download-state", (event) => {
-      setMenuDownload((current) => (current?.songId === event.payload.songId ? event.payload : current));
+    void listenEvent("download-state", (payload) => {
+      setMenuDownload((current) => (current?.songId === payload.songId ? payload : current));
     }).then((unlisten) => {
       stop = unlisten;
     });

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { listenEvent } from "./lib/events";
 import { invokeCancellable } from "./lib/cancellable";
 import { isIpcErrorCode } from "./lib/ipcError";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 import { parseAudioQuality, streamRequest } from "./lib/audioQuality";
 import { appendNewPlayable, removeAt } from "./lib/queue";
@@ -2152,9 +2152,9 @@ function App() {
     let disposed = false;
     let unlisteners: (() => void)[] = [];
     void Promise.all([
-      listen("media-prev", () => taskbarPreviousRef.current()),
-      listen("media-toggle", () => taskbarToggleRef.current()),
-      listen("media-next", () => taskbarNextRef.current()),
+      listenEvent("media-prev", () => taskbarPreviousRef.current()),
+      listenEvent("media-toggle", () => taskbarToggleRef.current()),
+      listenEvent("media-next", () => taskbarNextRef.current()),
     ])
       .then((cleanups) => {
         if (disposed) cleanups.forEach((cleanup) => cleanup());

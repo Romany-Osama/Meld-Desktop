@@ -90,19 +90,19 @@ pub async fn open_google_login(app: tauri::AppHandle) -> IpcResult<()> {
                         let Ok(data) = serde_json::from_str::<Value>(&raw) else { continue; };
                         let Some(visitor_data) = data.get("visitorData").and_then(Value::as_str).filter(|value| !value.is_empty()).map(str::to_owned) else { continue; };
                         let Some(data_sync_id) = data.get("dataSyncId").and_then(Value::as_str).filter(|value| !value.is_empty()).map(str::to_owned) else { continue; };
-                        let Ok(cookies) = window.cookies_for_url("https://music.youtube.com/".parse().expect("valid YouTube URL")) else { let _ = app_handle.emit("account-status-error", "Google login cookies could not be read".to_owned()); handled_for_task.store(false, Ordering::Release); return; };
+                        let Ok(cookies) = window.cookies_for_url("https://music.youtube.com/".parse().expect("valid YouTube URL")) else { events::emit_error(&app_handle, events::AppEvent::AccountStatusError, "Google login cookies could not be read".to_owned()); handled_for_task.store(false, Ordering::Release); return; };
                         let cookie_header = cookies.iter().map(|cookie| format!("{}={}", cookie.name(), cookie.value())).collect::<Vec<_>>().join("; ");
-                        if cookie_header.is_empty() { let _ = app_handle.emit("account-status-error", "Google login returned no session cookies".to_owned()); handled_for_task.store(false, Ordering::Release); return; }
+                        if cookie_header.is_empty() { events::emit_error(&app_handle, events::AppEvent::AccountStatusError, "Google login returned no session cookies".to_owned()); handled_for_task.store(false, Ordering::Release); return; }
                         let state = app_for_task.state::<RuntimeState>();
                         match save_account_session_internal(cookie_header, data_sync_id, visitor_data, &state).await {
-                            Ok(status) => { let _ = app_handle.emit("account-status", status); let _ = window.destroy(); }
-                            Err(error) => { let _ = app_handle.emit("account-status-error", error); handled_for_task.store(false, Ordering::Release); }
+                            Ok(status) => { events::emit(&app_handle, events::AppEvent::AccountStatus, status); let _ = window.destroy(); }
+                            Err(error) => { events::emit_error(&app_handle, events::AppEvent::AccountStatusError, error); handled_for_task.store(false, Ordering::Release); }
                         }
                         return;
                     }
                 }
                 handled_for_task.store(false, Ordering::Release);
-                let _ = app_handle.emit("account-status-error", "Google login timed out before Meld received the authenticated session".to_owned());
+                events::emit_error(&app_handle, events::AppEvent::AccountStatusError, "Google login timed out before Meld received the authenticated session".to_owned());
             });
         })
         .build()
@@ -179,8 +179,9 @@ pub async fn open_spotify_login(app: tauri::AppHandle) -> IpcResult<()> {
                         .await
                     {
                         Ok(expiry) => {
-                            let _ = app_handle.emit(
-                                "spotify-status",
+                            events::emit(
+                                &app_handle,
+                                events::AppEvent::SpotifyStatus,
                                 SpotifySessionStatus {
                                     authenticated: true,
                                     token_expiry: Some(expiry),
@@ -189,7 +190,11 @@ pub async fn open_spotify_login(app: tauri::AppHandle) -> IpcResult<()> {
                             let _ = window.destroy();
                         }
                         Err(error) => {
-                            let _ = app_handle.emit("spotify-status-error", error);
+                            events::emit_error(
+                                &app_handle,
+                                events::AppEvent::SpotifyStatusError,
+                                error,
+                            );
                             handled_for_task.store(false, Ordering::Release);
                         }
                     }
@@ -198,8 +203,9 @@ pub async fn open_spotify_login(app: tauri::AppHandle) -> IpcResult<()> {
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             handled_for_task.store(false, Ordering::Release);
-            let _ = app_handle.emit(
-                "spotify-status-error",
+            events::emit_error(
+                &app_handle,
+                events::AppEvent::SpotifyStatusError,
                 "Spotify login timed out before Meld received the authenticated session".to_owned(),
             );
         });
