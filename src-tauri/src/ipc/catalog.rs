@@ -312,9 +312,10 @@ pub async fn ytm_detail_continuation(
 #[specta::specta]
 pub fn ytm_podcast_cache_detail_page(
     browse_id: YtId,
-    page: DetailPage,
+    page: PageArg,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
+    let page = page.into_inner();
     let browse_id = browse_id.into_inner();
     let id = browse_id.trim();
     if id.is_empty() {

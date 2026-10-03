@@ -13,6 +13,7 @@ All notable changes are listed here. Versions follow SemVer; `package.json` is t
 - Pasting a Spotify playlist link or a `meld:` link into search opens that page. Pasting a Spotify song, album or artist link explains that it cannot be opened directly and to search by name.
 
 ### Changed
+- Security: Meld refuses oversized songs, pages and lists sent by the window before using them.
 - Playback: YouTube Music web streams now carry a proof-of-origin token made on your computer (like Meld on Android), so they play more reliably. If no token can be made, Meld plays as before and says why when a song fails.
 - Leaving a search, album, artist or playlist page, or switching to another song's lyrics, stops the request that was still loading instead of letting it finish in the background.
 - Security: Meld checks every id, token and text value the window sends to the app (length and allowed characters) before using it for a request or the database.

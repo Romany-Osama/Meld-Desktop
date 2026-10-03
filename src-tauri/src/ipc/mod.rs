@@ -5,6 +5,8 @@ pub mod backup;
 pub mod bindings;
 pub mod cancel;
 pub mod catalog;
+#[cfg(test)]
+mod contract;
 pub mod downloads;
 pub mod error;
 pub mod library;

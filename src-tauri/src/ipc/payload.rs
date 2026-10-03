@@ -213,6 +213,66 @@ impl<T: Into<String>> Opt<T> {
     }
 }
 
+/// A structured argument (an item, a page, a list) whose JSON encoding may be at most `MAX` bytes
+/// (S5-012): the value is read as JSON, measured, then converted, so an oversized payload is
+/// refused before any command code runs.
+#[derive(Clone, Debug)]
+pub struct Bounded<T, const MAX: usize>(pub T);
+
+impl<T, const MAX: usize> Bounded<T, MAX> {
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T, const MAX: usize> Deref for Bounded<T, MAX> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: specta::Type, const MAX: usize> specta::Type for Bounded<T, MAX> {
+    fn inline(
+        type_map: &mut specta::TypeCollection,
+        generics: specta::Generics,
+    ) -> specta::datatype::DataType {
+        T::inline(type_map, generics)
+    }
+
+    /// Keep `YtItem`, `SpotifyId`, … as named references in the bindings.
+    fn reference(
+        type_map: &mut specta::TypeCollection,
+        generics: &[specta::datatype::DataType],
+    ) -> specta::datatype::reference::Reference {
+        T::reference(type_map, generics)
+    }
+}
+
+impl<'de, T: serde::de::DeserializeOwned, const MAX: usize> Deserialize<'de> for Bounded<T, MAX> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let size = serde_json::to_vec(&value)
+            .map(|bytes| bytes.len())
+            .unwrap_or(usize::MAX);
+        if size > MAX {
+            return Err(serde::de::Error::custom(format!(
+                "argument is too large ({size} bytes, at most {MAX})"
+            )));
+        }
+        serde_json::from_value(value)
+            .map(Bounded)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+/// One song/album/playlist item sent by the window: 64 KiB is far above any real item.
+pub const MAX_ITEM_BYTES: usize = 64 * 1024;
+/// A whole detail page cached by the window (up to the S5-008 item cap at ~300 bytes each).
+pub const MAX_PAGE_BYTES: usize = 16 * 1024 * 1024;
+/// A list of ids (MAX_LIST_ARGUMENT ids of at most 64 characters, plus quotes and commas).
+pub const MAX_ID_LIST_BYTES: usize = 72 * 1024;
+
 /// Upper bound for list arguments such as Spotify track uids.
 pub const MAX_LIST_ARGUMENT: usize = 1_000;
 
