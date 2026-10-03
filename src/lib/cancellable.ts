@@ -3,6 +3,7 @@
 // its in-flight HTTP request instead of letting it finish for a screen nobody is looking at.
 import { invoke } from "@tauri-apps/api/core";
 import type { IpcError } from "./ipcError";
+import type { CommandArgs, CommandName, CommandResult } from "./ipc";
 
 let sequence = 0;
 
@@ -16,18 +17,19 @@ export function cancelledError(message = "Request was cancelled"): IpcError {
   return { code: "cancelled", message, retryable: false };
 }
 
-export async function invokeCancellable<T>(
-  command: string,
-  args: Record<string, unknown> = {},
+export async function invokeCancellable<K extends CommandName>(
+  command: K,
+  args: Omit<CommandArgs<K>, "requestId">,
   signal?: AbortSignal,
-): Promise<T> {
-  if (!signal) return invoke<T>(command, args);
+): Promise<CommandResult<K>> {
+  type T = CommandResult<K>;
+  if (!signal) return invoke<T>(command, args as Record<string, unknown>);
   if (signal.aborted) throw cancelledError();
   const requestId = newRequestId();
   const onAbort = () => void invoke("request_cancel", { requestId }).catch(() => undefined);
   signal.addEventListener("abort", onAbort, { once: true });
   try {
-    return await invoke<T>(command, { ...args, requestId });
+    return await invoke<T>(command, { ...(args as Record<string, unknown>), requestId });
   } finally {
     signal.removeEventListener("abort", onAbort);
   }

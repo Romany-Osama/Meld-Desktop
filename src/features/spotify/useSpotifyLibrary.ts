@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { Dispatch, SetStateAction, useState } from "react";
 import { AudioQuality } from "../../lib/audioQuality";
 import { errorMessage } from "../../lib/util";
@@ -14,7 +14,6 @@ import {
   SpotifyTrackMatch,
   SpotifyFolderItem,
   SpotifyTrackItem,
-  SearchPage,
 } from "../../types";
 import type { SetNotice } from "../../app/notifications";
 import type { Destructive } from "../../app/destructive";
@@ -77,7 +76,7 @@ export function useSpotifyLibrary({
       return;
     }
     try {
-      setSpotifyProfile(await invoke<SpotifyProfile>("spotify_profile"));
+      setSpotifyProfile(await call("spotify_profile"));
     } catch (error) {
       setSpotifyProfile(null);
       setNotice(`Spotify profile could not be loaded: ${errorMessage(error)}`, "error");
@@ -90,7 +89,7 @@ export function useSpotifyLibrary({
     try {
       setSpotifyLibrary({
         status: "ready",
-        data: await invoke<SpotifyLibraryNode>("spotify_library_node", { folderUri }),
+        data: await call("spotify_library_node", { folderUri }),
       });
     } catch (error) {
       setSpotifyLibrary({
@@ -105,7 +104,7 @@ export function useSpotifyLibrary({
     if (!spotifyStatus.authenticated) return;
     setSpotifyLikedTracks((current) => ({ ...current, status: "loading", error: undefined }));
     try {
-      setSpotifyLikedTracks({ status: "ready", data: await invoke<SpotifyLikedTracksPayload>("spotify_liked_tracks") });
+      setSpotifyLikedTracks({ status: "ready", data: await call("spotify_liked_tracks") });
     } catch (error) {
       setSpotifyLikedTracks({ status: "error", data: { tracks: [], totalCount: 0 }, error: errorMessage(error) });
     }
@@ -123,7 +122,7 @@ export function useSpotifyLibrary({
     try {
       setSpotifyPlaylistTracks({
         status: "ready",
-        data: await invoke<SpotifyTrackPage>("spotify_playlist_tracks", { playlistId: playlistItem.id, offset: 0 }),
+        data: await call("spotify_playlist_tracks", { playlistId: playlistItem.id, offset: 0 }),
       });
     } catch (error) {
       setSpotifyPlaylistTracks({
@@ -176,7 +175,7 @@ export function useSpotifyLibrary({
     if (targetIndex < 0 || targetIndex >= tracks.length) return;
     const beforeUid = direction === "up" ? tracks[targetIndex].uid : (tracks[targetIndex + 1]?.uid ?? null);
     try {
-      await invoke("spotify_move_in_playlist", { playlistId: spotifyOpenPlaylist.id, uids: [track.uid], beforeUid });
+      await call("spotify_move_in_playlist", { playlistId: spotifyOpenPlaylist.id, uids: [track.uid], beforeUid });
       await openSpotifyPlaylist(spotifyOpenPlaylist);
       setNotice(`Moved “${track.name}” ${direction}.`, "success");
     } catch (error) {
@@ -194,7 +193,7 @@ export function useSpotifyLibrary({
       return;
     setSpotifyPlaylistLoadingMore(true);
     try {
-      const next = await invoke<SpotifyTrackPage>("spotify_playlist_tracks", {
+      const next = await call("spotify_playlist_tracks", {
         playlistId: spotifyOpenPlaylist.id,
         offset: spotifyPlaylistTracks.data.tracks.length,
       });
@@ -212,7 +211,7 @@ export function useSpotifyLibrary({
   const renameSpotifyPlaylist = async () => {
     if (!spotifyOpenPlaylist || !spotifyRenameName.trim()) return;
     try {
-      await invoke("spotify_rename_playlist", {
+      await call("spotify_rename_playlist", {
         playlistId: spotifyOpenPlaylist.id,
         newName: spotifyRenameName.trim(),
       });
@@ -240,7 +239,7 @@ export function useSpotifyLibrary({
         message: `“${track.name}” is removed from “${playlist.name}” on Spotify.`,
         confirmLabel: "Remove",
       },
-      commit: () => invoke("spotify_remove_from_playlist", { playlistId: playlist.id, uid }),
+      commit: () => call("spotify_remove_from_playlist", { playlistId: playlist.id, uid }),
       refresh: () => openSpotifyPlaylist(playlist),
       success: `Removed “${track.name}” from Spotify playlist.`,
       failure: "Spotify track could not be removed",
@@ -248,7 +247,7 @@ export function useSpotifyLibrary({
   };
 
   const findYouTubeMatchForSpotifyTrack = async (track: SpotifyTrackItem) => {
-    const result = await invoke<SearchPage>("ytm_search", { query: `${track.artist} ${track.name}`.trim() });
+    const result = await call("ytm_search", { query: `${track.artist} ${track.name}`.trim() });
     return result.items.find((candidate) => candidate.kind === "song") ?? null;
   };
 
@@ -267,7 +266,7 @@ export function useSpotifyLibrary({
           message: "Loading Spotify playlist tracks for offline download…",
           progress: { value: offset, max: spotifyPlaylistTracks.data.totalCount },
         });
-        const next = await invoke<SpotifyTrackPage>("spotify_playlist_tracks", {
+        const next = await call("spotify_playlist_tracks", {
           playlistId: spotifyOpenPlaylist.id,
           offset,
         });
@@ -298,7 +297,7 @@ export function useSpotifyLibrary({
           skipped++;
           continue;
         }
-        await invoke("download_start", { item, audioQuality });
+        await call("download_start", { item, audioQuality });
         queued++;
       } catch {
         skipped++;
@@ -326,7 +325,7 @@ export function useSpotifyLibrary({
     setSpotifyAddState({ status: "loading", data: { match: null, playlists: [] } });
     try {
       const artist = item.artists.map((value) => value.name).join(", ") || item.subtitle || "";
-      const match = await invoke<SpotifyTrackMatch | null>("spotify_resolve_youtube", {
+      const match = await call("spotify_resolve_youtube", {
         youtubeId: item.videoId,
         title: item.title,
         artist,
@@ -340,7 +339,7 @@ export function useSpotifyLibrary({
         });
         return;
       }
-      const playlists = await invoke<SpotifyPlaylistItem[]>("spotify_playlists");
+      const playlists = await call("spotify_playlists");
       setSpotifyAddState({ status: "ready", data: { match, playlists } });
     } catch (error) {
       setSpotifyAddState({ status: "error", data: { match: null, playlists: [] }, error: errorMessage(error) });
@@ -351,7 +350,7 @@ export function useSpotifyLibrary({
     const match = spotifyAddState?.status === "ready" ? spotifyAddState.data.match : null;
     if (!match) return;
     try {
-      await invoke("spotify_add_to_playlist", { playlistId: playlist.id, trackUri: match.uri });
+      await call("spotify_add_to_playlist", { playlistId: playlist.id, trackUri: match.uri });
       setSpotifyAddItem(null);
       setSpotifyAddState(null);
       setNotice(`Added “${match.name}” to Spotify playlist “${playlist.name}”.`, "success");

@@ -14,5 +14,6 @@ export function streamRequest(
   item: { videoId?: string | null; playlistId?: string | null; playPlaylistId?: string | null },
   audioQuality: AudioQuality,
 ) {
-  return { videoId: item.videoId, playlistId: item.playlistId ?? item.playPlaylistId ?? null, audioQuality };
+  // An empty id is rejected by the backend with invalid_argument (S5-006) instead of a missing-key error.
+  return { videoId: item.videoId ?? "", playlistId: item.playlistId ?? item.playPlaylistId ?? null, audioQuality };
 }

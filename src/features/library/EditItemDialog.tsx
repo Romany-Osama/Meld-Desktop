@@ -1,5 +1,5 @@
 // Edit a song's title and artist (moved out of App.tsx, TR-M1).
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { errorMessage } from "../../lib/util";
 import type { NavKey, YtItem } from "../../types";
 import type { Dispatch, SetStateAction } from "react";
@@ -49,7 +49,7 @@ export function EditItemDialog({
           disabled={!editTitle.trim()}
           onClick={async () => {
             try {
-              await invoke("library_edit_item", {
+              await call("library_edit_item", {
                 itemId: editItem.id,
                 title: editTitle.trim(),
                 artist: editArtist.trim(),

@@ -7,6 +7,7 @@ use crate::*;
 /// player-cache file is dropped so the next resolve fetches fresh; a remote stream marks its client as
 /// failed for five minutes so the next resolve uses another client.
 #[tauri::command]
+#[specta::specta]
 pub fn ytm_report_stream_failure(
     video_id: VideoId,
     stream_url: LongText,
@@ -49,6 +50,7 @@ pub fn ytm_report_stream_failure(
 
 /// Copyable, redacted report of the last resolution for a song (PLAY-006).
 #[tauri::command]
+#[specta::specta]
 pub fn ytm_playback_report(video_id: VideoId) -> IpcResult<String> {
     let video_id = video_id.into_inner();
     let id = video_id.trim();
@@ -77,6 +79,7 @@ pub fn ytm_playback_report(video_id: VideoId) -> IpcResult<String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_next(
     video_id: VideoId,
     playlist_id: Opt<YtId>,
@@ -100,6 +103,7 @@ pub async fn ytm_next(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_related(
     browse_id: YtId,
     state: tauri::State<'_, RuntimeState>,
@@ -119,6 +123,7 @@ pub async fn ytm_related(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_queue_continuation(
     continuation: Token,
     state: tauri::State<'_, RuntimeState>,
@@ -136,6 +141,7 @@ pub async fn ytm_queue_continuation(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn player_cache_usage(state: tauri::State<'_, RuntimeState>) -> IpcResult<PlayerCacheUsage> {
     let db = state
         .db
@@ -157,6 +163,7 @@ pub fn player_cache_usage(state: tauri::State<'_, RuntimeState>) -> IpcResult<Pl
 
 /// Empties the playback cache. Offline downloads are not touched.
 #[tauri::command]
+#[specta::specta]
 pub fn player_cache_clear(state: tauri::State<'_, RuntimeState>) -> IpcResult<usize> {
     if let Ok(jobs) = player_cache_jobs().lock() {
         jobs.cancel_all();
@@ -192,6 +199,7 @@ pub fn player_cache_clear(state: tauri::State<'_, RuntimeState>) -> IpcResult<us
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_player_cache(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state
         .db
@@ -242,6 +250,7 @@ pub fn library_player_cache(state: tauri::State<'_, RuntimeState>) -> IpcResult<
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn player_cache_remove(
     song_id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
@@ -280,6 +289,7 @@ pub fn player_cache_remove(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_player(
     video_id: VideoId,
     playlist_id: Opt<YtId>,

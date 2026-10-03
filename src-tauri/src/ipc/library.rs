@@ -4,6 +4,7 @@
 use crate::*;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_delete_uploaded_song(
     entity_id: Token,
     state: tauri::State<'_, RuntimeState>,
@@ -52,6 +53,7 @@ pub async fn ytm_delete_uploaded_song(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_podcast_channels(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let local = {
         let db = state
@@ -83,6 +85,7 @@ pub async fn ytm_podcast_channels(state: tauri::State<'_, RuntimeState>) -> IpcR
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_saved_podcasts(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state
         .db
@@ -92,6 +95,7 @@ pub fn library_saved_podcasts(state: tauri::State<'_, RuntimeState>) -> IpcResul
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn sync_youtube_library(
     mode: Keyword,
     state: tauri::State<'_, RuntimeState>,
@@ -178,6 +182,7 @@ async fn sync_youtube_library_body(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_history(state: tauri::State<'_, RuntimeState>) -> IpcResult<RemoteHistoryPage> {
     let visitor_data = visitor(&state).await?;
     let session = auth_session(&state)?
@@ -195,6 +200,7 @@ pub async fn ytm_history(state: tauri::State<'_, RuntimeState>) -> IpcResult<Rem
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn library_refetch_item(
     id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
@@ -220,6 +226,7 @@ pub async fn library_refetch_item(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_save_item(item: YtItem, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let is_video = item
@@ -266,6 +273,7 @@ pub fn library_save_item(item: YtItem, state: tauri::State<'_, RuntimeState>) ->
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_edit_item(
     item_id: LibraryId,
     title: Name,
@@ -318,6 +326,7 @@ pub fn library_edit_item(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_toggle_liked(
     item: YtItem,
     liked: bool,
@@ -341,6 +350,7 @@ pub fn library_toggle_liked(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_remove_from_history(
     token: Token,
     state: tauri::State<'_, RuntimeState>,
@@ -356,6 +366,7 @@ pub async fn ytm_remove_from_history(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_toggle_like(
     video_id: VideoId,
     liked: bool,
@@ -398,6 +409,7 @@ pub async fn ytm_toggle_like(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_toggle_library(
     video_id: VideoId,
     add_to_library: bool,
@@ -428,6 +440,7 @@ pub async fn ytm_toggle_library(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_item_state(
     id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
@@ -462,6 +475,7 @@ pub fn library_item_state(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn speed_dial_toggle(
     item: YtItem,
     pinned: bool,
@@ -490,6 +504,7 @@ pub fn speed_dial_toggle(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn speed_dial_items(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT id, secondary_id, title, COALESCE(subtitle, ''), thumbnail, item_type, explicit FROM speed_dial ORDER BY created_at DESC").map_err(|error| format!("Speed Dial query failed: {error}"))?;
@@ -532,6 +547,7 @@ pub fn speed_dial_items(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_remove_item(id: LibraryId, state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let id = id.into_inner();
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
@@ -542,6 +558,7 @@ pub fn library_remove_item(id: LibraryId, state: tauri::State<'_, RuntimeState>)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn history_add(item: YtItem, state: tauri::State<'_, RuntimeState>) -> IpcResult<i64> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let is_video = item
@@ -558,6 +575,7 @@ pub fn history_add(item: YtItem, state: tauri::State<'_, RuntimeState>) -> IpcRe
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn history_record_playtime(
     history_id: i64,
     play_time_ms: i64,
@@ -569,6 +587,7 @@ pub fn history_record_playtime(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn history_clear(state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     db.execute("DELETE FROM history", [])
@@ -578,6 +597,7 @@ pub fn history_clear(state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_stats(
     period: Keyword,
     state: tauri::State<'_, RuntimeState>,
@@ -684,6 +704,7 @@ pub fn library_stats(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn history_items(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT s.id, s.kind, s.title, s.subtitle, s.thumbnail, s.browse_id, s.playlist_id, s.video_id, s.set_video_id, s.explicit, s.music_video_type FROM history h INNER JOIN songs s ON s.id = h.song_id ORDER BY h.played_at DESC, h.id DESC LIMIT 200").map_err(|e| format!("history query failed: {e}"))?;
@@ -717,6 +738,7 @@ pub fn history_items(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtI
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn local_files_pick(
     app: tauri::AppHandle,
     state: tauri::State<'_, RuntimeState>,
@@ -766,6 +788,7 @@ pub fn local_files_pick(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_downloaded_podcasts(
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<Vec<LocalItem>> {
@@ -812,6 +835,7 @@ pub fn library_downloaded_podcasts(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_local_files(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<LocalItem>> {
     let db = state
         .db
@@ -868,6 +892,7 @@ pub fn library_local_files(state: tauri::State<'_, RuntimeState>) -> IpcResult<V
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_top_songs(
     period: Keyword,
     limit: i64,
@@ -917,6 +942,7 @@ pub fn library_top_songs(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_songs(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT id, kind, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, explicit, music_video_type FROM songs WHERE in_library = 1 ORDER BY saved_at DESC").map_err(|e| format!("library query failed: {e}"))?;
@@ -950,6 +976,7 @@ pub fn library_songs(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtI
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_mix_songs(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state
         .db
@@ -986,6 +1013,7 @@ pub fn library_mix_songs(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_liked_songs(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT id, kind, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, explicit, music_video_type FROM songs WHERE liked = 1 ORDER BY COALESCE(liked_date, saved_at) DESC").map_err(|e| format!("liked songs query failed: {e}"))?;
@@ -1019,6 +1047,7 @@ pub fn library_liked_songs(state: tauri::State<'_, RuntimeState>) -> IpcResult<V
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_uploaded_songs(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT id, kind, title, subtitle, thumbnail, browse_id, playlist_id, video_id, set_video_id, explicit, music_video_type FROM songs WHERE uploaded = 1 ORDER BY saved_at DESC").map_err(|e| format!("uploaded songs query failed: {e}"))?;
@@ -1052,6 +1081,7 @@ pub fn library_uploaded_songs(state: tauri::State<'_, RuntimeState>) -> IpcResul
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_albums(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT a.id, a.title, a.thumbnail, a.playlist_id, COUNT(sa.song_id) FROM albums a INNER JOIN song_albums sa ON sa.album_id = a.id INNER JOIN songs s ON s.id = sa.song_id WHERE s.in_library = 1 GROUP BY a.id, a.title, a.thumbnail, a.playlist_id ORDER BY a.saved_at DESC").map_err(|error| format!("albums query failed: {error}"))?;
@@ -1085,6 +1115,7 @@ pub fn library_albums(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<Yt
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_artists(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<YtItem>> {
     let db = state.db.lock().map_err(|_| "database state poisoned")?;
     let mut statement = db.prepare("SELECT a.id, a.name, a.thumbnail, a.channel_id, COUNT(CASE WHEN s.in_library = 1 THEN sa.song_id END) FROM artists a LEFT JOIN song_artists sa ON sa.artist_id = a.id LEFT JOIN songs s ON s.id = sa.song_id WHERE a.bookmarked_at IS NOT NULL OR s.in_library = 1 GROUP BY a.id, a.name, a.thumbnail, a.channel_id ORDER BY a.bookmarked_at DESC, a.saved_at DESC").map_err(|error| format!("artists query failed: {error}"))?;
@@ -1118,6 +1149,7 @@ pub fn library_artists(state: tauri::State<'_, RuntimeState>) -> IpcResult<Vec<Y
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_playlists(
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<Vec<LibraryPlaylistItem>> {
@@ -1157,6 +1189,7 @@ pub fn library_playlists(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_artist_state(
     artist_id: LibraryId,
     state: tauri::State<'_, RuntimeState>,
@@ -1180,6 +1213,7 @@ pub fn library_artist_state(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn library_toggle_artist_bookmarked(
     artist_id: LibraryId,
     name: Text,
@@ -1223,6 +1257,7 @@ pub async fn library_toggle_artist_bookmarked(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_refresh_saved_podcasts(state: tauri::State<'_, RuntimeState>) -> IpcResult<i64> {
     let ids = {
         let db = state
@@ -1260,6 +1295,7 @@ pub async fn ytm_refresh_saved_podcasts(state: tauri::State<'_, RuntimeState>) -
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_toggle_episode_saved(
     video_id: VideoId,
     saved: bool,
@@ -1321,6 +1357,7 @@ pub async fn ytm_toggle_episode_saved(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_toggle_podcast_saved(
     podcast_id: YtId,
     saved: bool,
@@ -1359,6 +1396,7 @@ pub async fn ytm_toggle_podcast_saved(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_add_to_playlist(
     playlist_id: YtId,
     video_id: VideoId,
@@ -1378,6 +1416,7 @@ pub async fn ytm_add_to_playlist(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_remove_from_playlist(
     playlist_id: YtId,
     video_id: VideoId,
@@ -1402,6 +1441,7 @@ pub async fn ytm_remove_from_playlist(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ytm_create_playlist(
     title: Name,
     state: tauri::State<'_, RuntimeState>,
@@ -1446,6 +1486,7 @@ pub async fn ytm_create_playlist(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_create_playlist(
     title: Name,
     state: tauri::State<'_, RuntimeState>,
@@ -1481,6 +1522,7 @@ pub fn library_create_playlist(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_add_to_playlist(
     playlist_id: LibraryId,
     item: YtItem,
@@ -1515,6 +1557,7 @@ pub fn library_add_to_playlist(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_remove_from_playlist(
     playlist_id: LibraryId,
     song_id: LibraryId,
@@ -1532,6 +1575,7 @@ pub fn library_remove_from_playlist(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn library_playlist_songs(
     playlist_id: LibraryId,
     state: tauri::State<'_, RuntimeState>,

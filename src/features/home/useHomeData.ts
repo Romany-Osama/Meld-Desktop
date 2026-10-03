@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import type { HomePage, YtItem } from "../../types";
 import type { ResourceCache } from "../../data/resourceCache";
 import { useResource } from "../../data/useResource";
@@ -17,11 +17,11 @@ export function useHomeData({ cache, setNotice }: { cache: ResourceCache; setNot
   const [homeMoreLoading, setHomeMoreLoading] = useState(false);
 
   const loadHome = async () => {
-    await cache.load(homeKey, () => invoke<HomePage>("ytm_home"), { empty: { sections: [] } });
+    await cache.load<HomePage>(homeKey, () => call("ytm_home"), { empty: { sections: [] } });
   };
 
   const loadSpeedDial = async () => {
-    const outcome = await cache.load(speedDialKey, () => invoke<YtItem[]>("speed_dial_items"), { empty: [] });
+    const outcome = await cache.load(speedDialKey, () => call("speed_dial_items"), { empty: [] });
     if (outcome.status === "error") setNotice(`Speed Dial unavailable: ${outcome.error}`, "error");
   };
 
@@ -34,7 +34,7 @@ export function useHomeData({ cache, setNotice }: { cache: ResourceCache; setNot
     const feed = current;
     setHomeMoreLoading(true);
     try {
-      const next = await invoke<HomePage>("ytm_home_continuation", { continuation });
+      const next = await call("ytm_home_continuation", { continuation });
       if (!token.isCurrent() || cache.get<HomePage>(homeKey) !== feed) return;
       cache.set<HomePage>(homeKey, (entry) =>
         entry && entry.status === "ready" ? { ...entry, data: mergeHomePages(entry.data, next) } : entry,

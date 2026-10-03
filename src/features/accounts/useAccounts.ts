@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { listenEvent } from "../../lib/events";
 import { useEffect, useState } from "react";
 import { errorMessage } from "../../lib/util";
@@ -17,11 +17,11 @@ export function useAccounts({ setNotice }: AccountsDeps) {
 
   const loadSessionStatus = async (refreshGoogleProfile = false) => {
     try {
-      const current = await invoke<SessionStatus>("session_status");
+      const current = await call("session_status");
       setSessionStatus(current);
       if (refreshGoogleProfile && current.authenticated) {
         try {
-          const refreshed = await invoke<SessionStatus>("account_refresh_profile");
+          const refreshed = await call("account_refresh_profile");
           setSessionStatus(refreshed);
         } catch {
           // Keep the last locally saved profile when offline or when the upstream request fails.
@@ -34,7 +34,7 @@ export function useAccounts({ setNotice }: AccountsDeps) {
 
   const loadSpotifyStatus = async () => {
     try {
-      setSpotifyStatus(await invoke<SpotifySessionStatus>("spotify_session_status"));
+      setSpotifyStatus(await call("spotify_session_status"));
     } catch (error) {
       setNotice(`Spotify status could not be read: ${errorMessage(error)}`, "error");
     }
@@ -42,7 +42,7 @@ export function useAccounts({ setNotice }: AccountsDeps) {
 
   const connectGoogle = async () => {
     try {
-      await invoke("open_google_login");
+      await call("open_google_login");
       setNotice(
         "Google sign-in opened in Meld Desktop. Finish sign-in there; Meld will validate the session before saving it.",
       );
@@ -53,7 +53,7 @@ export function useAccounts({ setNotice }: AccountsDeps) {
 
   const connectSpotify = async () => {
     try {
-      await invoke("open_spotify_login");
+      await call("open_spotify_login");
       setNotice("Spotify sign-in opened in Meld Desktop. The session is saved only after token validation.");
     } catch (error) {
       setNotice(`Spotify sign-in could not open: ${errorMessage(error)}`, "error");
@@ -62,7 +62,7 @@ export function useAccounts({ setNotice }: AccountsDeps) {
 
   const logoutSpotify = async () => {
     try {
-      await invoke("spotify_logout");
+      await call("spotify_logout");
       setSpotifyStatus({ authenticated: false });
       setSpotifyProfile(null);
       setNotice("Spotify account disconnected.");

@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 
 /// Stable, machine-readable error codes. The TypeScript side mirrors these in
 /// `src/lib/ipcError.ts`; renaming one is a contract change.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     InvalidArgument,
@@ -55,7 +55,7 @@ impl ErrorCode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, specta::Type)]
 pub struct IpcError {
     pub code: ErrorCode,
     pub message: String,

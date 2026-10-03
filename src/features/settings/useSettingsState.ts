@@ -1,5 +1,5 @@
 import { SettingsPage } from "../../app/routes";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { useState, useCallback } from "react";
 import { AudioQuality } from "../../lib/audioQuality";
 import { errorMessage } from "../../lib/util";
@@ -57,7 +57,7 @@ export function useSettingsState({ setNotice }: SettingsStateDeps) {
     const previous = settings[key];
     setSettings((current) => ({ ...current, [key]: value }));
     try {
-      await invoke("settings_set", { key, value: String(value) });
+      await call("settings_set", { key, value: String(value) });
     } catch (error) {
       setSettings((current) => ({ ...current, [key]: previous }));
       setNotice(`Setting could not be saved: ${errorMessage(error)}`, "error");
@@ -68,7 +68,7 @@ export function useSettingsState({ setNotice }: SettingsStateDeps) {
     const previous = audioQuality;
     setAudioQuality(value);
     try {
-      await invoke("settings_set", { key: "audioQuality", value });
+      await call("settings_set", { key: "audioQuality", value });
     } catch (error) {
       setAudioQuality(previous);
       setNotice(`Audio quality could not be saved: ${errorMessage(error)}`, "error");

@@ -20,7 +20,7 @@ export const INVENTORY_DOC = "docs/ipc-commands.md";
 export function frontendFiles(root = "src") {
   const files = {};
   for (const name of readdirSync(root, { recursive: true }))
-    if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
+    if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) && name.replace(/\\/g, "/") !== "ipc/bindings.ts")
       files[name.replace(/\\/g, "/")] = readFileSync(join(root, name), "utf8");
   return files;
 }

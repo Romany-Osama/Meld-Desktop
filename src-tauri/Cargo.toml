@@ -38,8 +38,12 @@ keyring = { version = "3", default-features = false, features = ["windows-native
 tauri-plugin-updater = "2"
 # Sandboxed JavaScript for YouTube signature/n transforms (vendor/ejs, PLAY-002).
 rquickjs = { version = "0.14", default-features = false, features = ["std"] }
+specta = { version = "=2.0.0-rc.22", features = ["derive", "serde_json"] }
+specta-typescript = "0.0.9"
+tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 
 [dev-dependencies]
+heck = "0.5"
 sha2 = "0.10"
 
 [profile.release]

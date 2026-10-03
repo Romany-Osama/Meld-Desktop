@@ -10,3 +10,4 @@ src-tauri/icons/
 *.md
 # Captured API responses used as test fixtures; keep them byte-for-byte.
 **/fixtures/**/*.json
+src/ipc/bindings.ts

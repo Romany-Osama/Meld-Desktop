@@ -1,5 +1,5 @@
 // Sleep timer (moved out of App.tsx, TR-M1).
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { errorMessage } from "../../lib/util";
 import type { SetNotice } from "../../app/notifications";
 import type { Dispatch, SetStateAction } from "react";
@@ -81,7 +81,7 @@ export function SleepTimerDialog({
           <button
             className="secondary-button"
             onClick={() =>
-              void invoke("settings_set", { key: "sleepTimerDefault", value: String(sleepTimerMinutes) })
+              void call("settings_set", { key: "sleepTimerDefault", value: String(sleepTimerMinutes) })
                 .then(() => {
                   setSleepTimerDefault(sleepTimerMinutes);
                   setNotice(`Sleep timer default set to ${sleepTimerMinutes} minutes.`);

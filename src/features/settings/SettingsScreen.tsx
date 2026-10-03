@@ -1,5 +1,5 @@
 import { isIpcErrorCode } from "../../lib/ipcError";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { Dispatch, SetStateAction } from "react";
 import { AudioQuality } from "../../lib/audioQuality";
 import { errorMessage } from "../../lib/util";
@@ -145,7 +145,7 @@ export function SettingsScreen({
                     className="secondary-button"
                     onClick={async () => {
                       try {
-                        const path = await invoke<string>("backup_create");
+                        const path = await call("backup_create");
                         setNotice(`Meld Desktop backup created at ${path}.`);
                       } catch (error) {
                         if (!isIpcErrorCode(error, "cancelled"))
@@ -159,7 +159,7 @@ export function SettingsScreen({
                     className="secondary-button"
                     onClick={async () => {
                       try {
-                        const path = await invoke<string>("backup_restore");
+                        const path = await call("backup_restore");
                         setNotice(`Backup restored from ${path}. Restart Meld Desktop to reload the restored library.`);
                       } catch (error) {
                         if (!isIpcErrorCode(error, "cancelled"))
@@ -354,7 +354,7 @@ export function SettingsScreen({
                             message: "Every saved search is removed from Meld.",
                             confirmLabel: "Clear searches",
                           },
-                          commit: () => invoke("search_history_clear"),
+                          commit: () => call("search_history_clear"),
                           refresh: loadSearchHistory,
                           success: "Meld search history cleared.",
                           failure: "Search history could not be cleared",

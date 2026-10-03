@@ -1,8 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../../lib/ipc";
 import { useState, useRef } from "react";
 import { arrangeQueue, shuffleAfterCurrent, moveItem } from "../../lib/queue";
 import { errorMessage } from "../../lib/util";
-import { YtItem, QueuePage } from "../../types";
+import { YtItem } from "../../types";
 import type { SetNotice } from "../../app/notifications";
 
 export type QueueDeps = {
@@ -26,7 +26,7 @@ export function useQueue({ setNotice, settings }: QueueDeps) {
     setShuffleEnabled(next);
     if (settings.rememberShuffleAndRepeat === false) return;
     try {
-      await invoke("settings_set", { key: "shuffleMode", value: String(next) });
+      await call("settings_set", { key: "shuffleMode", value: String(next) });
     } catch (error) {
       setShuffleEnabled(!next);
       setNotice(`Shuffle preference could not be saved: ${errorMessage(error)}`, "error");
@@ -37,7 +37,7 @@ export function useQueue({ setNotice, settings }: QueueDeps) {
     const next = repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off";
     setRepeatMode(next);
     try {
-      await invoke("settings_set", { key: "repeatMode", value: next === "one" ? "1" : next === "all" ? "2" : "0" });
+      await call("settings_set", { key: "repeatMode", value: next === "one" ? "1" : next === "all" ? "2" : "0" });
     } catch (error) {
       setNotice(`Repeat preference could not be saved: ${errorMessage(error)}`, "error");
     }
@@ -75,7 +75,7 @@ export function useQueue({ setNotice, settings }: QueueDeps) {
       return [];
     automixLoadingRef.current = true;
     try {
-      const page = await invoke<QueuePage>("ytm_next", {
+      const page = await call("ytm_next", {
         videoId: current.videoId,
         playlistId: current.playPlaylistId ?? current.playlistId ?? `RDAMVM${current.videoId}`,
         setVideoId: current.setVideoId ?? null,
@@ -87,7 +87,7 @@ export function useQueue({ setNotice, settings }: QueueDeps) {
         (value) => value.videoId && value.id !== current.id && !existing.some((item) => item.id === value.id),
       );
       if (additions.length === 0 && page.relatedBrowseId) {
-        additions = (await invoke<YtItem[]>("ytm_related", { browseId: page.relatedBrowseId })).filter(
+        additions = (await call("ytm_related", { browseId: page.relatedBrowseId })).filter(
           (value) => value.videoId && value.id !== current.id && !existing.some((item) => item.id === value.id),
         );
       }

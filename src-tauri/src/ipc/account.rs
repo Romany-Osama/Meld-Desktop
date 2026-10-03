@@ -4,6 +4,7 @@
 use crate::*;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn account_refresh_profile(
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<SessionStatus> {
@@ -49,6 +50,7 @@ pub async fn account_refresh_profile(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn open_google_login(app: tauri::AppHandle) -> IpcResult<()> {
     if app.get_webview_window("google-login").is_some() {
         return Ok(());
@@ -111,6 +113,7 @@ pub async fn open_google_login(app: tauri::AppHandle) -> IpcResult<()> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn spotify_session_status(
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<SpotifySessionStatus> {
@@ -126,6 +129,7 @@ pub fn spotify_session_status(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn open_spotify_login(app: tauri::AppHandle) -> IpcResult<()> {
     if app.get_webview_window("spotify-login").is_some() {
         return Ok(());
@@ -216,6 +220,7 @@ pub async fn open_spotify_login(app: tauri::AppHandle) -> IpcResult<()> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn spotify_logout(
     app: tauri::AppHandle,
     state: tauri::State<'_, RuntimeState>,
@@ -232,6 +237,7 @@ pub fn spotify_logout(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn clear_local_library_keep_downloads(state: tauri::State<'_, RuntimeState>) -> IpcResult<()> {
     let db = state
         .db
@@ -268,6 +274,7 @@ pub fn clear_local_library_keep_downloads(state: tauri::State<'_, RuntimeState>)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn account_logout(
     app: tauri::AppHandle,
     state: tauri::State<'_, RuntimeState>,
@@ -295,6 +302,7 @@ pub fn account_logout(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn session_status(state: tauri::State<'_, RuntimeState>) -> IpcResult<SessionStatus> {
     match auth_session(&state)? {
         Some(session) => Ok(SessionStatus {

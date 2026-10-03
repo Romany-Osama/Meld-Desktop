@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { call } from "./lib/ipc";
 import { listenEvent } from "./lib/events";
 import { invokeCancellable } from "./lib/cancellable";
 import { isIpcErrorCode } from "./lib/ipcError";
@@ -11,17 +12,13 @@ import { restoreQueue, restoreSession } from "./lib/persistentPlayback";
 import { errorMessage, shuffled } from "./lib/util";
 import { mediaSrc } from "./lib/media";
 import {
-  LibraryItemState,
   LibrarySongFilter,
   LibrarySort,
   NavKey,
   PersistentPlayback,
-  PlayerPayload,
   PlaylistContinuationPage,
   QueuePage,
-  SettingEntry,
   SpotifyTrackItem,
-  SpotifyTrackMatch,
   YtItem,
 } from "./types";
 import { navigation } from "./app/navigation";
@@ -647,7 +644,7 @@ function App() {
   const loadSettings = async () => {
     setSettingsLoading(true);
     try {
-      const entries = await invoke<SettingEntry[]>("settings_get");
+      const entries = await call("settings_get");
       setSettings((current) =>
         entries.reduce((next, entry) => ({ ...next, [entry.key]: entry.value === "true" }), current),
       );
@@ -684,8 +681,8 @@ function App() {
 
   const confirmGoogleLogout = async (clearData: boolean) => {
     try {
-      if (clearData) await invoke("clear_local_library_keep_downloads");
-      await invoke("account_logout");
+      if (clearData) await call("clear_local_library_keep_downloads");
+      await call("account_logout");
       setLogoutDialogOpen(false);
       setSessionStatus({ authenticated: false });
       setNotice(
@@ -708,15 +705,15 @@ function App() {
     setQueueOpen(false);
     setPlayerExpanded(false);
     try {
-      const itemState = await invoke<LibraryItemState>("library_item_state", { id: item.id });
+      const itemState = await call("library_item_state", { id: item.id });
       if (item.videoId) {
         showMenuDownload(item.id);
-        void invoke<SpotifyTrackMatch | null>("spotify_match_for_youtube", { youtubeId: item.videoId })
+        void call("spotify_match_for_youtube", { youtubeId: item.videoId })
           .then(setMenuSpotifyMatch)
           .catch(() => setMenuSpotifyMatch(null));
       }
       if (item.kind === "episode" && item.albumId) {
-        const podcastState = await invoke<LibraryItemState>("library_item_state", { id: item.albumId });
+        const podcastState = await call("library_item_state", { id: item.albumId });
         setMenuState({ ...itemState, podcastSaved: podcastState.podcastSaved });
       } else setMenuState(itemState);
     } catch {
@@ -730,7 +727,7 @@ function App() {
   const syncLikeToYoutube = async (item: YtItem, liked: boolean): Promise<boolean> => {
     if (!item.videoId || !sessionStatus.authenticated) return true;
     try {
-      await invoke("ytm_toggle_like", { videoId: item.videoId, liked, item });
+      await call("ytm_toggle_like", { videoId: item.videoId, liked, item });
       return true;
     } catch {
       return false;
@@ -772,15 +769,13 @@ function App() {
   const likeSelectedItems = async () => {
     if (selectedItems.length === 0) return;
     try {
-      const states = await Promise.all(
-        selectedItems.map((item) => invoke<LibraryItemState>("library_item_state", { id: item.id })),
-      );
+      const states = await Promise.all(selectedItems.map((item) => call("library_item_state", { id: item.id })));
       const allLiked = states.every((state) => state.liked);
       let syncFailures = 0;
       for (let index = 0; index < selectedItems.length; index += 1) {
         const item = selectedItems[index];
         const liked = !allLiked;
-        await invoke("library_toggle_liked", { item, liked });
+        await call("library_toggle_liked", { item, liked });
         maybeAutoDownloadOnLike(item, liked);
         if (!(await syncLikeToYoutube(item, liked))) syncFailures += 1;
       }
@@ -810,7 +805,7 @@ function App() {
 
   const importLocalFiles = async () => {
     try {
-      const imported = await invoke<YtItem[]>("local_files_pick");
+      const imported = await call("local_files_pick");
       await loadLibrary("local");
       setNotice(
         imported.length > 0
@@ -841,7 +836,7 @@ function App() {
     }
     setPodcastRefreshing(true);
     try {
-      const refreshed = await invoke<number>("ytm_refresh_saved_podcasts");
+      const refreshed = await call("ytm_refresh_saved_podcasts");
       await loadPodcastItems(podcastFilter);
       setNotice(
         refreshed > 0
@@ -880,11 +875,7 @@ function App() {
     });
     try {
       const syncMode = mode === "songs" ? "library" : mode;
-      const result = await invokeCancellable<{ likedSongs: number; librarySongs: number; uploadedSongs: number }>(
-        "sync_youtube_library",
-        { mode: syncMode },
-        sync.signal,
-      );
+      const result = await invokeCancellable("sync_youtube_library", { mode: syncMode }, sync.signal);
       lastLibrarySyncRef.current[syncMode] = Date.now();
       await loadLibrary(mode);
       setNotice({
@@ -1008,7 +999,7 @@ function App() {
     const record = typed;
     setSubmittedQuery(value);
     if (record && settings.pauseSearchHistory !== true)
-      void invoke("search_history_add", { query: value })
+      void call("search_history_add", { query: value })
         .then(() => loadSearchHistory())
         .catch(() => undefined);
     const link = parseLink(value);
@@ -1078,7 +1069,7 @@ function App() {
     };
     try {
       const nextLiked = !current.liked;
-      await invoke("library_toggle_liked", { item: player.item, liked: nextLiked });
+      await call("library_toggle_liked", { item: player.item, liked: nextLiked });
       setPlayerItemState({ ...current, liked: nextLiked });
       setMenuState((state) => ({ ...state, liked: nextLiked }));
       maybeAutoDownloadOnLike(player.item, nextLiked);
@@ -1100,7 +1091,7 @@ function App() {
   // Redacted resolver report (which sources were tried and why they failed; no URLs, cookies or e-mails).
   const copyPlaybackReport = async (videoId: string) => {
     try {
-      const report = await invoke<string>("ytm_playback_report", { videoId });
+      const report = await call("ytm_playback_report", { videoId });
       await navigator.clipboard.writeText(`${report}\nSource: ${player?.payload.sourceClient ?? "cache or unknown"}`);
       setNotice("Playback report copied.");
     } catch (error) {
@@ -1115,7 +1106,7 @@ function App() {
     showMenuDownload(null);
     setQueueOpen(false);
     try {
-      const state = await invoke<LibraryItemState>("library_item_state", { id: player.item.id });
+      const state = await call("library_item_state", { id: player.item.id });
       setPlayerItemState(state);
       setMenuState(state);
       if (player.item.videoId) showMenuDownload(player.item.id);
@@ -1134,7 +1125,7 @@ function App() {
         activeRequest = false;
       };
     }
-    void invoke<LibraryItemState>("library_item_state", { id: player.item.id })
+    void call("library_item_state", { id: player.item.id })
       .then((state) => {
         if (activeRequest) setPlayerItemState(state);
       })
@@ -1224,7 +1215,7 @@ function App() {
       await destructive({
         severity: "disposable",
         key: `cache-remove:${item.id}`,
-        commit: () => invoke("player_cache_remove", { songId: item.id }),
+        commit: () => call("player_cache_remove", { songId: item.id }),
         refresh: () => {
           if (active === "library" && libraryMode === "cache") void loadLibrary("cache");
         },
@@ -1245,7 +1236,7 @@ function App() {
         return;
       }
       try {
-        const refreshed = await invoke<YtItem | null>("library_refetch_item", { id: item.videoId });
+        const refreshed = await call("library_refetch_item", { id: item.videoId });
         if (!refreshed) {
           setNotice(`Meld could not refetch metadata for “${item.title}”.`, "warning");
           return;
@@ -1275,7 +1266,7 @@ function App() {
           message: `“${item.title}” is deleted from your YouTube Music uploads. This cannot be undone.`,
           confirmLabel: "Delete song",
         },
-        commit: () => invoke("ytm_delete_uploaded_song", { entityId }),
+        commit: () => call("ytm_delete_uploaded_song", { entityId }).then(() => undefined),
         refresh: () => {
           if (active === "library") void syncLibraryMode("uploaded");
         },
@@ -1318,7 +1309,7 @@ function App() {
       }
       const name = item.albumTitle || item.title || "podcast";
       const setSaved = async (saved: boolean) => {
-        await invoke("ytm_toggle_podcast_saved", {
+        await call("ytm_toggle_podcast_saved", {
           podcastId,
           saved,
           title: item.albumTitle || item.title || "Podcast",
@@ -1359,7 +1350,7 @@ function App() {
       }
       const videoId = item.videoId;
       const setSaved = async (saved: boolean) => {
-        await invoke("ytm_toggle_episode_saved", { videoId, saved, setVideoId: item.setVideoId ?? null, item });
+        await call("ytm_toggle_episode_saved", { videoId, saved, setVideoId: item.setVideoId ?? null, item });
         setMenuState((current) => ({ ...current, inLibrary: saved }));
       };
       const refresh = () => {
@@ -1425,7 +1416,7 @@ function App() {
           message: `“${item.title}” is removed from your YouTube Music watch history. This cannot be undone.`,
           confirmLabel: "Remove",
         },
-        commit: () => invoke("ytm_remove_from_history", { token }),
+        commit: () => call("ytm_remove_from_history", { token }),
         refresh: loadRemoteHistory,
         success: `Removed “${item.title}” from YouTube Music history.`,
         failure: `Could not remove “${item.title}” from remote history`,
@@ -1435,7 +1426,7 @@ function App() {
     if (action === "meld_like") {
       const nextLiked = !menuState.liked;
       const setLiked = async (liked: boolean) => {
-        await invoke("library_toggle_liked", { item, liked });
+        await call("library_toggle_liked", { item, liked });
         maybeAutoDownloadOnLike(item, liked);
         if (!(await syncLikeToYoutube(item, liked)))
           setNotice("Meld Liked Songs was updated locally; Google sync could not be completed.", "warning");
@@ -1519,9 +1510,9 @@ function App() {
           severity: "undoable",
           key: `playlist-remove:${playlistId}:${item.id}`,
           optimistic,
-          commit: () => invoke("library_remove_from_playlist", { playlistId, songId: item.id }),
+          commit: () => call("library_remove_from_playlist", { playlistId, songId: item.id }),
           undo: async () => {
-            await invoke("library_add_to_playlist", { playlistId, item });
+            await call("library_add_to_playlist", { playlistId, item });
           },
           refresh: reloadPlaylist,
           success: `Removed “${item.title}” from the local playlist.`,
@@ -1539,7 +1530,7 @@ function App() {
             confirmLabel: "Remove",
           },
           optimistic,
-          commit: () => invoke("ytm_remove_from_playlist", { playlistId, videoId, setVideoId }),
+          commit: () => call("ytm_remove_from_playlist", { playlistId, videoId, setVideoId }),
           refresh: reloadPlaylist,
           success: `Removed “${item.title}” from the YouTube Music playlist.`,
           failure: "Could not remove from playlist",
@@ -1555,7 +1546,7 @@ function App() {
         return;
       }
       try {
-        const page = await invoke<QueuePage>("ytm_next", {
+        const page = await call("ytm_next", {
           videoId: item.videoId,
           playlistId: `RDAMVM${item.videoId}`,
           setVideoId: item.setVideoId ?? null,
@@ -1573,7 +1564,7 @@ function App() {
     }
     if (action === "pin" || action === "unpin") {
       const setPinned = async (pinned: boolean) => {
-        await invoke("speed_dial_toggle", { item, pinned });
+        await call("speed_dial_toggle", { item, pinned });
         setMenuState((current) => ({ ...current, pinned }));
       };
       if (action === "pin") {
@@ -1608,9 +1599,9 @@ function App() {
       }
       const videoId = item.videoId;
       const setInLibrary = async (inLibrary: boolean) => {
-        await invoke("ytm_toggle_library", { videoId, addToLibrary: inLibrary });
-        if (inLibrary) await invoke("library_save_item", { item });
-        else await invoke("library_remove_item", { id: item.id });
+        await call("ytm_toggle_library", { videoId, addToLibrary: inLibrary });
+        if (inLibrary) await call("library_save_item", { item });
+        else await call("library_remove_item", { id: item.id });
         setMenuState((current) => ({ ...current, inLibrary }));
       };
       const refresh = () => {
@@ -1686,7 +1677,7 @@ function App() {
     if (settings.pauseListenHistory === true) return;
     await flushPlaytime();
     try {
-      const historyId = await invoke<number>("history_add", { item });
+      const historyId = await call("history_add", { item });
       const position = activePlayerIdRef.current === item.id ? (audioRef.current?.currentTime ?? 0) : 0;
       playtimeRef.current = {
         historyId,
@@ -1751,7 +1742,7 @@ function App() {
     if (sourceQueue.length <= 1 && autoMixEnabledRef.current) {
       try {
         const queuePlaylistId = item.playPlaylistId ?? item.playlistId ?? `RDAMVM${item.videoId}`;
-        const page = await invoke<QueuePage>("ytm_next", {
+        const page = await call("ytm_next", {
           videoId: item.videoId,
           playlistId: queuePlaylistId,
           setVideoId: item.setVideoId ?? null,
@@ -1792,7 +1783,7 @@ function App() {
     setQueueContinuationKind(nextContinuation ? sourceContinuationKind : null);
     setQueueIndex(nextIndex);
     try {
-      const payload = await invoke<PlayerPayload>("ytm_player", streamRequest(item, audioQuality));
+      const payload = await call("ytm_player", streamRequest(item, audioQuality));
       if (requestId !== playRequestIdRef.current) return;
       streamResolvedAtRef.current = Date.now();
       const occurrence = startOccurrence(playbackSessionRef.current, item, payload);
@@ -2114,8 +2105,8 @@ function App() {
         const previousContinuation = continuation;
         const next =
           continuationKind === "playlist"
-            ? await invoke<PlaylistContinuationPage>("ytm_playlist_continuation", { continuation })
-            : await invoke<QueuePage>("ytm_queue_continuation", { continuation });
+            ? await call("ytm_playlist_continuation", { continuation })
+            : await call("ytm_queue_continuation", { continuation });
         const pageItems: YtItem[] =
           continuationKind === "playlist" ? (next as PlaylistContinuationPage).songs : (next as QueuePage).items;
         const additions = appendNewPlayable(items, pageItems);
@@ -2339,7 +2330,7 @@ function App() {
     const artistId = page.browseId as string;
     const name = page.title || "artist";
     const setBookmarked = async (bookmarked: boolean) => {
-      await invoke("library_toggle_artist_bookmarked", {
+      await call("library_toggle_artist_bookmarked", {
         artistId,
         name: page.title || "Artist",
         thumbnail: page.thumbnail ?? null,

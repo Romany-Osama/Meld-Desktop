@@ -1,6 +1,6 @@
 import { errorMessage } from "./lib/util";
+import { call } from "./lib/ipc";
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { CACHE_LIMIT_CHOICES_MB, limitLabel, usageSummary, type PlayerCacheUsage } from "./lib/cacheUsage";
 import type { SetNotice } from "./app/notifications";
 import type { Destructive } from "./app/destructive";
@@ -12,7 +12,7 @@ export function PlaybackCachePanel({ onNotice, destructive }: { onNotice: SetNot
 
   const refresh = async () => {
     try {
-      setUsage(await invoke<PlayerCacheUsage>("player_cache_usage"));
+      setUsage(await call("player_cache_usage"));
     } catch (error) {
       onNotice(`Playback cache size could not be read: ${errorMessage(error)}`, "error");
     }
@@ -25,7 +25,7 @@ export function PlaybackCachePanel({ onNotice, destructive }: { onNotice: SetNot
   const changeLimit = async (limitMb: number) => {
     setBusy(true);
     try {
-      await invoke("settings_set", { key: "playerCacheLimitMb", value: String(limitMb) });
+      await call("settings_set", { key: "playerCacheLimitMb", value: String(limitMb) });
       await refresh();
     } catch (error) {
       onNotice(`Playback cache limit could not be saved: ${errorMessage(error)}`, "error");
@@ -43,7 +43,7 @@ export function PlaybackCachePanel({ onNotice, destructive }: { onNotice: SetNot
         severity: "disposable",
         key: "player-cache-clear",
         commit: async () => {
-          removed = await invoke<number>("player_cache_clear");
+          removed = await call("player_cache_clear");
         },
         refresh,
         success: () => (removed === 1 ? "Removed 1 cached song." : `Removed ${removed} cached songs.`),
