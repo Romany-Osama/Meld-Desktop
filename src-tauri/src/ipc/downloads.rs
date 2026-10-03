@@ -97,7 +97,7 @@ pub fn download_remove(song_id: LibraryId, state: tauri::State<'_, RuntimeState>
 #[tauri::command]
 #[specta::specta]
 pub async fn download_start(
-    item: YtItem,
+    item: ItemArg,
     audio_quality: Opt<Keyword>,
     app: tauri::AppHandle,
     state: tauri::State<'_, RuntimeState>,

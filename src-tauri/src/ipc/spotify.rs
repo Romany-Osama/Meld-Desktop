@@ -59,7 +59,7 @@ pub async fn spotify_remove_from_playlist(
 #[specta::specta]
 pub async fn spotify_move_in_playlist(
     playlist_id: SpotifyId,
-    uids: Vec<SpotifyId>,
+    uids: IdListArg<SpotifyId>,
     before_uid: Opt<SpotifyId>,
     state: tauri::State<'_, RuntimeState>,
 ) -> IpcResult<()> {
@@ -67,7 +67,7 @@ pub async fn spotify_move_in_playlist(
     if uids.len() > MAX_LIST_ARGUMENT {
         return Err(IpcError::invalid("uids list is too long"));
     }
-    let uids: Vec<String> = uids.into_iter().map(String::from).collect();
+    let uids: Vec<String> = uids.into_inner().into_iter().map(String::from).collect();
     let before_uid = before_uid.into_string();
     let playlist_id = playlist_id.trim();
     let uids: Vec<String> = uids

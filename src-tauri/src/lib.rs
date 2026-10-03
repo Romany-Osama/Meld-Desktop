@@ -46,9 +46,13 @@ pub(crate) use ipc::limits::{
     clamp_limit, clamp_spotify_offset, collect_continuations, PageBudget,
 };
 pub(crate) use ipc::payload::{
-    Keyword, LibraryId, LongText, Name, Opt, SpotifyId, SpotifyUri, Text, Token, VideoId, YtId,
-    MAX_LIST_ARGUMENT,
+    Bounded, Keyword, LibraryId, LongText, Name, Opt, SpotifyId, SpotifyUri, Text, Token, VideoId,
+    YtId, MAX_ID_LIST_BYTES, MAX_ITEM_BYTES, MAX_LIST_ARGUMENT, MAX_PAGE_BYTES,
 };
+/// Size-bounded structured command arguments (S5-012).
+pub(crate) type ItemArg = Bounded<YtItem, MAX_ITEM_BYTES>;
+pub(crate) type PageArg = Bounded<DetailPage, MAX_PAGE_BYTES>;
+pub(crate) type IdListArg<T> = Bounded<Vec<T>, MAX_ID_LIST_BYTES>;
 mod player_cache;
 mod potoken;
 mod resolver;
