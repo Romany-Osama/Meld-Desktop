@@ -1,18 +1,13 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import doc from "../../docs/events.md?raw";
 import { EVENT_VERSIONS } from "./events";
 
-const root = join(__dirname, "..");
-const doc = readFileSync(join(root, "..", "docs", "events.md"), "utf8");
-
-function sources(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return sources(path);
-    return /\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
-  });
-}
+// Every non-test source file under src/, keyed by its path relative to this file.
+const sources = import.meta.glob<string>(["../**/*.{ts,tsx}", "!../**/*.test.{ts,tsx}"], {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
 
 describe("event contract (S5-010)", () => {
   it("documents every event with the same version", () => {
@@ -23,10 +18,10 @@ describe("event contract (S5-010)", () => {
   });
 
   it("listens to events only through listenEvent", () => {
-    for (const file of sources(root)) {
+    expect(Object.keys(sources).length).toBeGreaterThan(20);
+    for (const [file, text] of Object.entries(sources)) {
       // The generated bindings import the event module for tauri-specta helpers Meld does not use.
-      if (file.endsWith(join("lib", "events.ts")) || file.endsWith(join("ipc", "bindings.ts"))) continue;
-      const text = readFileSync(file, "utf8");
+      if (file === "./events.ts" || file === "../ipc/bindings.ts") continue;
       expect(text, file).not.toMatch(/from "@tauri-apps\/api\/event"/);
     }
   });
