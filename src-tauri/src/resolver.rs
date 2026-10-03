@@ -6,7 +6,8 @@
 //! Order and client contracts follow reference Meld's InnerTubeX catalog (v0.5.2) and yt-dlp: stable
 //! direct-URL clients first, then clients whose formats need the player's signature/`n` transforms
 //! (WEB_REMIX first among those: verified end to end; TV clients are kept as later fallbacks).
-//! Clients that need a PoToken are not used (no PoToken generation, plan §0.2).
+//! The browser clients (`po_token`) get proof-of-origin tokens from `potoken` when available (PLAY-010,
+//! D-048); without one they are tried as before.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -52,6 +53,8 @@ pub struct ClientProfile {
     pub auth: Auth,
     /// Formats may be ciphered / `n`-throttled: send `signatureTimestamp` and solve with the player JS.
     pub uses_player_js: bool,
+    /// Browser client: send a PO token with `/player` and as the stream URL's `pot` when one is available.
+    pub po_token: bool,
 }
 
 const fn direct(
@@ -78,6 +81,7 @@ const fn direct(
         embedded: false,
         auth: Auth::None,
         uses_player_js: false,
+        po_token: false,
     }
 }
 
@@ -107,7 +111,14 @@ const fn web(
         embedded,
         auth,
         uses_player_js: true,
+        po_token: false,
     }
+}
+
+/// Mark a browser client as PO-token capable.
+const fn po(mut client: ClientProfile) -> ClientProfile {
+    client.po_token = true;
+    client
 }
 
 pub const CLIENTS: [ClientProfile; 9] = [
@@ -115,11 +126,11 @@ pub const CLIENTS: [ClientProfile; 9] = [
     direct("VISIONOS_0_1", "VISIONOS", "0.1", "101", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15", ("visionOS", "1.3.21O771", "Apple", "RealityDevice14,1"), None),
     direct("ANDROID_VR_1_43_32", "ANDROID_VR", "1.43.32", "28", "com.google.android.apps.youtube.vr.oculus/1.43.32 (Linux; U; Android 12; en_US; Quest 3; Build/SQ3A.220605.009.A1; Cronet/107.0.5284.2)", ("Android", "12", "Oculus", "Quest 3"), Some(32)),
     direct("IOS_21_03_3", "IOS", "21.03.3", "5", "com.google.ios.youtube/21.03.3 (iPad7,6; U; CPU iPadOS 17_7_10 like Mac OS X; en-US)", ("iPadOS", "17.7.10.21H450", "Apple", "iPad7,6"), None),
-    web("WEB_REMIX", "WEB_REMIX", "1.20260707.12.00", "67", BROWSER_USER_AGENT, "music.youtube.com", false, Auth::Optional),
+    po(web("WEB_REMIX", "WEB_REMIX", "1.20260707.12.00", "67", BROWSER_USER_AGENT, "music.youtube.com", false, Auth::Optional)),
     web("TVHTML5_DOWNGRADED", "TVHTML5", "5.20260707", "7", "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version", "www.youtube.com", false, Auth::Optional),
     web("TVHTML5", "TVHTML5", "7.20260707.07.00", "7", "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)", "www.youtube.com", false, Auth::Optional),
-    web("WEB_EMBEDDED_PLAYER", "WEB_EMBEDDED_PLAYER", "2.20260708.00.00", "56", BROWSER_USER_AGENT, "www.youtube.com", true, Auth::Optional),
-    web("WEB_CREATOR", "WEB_CREATOR", "1.20260708.06.00", "62", BROWSER_USER_AGENT, "www.youtube.com", false, Auth::Required),
+    po(web("WEB_EMBEDDED_PLAYER", "WEB_EMBEDDED_PLAYER", "2.20260708.00.00", "56", BROWSER_USER_AGENT, "www.youtube.com", true, Auth::Optional)),
+    po(web("WEB_CREATOR", "WEB_CREATOR", "1.20260708.06.00", "62", BROWSER_USER_AGENT, "www.youtube.com", false, Auth::Required)),
 ];
 
 /// Content hints (PLAY-007): uploaded songs (`MLPT` playlists or library uploads) only play with the
@@ -221,6 +232,8 @@ pub enum Category {
     CipherUnsolved,
     StreamForbidden,
     Network,
+    /// A browser client failed and no PO token could be minted for it (PLAY-010).
+    PoTokenUnavailable,
 }
 
 impl Category {
@@ -237,6 +250,7 @@ impl Category {
             Category::CipherUnsolved => "stream signature could not be solved",
             Category::StreamForbidden => "YouTube's media server refused the stream (403)",
             Category::Network => "network error",
+            Category::PoTokenUnavailable => "no proof-of-origin token was available",
         }
     }
 
@@ -294,7 +308,11 @@ pub fn redact(text: &str) -> String {
             Some("[url]")
         } else if trimmed.contains('@') && trimmed.contains('.') {
             Some("[email]")
-        } else if lower.contains("sapisid") || lower.contains("cookie=") || lower.contains("token=")
+        } else if lower.contains("sapisid")
+            || lower.contains("cookie=")
+            || lower.contains("token=")
+            || lower.contains("potoken")
+            || lower.contains("pot=")
         {
             Some("[secret]")
         } else {
@@ -476,6 +494,35 @@ pub fn finalize_url(
         if valid_cpn(cpn) {
             query.append_pair("cpn", cpn);
         }
+    }
+    let url = parsed.to_string();
+    validate_stream_url(&url)?;
+    Ok(url)
+}
+
+/// Failures a missing or rejected PO token can explain (PLAY-010).
+pub fn retry_without_po_token(category: Category) -> bool {
+    matches!(
+        category,
+        Category::BotCheck | Category::StreamForbidden | Category::Unplayable
+    )
+}
+
+/// Add the session-bound PO token as `pot` (replacing any existing one) and re-validate (PLAY-010).
+pub fn with_pot(url: &str, pot: &str) -> Result<String, String> {
+    let mut parsed = url::Url::parse(url).map_err(|_| "stream URL is malformed".to_owned())?;
+    let pairs: Vec<(String, String)> = parsed
+        .query_pairs()
+        .filter(|(key, _)| key != "pot")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    {
+        let mut query = parsed.query_pairs_mut();
+        query.clear();
+        for (key, value) in &pairs {
+            query.append_pair(key, value);
+        }
+        query.append_pair("pot", pot);
     }
     let url = parsed.to_string();
     validate_stream_url(&url)?;
@@ -828,5 +875,43 @@ mod tests {
         ]}});
         let candidates = audio_candidates(&response, false);
         assert_eq!(candidates[0].content_length, Some(4_001_721));
+    }
+
+    #[test]
+    fn browser_clients_take_po_tokens_and_pot_is_added_safely() {
+        let po: Vec<&str> = CLIENTS
+            .iter()
+            .filter(|c| c.po_token)
+            .map(|c| c.key)
+            .collect();
+        assert_eq!(po, ["WEB_REMIX", "WEB_EMBEDDED_PLAYER", "WEB_CREATOR"]);
+        assert!(CLIENTS
+            .iter()
+            .filter(|c| c.po_token)
+            .all(|c| c.user_agent == BROWSER_USER_AGENT));
+        let url = with_pot(
+            "https://rr1.googlevideo.com/videoplayback?id=1&pot=old&n=x",
+            "NEW_tok-en",
+        )
+        .unwrap();
+        let query: HashMap<String, String> = url::Url::parse(&url)
+            .unwrap()
+            .query_pairs()
+            .into_owned()
+            .collect();
+        assert_eq!(query.get("pot").map(String::as_str), Some("NEW_tok-en"));
+        assert_eq!(url.matches("pot=").count(), 1);
+        assert!(with_pot("https://evil.example/videoplayback", "t").is_err());
+        assert!(
+            retry_without_po_token(Category::StreamForbidden)
+                && !retry_without_po_token(Category::Unavailable)
+        );
+        assert!(summarize(&[Attempt {
+            client: "WEB_REMIX",
+            category: Category::PoTokenUnavailable,
+            detail: String::new()
+        }])
+        .contains("proof-of-origin"));
+        assert_eq!(redact("poToken=abc pot=xyz"), "[secret] [secret]");
     }
 }
